@@ -3,7 +3,6 @@ import shutil
 from dataclasses import dataclass, field
 
 from star_manager.core.card_parser import extract_mod_guids_from_card, is_ais_card
-from star_manager.core.config import ConfigDataList
 from star_manager.core.zipmod_utils import (
     copy_zipmods_preserving_tree,
     find_files,
@@ -13,6 +12,7 @@ from star_manager.core.zipmod_utils import (
     is_hs2_game_dir,
     move_zipmods_preserving_tree,
 )
+from star_manager.services.mod_database import find_zipmod_paths_by_guid
 from star_manager.tools.mod_sorter import sort_zipmod
 
 
@@ -47,7 +47,7 @@ class ExtractOptions:
     input_dir: str
     output_dir: str = ""
     card_paths: set[str] = field(default_factory=set)
-    zipmod_extract_mode: str = ConfigDataList.ZIPMOD_MODE_COPY
+    zipmod_extract_mode: str = "copy"
 
 
 @dataclass
@@ -56,6 +56,7 @@ class ExtractResult:
     card_paths: set[str]
     required_guids: set[str]
     matched_mod_paths: set[str]
+    database_matched_mod_paths: set[str]
     missing_mods: set[str]
     missing_abdata: set[str]
 
@@ -114,11 +115,21 @@ def extract_mods(options, reporter=None):
     reporter.message("Copying AIS cards to output directory...")
     copy_cards_to_output(card_paths, output_card_dir, reporter)
 
-    reporter.message("Searching matching zipmods...")
-    zipmod_files = find_zipmod_files(game_mods_dir)
-    matched_mod_paths, missing_mods = get_depend_mods_paths(required_guids, zipmod_files, reporter)
+    reporter.message("Searching matching zipmods from mod database...")
+    matched_mod_paths, database_missing_mods = get_depend_mods_paths_from_database(
+        required_guids, game_mods_dir, reporter
+    )
+    database_matched_mod_paths = set(matched_mod_paths)
 
-    is_move_mode = options.zipmod_extract_mode == ConfigDataList.ZIPMOD_MODE_MOVE
+    if database_missing_mods:
+        reporter.message("Searching remaining matching zipmods from game directory...")
+        zipmod_files = find_zipmod_files(game_mods_dir)
+        fallback_matched_paths, missing_mods = get_depend_mods_paths(database_missing_mods, zipmod_files, reporter)
+        matched_mod_paths.update(fallback_matched_paths)
+    else:
+        missing_mods = set()
+
+    is_move_mode = options.zipmod_extract_mode == "move"
     reporter.message(("Moving" if is_move_mode else "Copying") + " required zipmods to output directory...")
     transfer_depend_mods_to_output(matched_mod_paths, game_mods_dir, output_mods_dir, is_move_mode, reporter)
 
@@ -130,6 +141,7 @@ def extract_mods(options, reporter=None):
         card_paths=card_paths,
         required_guids=required_guids,
         matched_mod_paths=matched_mod_paths,
+        database_matched_mod_paths=database_matched_mod_paths,
         missing_mods=missing_mods,
         missing_abdata=missing_abdata,
     )
@@ -144,6 +156,18 @@ def get_depend_mods_guids(card_paths, reporter=None):
         required_guids.update(extract_mod_guids_from_card(card_path))
     reporter.result(f"Required mod count: {len(required_guids)}")
     return required_guids
+
+
+def get_depend_mods_paths_from_database(required_guids, game_mods_dir, reporter=None):
+    reporter = reporter or WorkflowReporter()
+    reporter.title("Find required mods in database")
+    reporter.progress(0, 1)
+    matched_paths, missing_guids = find_zipmod_paths_by_guid(required_guids, mods_dir=game_mods_dir)
+    reporter.progress(1, 1)
+    reporter.result(f"Found {len(matched_paths)} matching mods from database.")
+    if missing_guids:
+        reporter.message(f"Database missing {len(missing_guids)} required mods; falling back to file scan.")
+    return matched_paths, missing_guids
 
 
 def get_depend_mods_paths(required_guids, zipmod_files, reporter=None):

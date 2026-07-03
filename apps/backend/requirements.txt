@@ -1,2 +1,7 @@
-# The initial bridge uses only Python standard library modules.
-# Add backend dependencies here when migrating the existing business logic.
+Pillow>=10.0
+UnityPy>=1.22.0
+texture2ddecoder
+etcpak
+astc-encoder-py
+fmod-toolkit
+archspec

@@ -13,9 +13,15 @@ ENV/
 apps/build/
 apps/dist/
 apps/release/
+apps/backend/.vendor/
+apps/backend/Runtime/
+apps/backend/runtime/
 *.egg-info/
 *.spec
 *.tsbuildinfo
+/scripts/
+/index-*.js
+/package.json
 
 # Node/Electron dependencies and caches
 node_modules/

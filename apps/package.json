@@ -8,12 +8,13 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && set ELECTRON_RUN_AS_NODE=&& set ELECTRON_RENDERER_URL=http://127.0.0.1:5173&& electron .\"",
     "build": "vite build",
-    "build:backend": "conda run -n mm_env python -m PyInstaller --noconfirm --clean --onefile --name star_manager_backend --distpath build/backend --workpath build/pyinstaller --specpath build --paths backend --paths backend/app backend/app/server.py",
-    "package:win": "npm run build && npm run build:backend && electron-builder --win dir",
+    "build:backend": "node scripts/python.cjs pyinstaller",
+    "package:win": "npm run build && npm run build:backend && electron-builder --win dir --config.electronDist=node_modules/electron/dist",
     "preview": "vite preview --host 127.0.0.1",
     "electron": "npm run build && set ELECTRON_RUN_AS_NODE=&& electron .",
     "python:dev": "node scripts/python.cjs dev",
-    "check:python": "node scripts/python.cjs check"
+    "check:python": "node scripts/python.cjs check",
+    "check:package-deps": "node scripts/python.cjs check-package-deps"
   },
   "build": {
     "appId": "com.lunaburg.star-manager",
@@ -25,6 +26,7 @@
       "dist/**/*",
       "electron/**/*",
       "backend/**/*",
+      "!backend/runtime/**/*",
       "package.json"
     ],
     "extraResources": [

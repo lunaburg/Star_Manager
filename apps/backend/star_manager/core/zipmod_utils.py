@@ -48,19 +48,6 @@ def get_manifest_value(zipmod_path, name):
         return ERROR_OTHER
 
 
-def find_zipmods_by_guid(required_guids, zipmod_files):
-    remaining_guids = set(required_guids)
-    matched_paths = set()
-
-    for zipmod_path in zipmod_files:
-        guid = get_manifest_value(zipmod_path, "guid")
-        if guid in remaining_guids:
-            remaining_guids.remove(guid)
-            matched_paths.add(zipmod_path)
-
-    return matched_paths, remaining_guids
-
-
 def copy_zipmods_preserving_tree(zipmod_paths, source_root, target_root):
     for zipmod_path in zipmod_paths:
         relative_path = os.path.relpath(zipmod_path, source_root)

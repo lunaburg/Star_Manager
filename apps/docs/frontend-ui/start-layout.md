@@ -135,6 +135,8 @@ D:\Workspace\code_workspace\Star_Manager\test\hs2\UserData\setup.xml
 
 右侧区域展示常用目录快捷按钮。当前预览标题为“目录入口”，副标题为“常用游戏目录快捷打开”。
 
+入口相对当前游戏根目录的映射为：游戏主目录 `.`、`UserData`、工作室场景 `UserData\\Studio\\scene`、截图 `UserData\\cap`、人物卡（女）`UserData\\chara\\female`、人物卡（男）`UserData\\chara\\male`。未选择游戏目录时禁用这些入口；目标目录不存在时不自动创建，并在运行日志中记录错误。
+
 常用目录按钮：
 
 - 游戏主目录。

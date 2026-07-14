@@ -4,13 +4,17 @@ import StartView from "./components/views/StartView.vue";
 import OverviewView from "./components/views/OverviewView.vue";
 import CharactersView from "./components/views/CharactersView.vue";
 import ModsView from "./components/views/ModsView.vue";
+import PluginsView from "./components/views/PluginsView.vue";
 import LogsView from "./components/views/LogsView.vue";
+import appIcon from "../build-resources/app-icon.png";
+import brandLogo from "../build-resources/brand-logo.png";
 
 const views = [
   { id: "start", icon: "ST", label: "开始游戏" },
   { id: "overview", icon: "OV", label: "总览" },
   { id: "characters", icon: "CH", label: "角色管理" },
   { id: "mods", icon: "MD", label: "模组管理" },
+  { id: "plugins", icon: "PL", label: "插件管理" },
   { id: "logs", icon: "LG", label: "运行日志" }
 ];
 
@@ -60,6 +64,17 @@ const stats = reactive({
 const logs = ref([]);
 const seenTaskMessages = ref(new Set());
 const recentTasks = ref([]);
+const achievements = ref([]);
+const achievementPreferences = reactive({ enabled: true, notifications: true, hide_locked: false });
+const selectedAchievement = ref(null);
+const achievementToast = ref(null);
+const achievementInitialized = ref(false);
+let achievementToastTimer = null;
+
+const visibleAchievements = computed(() => achievementPreferences.hide_locked
+  ? achievements.value.filter((item) => item.unlocked)
+  : achievements.value);
+const achievementUnlockedCount = computed(() => achievements.value.filter((item) => item.unlocked).length);
 
 
 const cardFolders = ref([]);
@@ -73,6 +88,8 @@ const cardBulkMode = ref(false);
 const selectedCardProfile = ref(null);
 const selectedCardDependencies = ref([]);
 const selectedCardProfileLoading = ref(false);
+const settingNaviSlot = ref("");
+const naviActionNotice = reactive({ type: "", message: "" });
 const selectedCardProfileError = ref("");
 const cardLibrary = reactive({
   checked: false,
@@ -85,62 +102,124 @@ const cardLibrary = reactive({
 const ITEM_PAGE_SIZE = 500;
 const MOD_PAGE_SIZE = 200;
 const UNKNOWN_AUTHOR_LABEL = "未知作者";
+const POSE_ITEM_KIND_CODES = new Set(["500", "501"]);
+const PERSONALITY_LABELS = [
+  "\u9177\u59b9",
+  "\u6807\u51c6",
+  "\u5fa1\u59d0",
+  "\u5973\u53cb",
+  "\u8fa3\u59b9",
+  "\u5f31\u59b9",
+  "\u4eba\u59bb",
+  "\u5973\u738b",
+  "\u8150\u5973",
+  "\u6b63\u59b9",
+  "\u8ba4\u771f\u59b9",
+  "\u8f6f\u59b9\u7eb8",
+  "\u6b63\u592a",
+  "\u75c5\u5a07"
+];
 const ITEM_KIND_LABELS = {
-  8: "身体彩绘布局",
-  110: "眼睛",
-  111: "眉毛",
-  112: "睫毛",
-  121: "胡子",
-  131: "腮红",
-  132: "口红",
-  133: "痣",
-  140: "男 mod / 上衣",
-  141: "男 mod / 下衣",
-  144: "男 mod / 手套",
-  147: "男 mod / 鞋子",
-  210: "脸模",
-  211: "脸部肌肤",
-  212: "脸部皱纹 / 脸部细节",
-  231: "身体肌肤",
-  232: "肉感",
-  233: "身体彩绘",
-  240: "女 mod / 上衣",
-  241: "女 mod / 下衣",
-  242: "女 mod / 内衣",
-  243: "女 mod / 内裤",
-  244: "女 mod / 手套",
-  245: "女 mod / 裤袜",
-  246: "女 mod / 袜子",
-  247: "女 mod / 鞋子",
-  300: "头发 / 后发",
-  301: "头发 / 前发",
-  302: "头发 / 侧发",
-  303: "头发 / 后侧发",
-  313: "人体彩绘",
-  314: "眉毛",
-  315: "睫毛",
-  316: "眼影",
-  317: "美容 / 眼睛种类",
-  318: "瞳孔 / 黑眼",
-  320: "腮红",
-  322: "口红",
-  323: "痣",
-  334: "乳头",
-  335: "阴毛",
-  348: "图框",
-  351: "饰品 mod / 头部",
-  352: "饰品 mod / 耳朵",
-  353: "饰品 mod / 眼镜",
-  354: "饰品 mod / 脸部",
-  355: "饰品 mod / 脖子",
-  356: "饰品 mod / 肩部",
-  357: "饰品 mod / 胸部",
-  358: "饰品 mod / 腰部",
-  359: "饰品 mod / 后背",
-  360: "饰品 mod / 胯部",
-  361: "饰品 mod / 手部",
-  362: "饰品 mod / 腿部",
-  363: "饰品 mod / 脚部"
+  8: "男/身体/人体彩绘",
+  110: "男/面部/眼睛",
+  111: "男/面部/眉毛",
+  112: "男/面部/睫毛",
+  121: "男/面部/胡子",
+  131: "男/面部/腮红",
+  132: "男/面部/口红",
+  133: "男/面部/痣",
+  140: "男/服饰/上衣",
+  141: "男/服饰/下衣",
+  144: "男/服饰/手套",
+  147: "男/服饰/鞋子",
+  210: "女/面部/脸模",
+  211: "女/面部/脸部肌肤",
+  212: "女/面部/脸部皱纹",
+  231: "女/身体/身体肌肤",
+  232: "女/身体/肉感",
+  233: "女/身体/晒痕",
+  240: "女/服饰/上衣",
+  241: "女/服饰/下衣",
+  242: "女/服饰/内衣",
+  243: "女/服饰/内裤",
+  244: "女/服饰/手套",
+  245: "女/服饰/裤袜",
+  246: "女/服饰/袜子",
+  247: "女/服饰/鞋子",
+  300: "头发/后发",
+  301: "头发/前发",
+  302: "头发/侧发",
+  303: "头发/后侧发",
+  313: "女/身体/人体彩绘",
+  314: "女/面部/眉毛",
+  315: "女/面部/睫毛",
+  316: "女/面部/眼影",
+  317: "女/面部/美瞳种类",
+  318: "女/面部/瞳孔",
+  319: "女/面部/眼睛亮点",
+  320: "女/面部/腮红",
+  322: "女/面部/口红",
+  323: "女/面部/痣",
+  334: "女/身体/乳头",
+  335: "女/身体/阴毛",
+  348: "图案",
+  351: "饰品/头部",
+  352: "饰品/耳朵",
+  353: "饰品/眼镜",
+  354: "饰品/脸部",
+  355: "饰品/脖子",
+  356: "饰品/肩部",
+  357: "饰品/胸部",
+  358: "饰品/腰部",
+  359: "饰品/后背",
+  360: "饰品/胯部",
+  361: "饰品/手部",
+  362: "饰品/腿部",
+  363: "饰品/脚部",
+  500: "男姿势",
+  501: "女姿势"
+};
+
+function svgDataUrl(svg) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+const POSE_ITEM_THUMBNAILS = {
+  500: svgDataUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="86" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d7f0ff"/>
+      <stop offset="1" stop-color="#395a74"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="14" fill="url(#bg)"/>
+  <path d="M18 75h60" stroke="#f8fbff" stroke-width="5" stroke-linecap="round" opacity=".35"/>
+  <circle cx="51" cy="22" r="8" fill="#f8fbff"/>
+  <path d="M50 32 39 49l13 7 14-13" fill="none" stroke="#f8fbff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m39 49-17 4" fill="none" stroke="#17354b" stroke-width="7" stroke-linecap="round"/>
+  <path d="m53 56 15 16" fill="none" stroke="#17354b" stroke-width="7" stroke-linecap="round"/>
+  <path d="M53 56 41 75" fill="none" stroke="#f8fbff" stroke-width="7" stroke-linecap="round"/>
+  <text x="14" y="24" fill="#17354b" font-family="Verdana, sans-serif" font-size="14" font-weight="700">M</text>
+</svg>`),
+  501: svgDataUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="10" x2="84" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe1ec"/>
+      <stop offset="1" stop-color="#8b4163"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="14" fill="url(#bg)"/>
+  <path d="M19 76h58" stroke="#fff8fb" stroke-width="5" stroke-linecap="round" opacity=".35"/>
+  <circle cx="46" cy="21" r="8" fill="#fff8fb"/>
+  <path d="M47 31c-5 8-8 16-7 23 1 8 8 13 19 15" fill="none" stroke="#fff8fb" stroke-width="7" stroke-linecap="round"/>
+  <path d="M40 45 24 35" fill="none" stroke="#55233a" stroke-width="7" stroke-linecap="round"/>
+  <path d="M42 54 28 71" fill="none" stroke="#fff8fb" stroke-width="7" stroke-linecap="round"/>
+  <path d="M52 65 70 48" fill="none" stroke="#55233a" stroke-width="7" stroke-linecap="round"/>
+  <path d="M55 39c6 3 11 7 15 14" fill="none" stroke="#fff8fb" stroke-width="5" stroke-linecap="round" opacity=".9"/>
+  <text x="14" y="24" fill="#55233a" font-family="Verdana, sans-serif" font-size="14" font-weight="700">F</text>
+</svg>`)
 };
 const itemRows = ref([]);
 const modRows = ref([]);
@@ -179,6 +258,7 @@ let modFilterTimer = null;
 let itemRowsRequestSeq = 0;
 const repairingUnity3dPath = ref("");
 const repairingThumbnailItemId = ref(null);
+const exportingFbxItemId = ref(null);
 const deletingItemId = ref(null);
 const bulkActionBusy = ref("");
 const cleaningDuplicateZipmods = ref(false);
@@ -265,6 +345,7 @@ const bulkOrganizePrompt = reactive({
   targetDir: "",
   error: ""
 });
+const organizeAllPrompt = reactive({ open: false, error: "" });
 const bulkUnity3dPrompt = reactive({
   open: false
 });
@@ -275,6 +356,10 @@ const bulkDuplicateCleanupPrompt = reactive({
 const bulkDeletePrompt = reactive({
   open: false,
   error: ""
+});
+const importResultPrompt = reactive({
+  open: false,
+  task: null
 });
 const thumbnailToolsPrompt = reactive({
   open: false,
@@ -326,6 +411,131 @@ function formatProgressPercent(value) {
 const taskPercent = computed(() => formatProgressPercent(progress.value));
 const itemDatabaseEmpty = computed(() => itemDatabase.checked && itemDatabase.exists && itemDatabase.total === 0);
 const modDatabaseEmpty = computed(() => modDatabase.checked && modDatabase.exists && modDatabase.total === 0);
+const importResultData = computed(() => importResultPrompt.task?.data || {});
+const importResultGroups = computed(() => {
+  const data = importResultData.value;
+  return [
+    {
+      key: "imported",
+      label: "正常导入模组",
+      count: Number(data.imported_count || 0),
+      tone: "ok",
+      empty: "没有新的非重复模组。",
+      items: (data.imported || []).map((item) => ({
+        title: item.file_name || item.guid || "zipmod",
+        meta: item.guid || "",
+        detail: item.target_path || item.source_path || "",
+        note: "已复制到当前游戏 mods/Imported"
+      }))
+    },
+    {
+      key: "promoted",
+      label: "重复中保留更优",
+      count: Number(data.promoted_count || 0),
+      tone: "warn",
+      empty: "没有需要替换为更优版本的重复模组。",
+      items: (data.promoted || []).map((item) => ({
+        title: item.file_name || item.guid || "zipmod",
+        meta: item.guid || "",
+        detail: item.promoted_file_path || "",
+        note: item.removed_primary_path ? `已移除旧主文件：${item.removed_primary_path}` : "已提升为主记录"
+      }))
+    },
+    {
+      key: "cleaned",
+      label: "重复清理",
+      count: Number(data.cleaned_count || 0),
+      tone: "danger",
+      empty: "没有自动清理重复文件。",
+      items: (data.cleaned || []).flatMap((item) => {
+        const removed = item.removed?.length ? item.removed : [];
+        if (!removed.length) {
+          return [{
+            title: item.kept_file_name || item.guid || "zipmod",
+            meta: item.guid || "",
+            detail: item.kept_file_path || "",
+            note: "保留该模组，重复记录已整理"
+          }];
+        }
+        return removed.map((path) => ({
+          title: path.split(/[\\/]/).pop() || item.guid || "zipmod",
+          meta: item.guid || "",
+          detail: path,
+          note: item.kept_file_path ? `已清理，保留：${item.kept_file_path}` : "已清理重复文件"
+        }));
+      })
+    },
+    {
+      key: "cards",
+      label: "角色卡",
+      count: Number(data.card_imported_count || 0),
+      tone: "ok",
+      empty: "没有识别到可导入的角色卡。",
+      items: (data.imported_cards || []).map((item) => ({
+        title: item.target_path?.split(/[\\/]/).pop() || "角色卡",
+        meta: "AIS/HS2 PNG",
+        detail: item.target_path || "",
+        note: item.source_path ? `来源：${item.source_path}` : "已复制到 UserData/chara/female"
+      }))
+    },
+    {
+      key: "unity3d",
+      label: "补入 Unity3D",
+      count: Number(data.unity3d_repaired_count || 0),
+      tone: "warn",
+      empty: "没有从外部 abdata 补入 unity3d。",
+      items: (data.unity3d_repaired || []).flatMap((item) => {
+        const moved = item.moved?.length ? item.moved : [];
+        return moved.map((movedItem) => ({
+          title: movedItem.path?.split(/[\\/]/).pop() || item.guid || "unity3d",
+          meta: item.guid || "",
+          detail: movedItem.path || "",
+          note: movedItem.source_path ? `已从外部 abdata 移入 zipmod：${movedItem.source_path}` : `已写入：${item.zipmod_path || ""}`
+        }));
+      })
+    },
+    {
+      key: "skipped",
+      label: "跳过",
+      count: Number(data.skipped_count || 0) + Number(data.invalid_count || 0) + Number(data.non_card_png_count || 0),
+      tone: "neutral",
+      empty: "没有跳过项。",
+      items: [
+        ...(data.skipped || []).map((item) => ({
+          title: item.guid || item.id || "zipmod",
+          meta: "需要人工确认",
+          detail: "",
+          note: item.reason || "未自动处理"
+        })),
+        ...(data.invalid || []).map((item) => ({
+          title: item.source_path?.split(/[\\/]/).pop() || "zipmod",
+          meta: item.status || "invalid",
+          detail: item.source_path || "",
+          note: item.error || "manifest 无效"
+        })),
+        ...(data.non_card_pngs || []).map((path) => ({
+          title: path.split(/[\\/]/).pop() || "PNG",
+          meta: "普通 PNG",
+          detail: path,
+          note: "未检测到角色卡标记"
+        }))
+      ]
+    },
+    {
+      key: "failures",
+      label: "失败",
+      count: Number(data.failure_count || 0),
+      tone: "danger",
+      empty: "没有失败项。",
+      items: (data.failures || []).map((item) => ({
+        title: item.guid || item.source_path?.split(/[\\/]/).pop() || item.id || "失败项",
+        meta: item.id ? `#${item.id}` : "",
+        detail: item.source_path || "",
+        note: item.error || "处理失败"
+      }))
+    }
+  ];
+});
 const zipmodAuthorOptions = computed(() => ["", ...zipmodAuthors.value, UNKNOWN_AUTHOR_LABEL]);
 const filteredZipmodAuthorOptions = computed(() => {
   const query = String(modFilters.author || "").trim().toLowerCase();
@@ -346,10 +556,38 @@ const bulkAuthorSuggestions = computed(() => {
 });
 const itemAuthorOptions = computed(() => ["", ...itemFilterAuthors.value, UNKNOWN_AUTHOR_LABEL]);
 const itemKindOptions = computed(() => {
-  return ["", ...itemFilterKinds.value].map((kind) => ({
-    value: kind,
-    label: kind ? itemKindLabel(kind) : "全部 Kind"
-  }));
+  const genderOrder = { male: 0, female: 1, neutral: 2 };
+  const categoryOrder = {
+    "\u9762\u90e8": 0,
+    "\u8eab\u4f53": 1,
+    "\u670d\u9970": 2,
+    "\u5934\u53d1": 3,
+    "\u9970\u54c1": 4
+  };
+  const options = itemFilterKinds.value.map((kind, sourceIndex) => {
+    const label = itemKindLabel(kind);
+    const gender = label.startsWith("\u2642")
+      ? "male"
+      : label.startsWith("\u2640")
+        ? "female"
+        : "neutral";
+    const segments = label.split("/");
+    const category = gender === "neutral" ? segments[0] : segments[1];
+    return {
+      value: kind,
+      label,
+      gender,
+      category,
+      categoryIndex: categoryOrder[category] ?? 99,
+      sourceIndex
+    };
+  });
+  options.sort((left, right) => (
+    genderOrder[left.gender] - genderOrder[right.gender]
+    || left.categoryIndex - right.categoryIndex
+    || left.sourceIndex - right.sourceIndex
+  ));
+  return [{ value: "", label: "全部 Kind", gender: "all" }, ...options];
 });
 const selectedModDiagnosticGroups = computed(() => {
   const issues = selectedModDiagnostics.value?.issues || [];
@@ -465,10 +703,21 @@ const overviewSummaryCards = computed(() => {
   if (modDatabase.checked && modDatabase.exists && Number.isFinite(stats.zipmods)) {
     cards.push({
       key: "zipmods",
-      label: "Zipmods",
+      label: "模组",
       value: stats.zipmods,
       caption: "本地索引",
-      action: "mods"
+      action: "mods",
+      libraryMode: "mods"
+    });
+  }
+  if (itemDatabase.checked && itemDatabase.exists && Number.isFinite(stats.modItems)) {
+    cards.push({
+      key: "items",
+      label: "物品",
+      value: stats.modItems,
+      caption: "模组物品",
+      action: "mods",
+      libraryMode: "items"
     });
   }
   return cards;
@@ -597,16 +846,22 @@ function taskSummary(task) {
   }
   if (task.task_type === "bulk_export_zipmods") {
     const unity3dCount = task.data?.exported_unity3d_count ?? 0;
-    return `?? ${task.data?.exported_count ?? task.data?.selected_count ?? 0} ? zipmod ? ?? unity3d ${unity3dCount} ?`;
+    return `已导出 ${task.data?.exported_count ?? task.data?.selected_count ?? 0} 个 zipmod，包含 ${unity3dCount} 个 unity3d`;
   }
   if (task.task_type === "bulk_organize_zipmods") {
     return `按作者整理 ${task.data?.exported_count ?? task.data?.selected_count ?? 0} 个 zipmod`;
+  }
+  if (task.task_type === "organize_all_zipmods_by_author") {
+    return `已移动 ${task.data?.moved_count ?? 0} 个 zipmod，删除 ${task.data?.removed_empty_dir_count ?? 0} 个空目录`;
   }
   if (task.task_type === "bulk_repair_zipmods_unity3d") {
     return `已修复 ${task.data?.repaired_count ?? 0} 个，跳过 ${task.data?.skipped_count ?? 0} 个`;
   }
   if (task.task_type === "bulk_cleanup_duplicate_zipmods") {
     return `已清理 ${task.data?.cleaned_duplicate_count ?? 0} 个重复文件，跳过 ${task.data?.skipped_count ?? 0} 个`;
+  }
+  if (task.task_type === "import_external_zipmods") {
+    return `导入 ${task.data?.imported_count ?? 0} 个，替换 ${task.data?.promoted_count ?? 0} 个，补入 ${task.data?.unity3d_repaired_count ?? 0} 个 unity3d，角色卡 ${task.data?.card_imported_count ?? 0} 张`;
   }
   if (task.task_type === "bulk_update_zipmod_authors") {
     return `已更新 ${task.data?.updated_count ?? 0} 个`;
@@ -672,7 +927,70 @@ function formatDatabaseTime(value) {
 }
 
 function openSummaryCard(card) {
+  if (card.libraryMode) setLibraryMode(card.libraryMode);
   if (card.action) activeView.value = card.action;
+}
+
+function formatPersonality(value) {
+  const personalityId = Number(value);
+  if (Number.isInteger(personalityId) && PERSONALITY_LABELS[personalityId]) {
+    return PERSONALITY_LABELS[personalityId];
+  }
+  return formatProfileValue(value);
+}
+
+function formatCharacterSex(value) {
+  const sexId = Number(value);
+  if (sexId === 0) return "\u7537";
+  if (sexId === 1) return "\u5973";
+  return formatProfileValue(value);
+}
+
+function formatAchievementProgress(item) {
+  if (!item) return "-";
+  if (item.unit === "bytes") return `${formatBytes(item.progress)} / 10 GB`;
+  if (item.unit === "milestone") return item.unlocked ? "已完成" : "等待完整扫描";
+  return `${formatStat(item.progress)} / ${formatStat(item.target)}`;
+}
+
+async function loadAchievements({ notify = false } = {}) {
+  try {
+    const previousUnlocked = new Set(achievements.value.filter((item) => item.unlocked).map((item) => item.id));
+    const result = await window.desktopApi?.backendRequest?.("/achievements");
+    if (!result?.ok) throw new Error(result?.error || "成就读取失败");
+    achievements.value = Array.isArray(result.achievements) ? result.achievements : [];
+    Object.assign(achievementPreferences, result.preferences || {});
+    if (notify && achievementInitialized.value && achievementPreferences.notifications) {
+      const unlocked = achievements.value.find((item) => item.unlocked && !previousUnlocked.has(item.id));
+      if (unlocked) {
+        achievementToast.value = unlocked;
+        window.clearTimeout(achievementToastTimer);
+        achievementToastTimer = window.setTimeout(() => { achievementToast.value = null; }, 5000);
+      }
+    }
+    achievementInitialized.value = true;
+  } catch (error) {
+    log(`[Achievements Error] ${error.message}`);
+  }
+}
+
+async function updateAchievementPreference(key, value) {
+  const result = await window.desktopApi?.backendRequest?.("/achievements/preferences", {
+    method: "POST",
+    body: { [key]: Boolean(value) }
+  });
+  if (!result?.ok) return;
+  achievements.value = result.achievements || achievements.value;
+  Object.assign(achievementPreferences, result.preferences || {});
+}
+
+async function resetAchievementHistory() {
+  if (!window.confirm("确认重置全部本地成就记录？资源数据库和游戏文件不会被删除。")) return;
+  const result = await window.desktopApi?.backendRequest?.("/achievements/reset", { method: "POST", body: {} });
+  if (result?.ok) {
+    achievements.value = result.achievements || [];
+    selectedAchievement.value = null;
+  }
 }
 
 function clearResourceStats() {
@@ -870,29 +1188,43 @@ function setLibraryMode(mode) {
   ensureModDatabaseLoaded();
 }
 
-function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "") {
+function isPoseItemKind(kind) {
+  return POSE_ITEM_KIND_CODES.has(String(kind || "").trim());
+}
+
+function itemFallbackThumbnailUrl(kind) {
+  return POSE_ITEM_THUMBNAILS[String(kind || "").trim()] || "";
+}
+
+function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind = "") {
   if (unity3dStatus === "missing" || unity3dStatus === "error") return "error";
   if (status && status !== "ok") return "parse";
+  if (isPoseItemKind(kind)) return "ready";
   if (thumbnailStatus && thumbnailStatus !== "ready" && thumbnailStatus !== "ok") return "thumb";
   return "ready";
 }
 
 function itemKindLabel(kind) {
   const key = String(kind || "").trim();
-  return ITEM_KIND_LABELS[key] || key || "-";
+  const label = ITEM_KIND_LABELS[key] || key || "-";
+  if (label.startsWith("\u7537")) return `\u2642${label.slice(1)}`;
+  if (label.startsWith("\u5973")) return `\u2640${label.slice(1)}`;
+  return label;
 }
 
 function mapModItemRow(row) {
+  const thumbnailUrl = backendAssetUrl(row.thumbnail_url) || itemFallbackThumbnailUrl(row.kind);
   return {
     id: row.id,
     zipmodId: row.zipmod_id,
-    status: normalizeItemStatus(row.status, row.thumbnail_status, row.unity3d_status),
+    status: normalizeItemStatus(row.status, row.thumbnail_status, row.unity3d_status, row.kind),
     name: row.name || `(item ${row.item_id || row.id})`,
     kind: itemKindLabel(row.kind),
     kindCode: row.kind || "",
     author: row.author || "-",
     sourceMod: row.source_mod || row.zipmod_guid || "-",
-    thumbnailUrl: backendAssetUrl(row.thumbnail_url),
+    thumbnailUrl,
+    fallbackThumbnail: !backendAssetUrl(row.thumbnail_url) && Boolean(thumbnailUrl),
     raw: row
   };
 }
@@ -1159,14 +1491,16 @@ function showMissingItemPrompt(dependency) {
 async function locateSourceMod(row = selectedItem.value) {
   if (!row) return;
   const zipmodId = Number(row.zipmodId || row.raw?.zipmod_id || 0);
+  const sourceAuthor = String(row.raw?.author || row.author || "").trim();
   if (!zipmodId) {
     log("[Items Error] 缺少关联模组 ID");
     return;
   }
 
+  window.clearTimeout(modFilterTimer);
   libraryMode.value = "mods";
   modTab.value = "详情";
-  modFilters.author = "";
+  modFilters.author = sourceAuthor && sourceAuthor !== "-" ? sourceAuthor : UNKNOWN_AUTHOR_LABEL;
   modFilters.status = "";
   dependencyUsageFilter.value = "";
   await ensureModDatabaseLoaded({ force: true });
@@ -1281,6 +1615,12 @@ function unity3dIssueFileName(issue) {
   return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
+function itemUnity3dFileName(item) {
+  const path = String(item?.raw?.main_ab || "").trim();
+  if (!path) return "-";
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
 function thumbnailMissingSourceType(item, detail) {
   const sourcePath = String(detail || "")
     .replace(/^.*source not found:\s*/i, "")
@@ -1295,9 +1635,9 @@ function thumbnailMissingSourceType(item, detail) {
 
 function thumbnailIssueReason(item) {
   const detail = String(item?.thumbnail_error_detail || item?.thumbnail_error || "").trim();
-  if (!detail) return "缂╃暐鍥炬湭鐢熸垚";
+  if (!detail) return "缩略图未生成";
   if (detail.includes("ThumbAB/ThumbTex") || detail.includes("ThumbAB and ThumbTex are empty")) {
-    return "缂哄皯 ThumbAB/ThumbTex";
+    return "缺少 ThumbAB/ThumbTex";
   }
   if (detail.includes("source not found") || detail.includes("源文件不存在")) {
     const sourceType = thumbnailMissingSourceType(item, detail);
@@ -1311,7 +1651,7 @@ function thumbnailIssueReason(item) {
   if (detail.includes("UnityPy loaded no objects") || detail.includes("没有解析出任何资源")) {
     return "Unity3D 未解析出资源";
   }
-  if (detail.includes("asset not found") || detail.includes("璐村浘璧勬簮")) {
+  if (detail.includes("asset not found") || detail.includes("贴图资源")) {
     return "图片解码失败";
   }
   if (detail.includes("extract failed") || detail.includes("提取") || detail.includes("解码")) {
@@ -1339,6 +1679,7 @@ async function repairUnity3dIssue(issue) {
     selectedModDiagnostics.value = null;
     await loadSelectedModDiagnostics();
     await refreshModDatabaseList();
+    await loadAchievements({ notify: true });
   } catch (error) {
     selectedModDiagnosticsError.value = error.message;
     log(`[Mods Error] ${error.message}`);
@@ -1737,10 +2078,11 @@ async function submitBulkDeleteErrorItems() {
   }
 }
 
-async function repairThumbnailItem(item = selectedItem.value) {
+async function repairThumbnailItem(item = selectedItem.value, options = {}) {
   if (!item?.id) return;
-  const imagePath = await window.desktopApi?.selectImageFile?.("选择 PNG 图片");
-  if (!imagePath) return;
+  const imageData = String(options.imageData || "");
+  const imagePath = imageData ? "" : await window.desktopApi?.selectImageFile?.("选择 PNG 图片");
+  if (!imageData && !imagePath) return false;
 
   const itemId = item.id;
   repairingThumbnailItemId.value = itemId;
@@ -1749,7 +2091,7 @@ async function repairThumbnailItem(item = selectedItem.value) {
       `/mods/items/${itemId}/import-thumbnail`,
       {
         method: "POST",
-        body: { image_path: imagePath }
+        body: imageData ? { image_data: imageData } : { image_path: imagePath }
       }
     );
     if (!result?.ok) {
@@ -1763,10 +2105,12 @@ async function repairThumbnailItem(item = selectedItem.value) {
       if (modTab.value === "物品") await loadSelectedModItems();
     }
     await refreshModDatabaseList();
+    await loadAchievements({ notify: true });
     if (libraryMode.value === "items") {
       const updatedItem = itemRows.value.find((row) => row.id === itemId);
       if (updatedItem) selectedItem.value = updatedItem;
     }
+    return true;
   } catch (error) {
     if (selectedMod.value) selectedModDiagnosticsError.value = error.message;
     log(`[Mods Error] ${error.message}`);
@@ -1781,6 +2125,28 @@ async function deleteSelectedItem(item = selectedItem.value) {
   deleteItemPrompt.name = item.name || item.raw?.item_id || String(item.id);
   deleteItemPrompt.error = "";
   deleteItemPrompt.open = true;
+}
+
+async function exportItemFbx(item = selectedItem.value) {
+  if (!item?.id || exportingFbxItemId.value) return false;
+  const targetDir = await window.desktopApi?.selectDirectory?.("选择 FBX 模型导出目录");
+  if (!targetDir) return false;
+  exportingFbxItemId.value = item.id;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/mods/items/${item.id}/export-fbx`,
+      { method: "POST", body: { target_dir: targetDir } }
+    );
+    if (!result?.ok) throw new Error(result?.error || "FBX 模型导出失败");
+    log(`[Models] ${result.message}: ${result.fbx_path}`);
+    await window.desktopApi?.showItemInFolder?.(result.fbx_path);
+    return true;
+  } catch (error) {
+    log(`[Models Error] ${error.message}`);
+    return false;
+  } finally {
+    exportingFbxItemId.value = null;
+  }
 }
 
 async function confirmDeleteSelectedItem() {
@@ -1903,6 +2269,7 @@ async function cleanupDuplicateZipmods(duplicateIds = null, zipmodIdOverride = n
     selectedModDiagnostics.value = null;
     await loadSelectedModDiagnostics();
     await refreshModDatabaseList();
+    await loadAchievements({ notify: true });
   } catch (error) {
     duplicateZipmodPrompt.error = error.message;
     log(`[Mods Error] ${error.message}`);
@@ -1951,6 +2318,7 @@ async function mergeDuplicateZipmod(candidate) {
   } catch (error) {
     duplicateZipmodPrompt.error = error.message;
     log(`[Mods Error] ${error.message}`);
+    return false;
   } finally {
     duplicateZipmodPrompt.busyId = null;
   }
@@ -2304,6 +2672,7 @@ async function checkStartupDatabaseChanges() {
   if (!paths.gameDir) return;
   if (isBusy.value) return;
   try {
+    await checkModDatabase();
     const result = await window.desktopApi?.backendRequest?.(
       `/mods/database/changes?game_dir=${encodeQuery(paths.gameDir)}`
     );
@@ -2312,7 +2681,7 @@ async function checkStartupDatabaseChanges() {
     }
     const data = result.data || {};
     if (!data.needs_rebuild) {
-      log("[Database] detected changes; rebuilding database");
+      log("[Database] 数据库已是最新状态");
       return;
     }
     if (data.recommended_action === "auto_incremental") {
@@ -2553,6 +2922,7 @@ async function selectGameDir() {
   log(`[Directory] 选择游戏目录: ${selected}`);
   await submitTask("check_game_dir");
   await loadCardTree();
+  await checkStartupDatabaseChanges();
 }
 
 async function launchExecutable(launchType) {
@@ -2575,7 +2945,7 @@ async function launchExecutable(launchType) {
     }
     log(`[Launch] ${labels[launchType]}: ${result.executable}`);
   } catch (error) {
-    log(`[Launch Error] ${labels[launchType] || "鍚姩"}: ${error.message}`);
+    log(`[Launch Error] ${labels[launchType] || "启动"}: ${error.message}`);
   }
 }
 
@@ -2700,8 +3070,10 @@ function applyTask(task) {
     [
       "bulk_export_zipmods",
       "bulk_organize_zipmods",
+      "organize_all_zipmods_by_author",
       "bulk_repair_zipmods_unity3d",
       "bulk_cleanup_duplicate_zipmods",
+      "import_external_zipmods",
       "bulk_delete_zipmods",
       "bulk_update_zipmod_authors",
       "bulk_apply_item_thumbnail",
@@ -2717,7 +3089,27 @@ function applyTask(task) {
         log(`[Mods] 跳过 #${item.id}: ${item.reason || "智能分析建议保留人工处理"}`);
       });
     }
+    if (task.task_type === "import_external_zipmods" && task.status === "completed") {
+      importResultPrompt.task = task;
+      importResultPrompt.open = true;
+      (task.data?.skipped || []).slice(0, 5).forEach((item) => {
+        log(`[Import] 跳过 ${item.guid || item.id || ""}: ${item.reason || "需要人工确认"}`);
+      });
+    }
+    if (task.task_type === "organize_all_zipmods_by_author" && task.status === "completed") {
+      modDatabase.checked = false;
+      itemDatabase.checked = false;
+      void refreshModDatabaseList();
+    }
   }
+}
+
+async function openGameDirectory(relativePath) {
+  if (!paths.gameDir) return;
+  const suffix = relativePath === "." ? "" : `\\${relativePath}`;
+  const directoryPath = `${paths.gameDir}${suffix}`;
+  const result = await window.desktopApi?.openDirectory?.(directoryPath);
+  if (!result?.ok) log(`[Directory Error] ${result?.error || "无法打开目录"}: ${directoryPath}`);
 }
 
 async function pollTask(id, options = {}) {
@@ -2735,6 +3127,7 @@ async function pollTask(id, options = {}) {
       if (["completed", "failed"].includes(result.task.status)) break;
       await new Promise((resolve) => window.setTimeout(resolve, 350));
     }
+    if (finalTask?.status === "completed") await loadAchievements({ notify: true });
     if (typeof onDone === "function" && finalTask) {
       await onDone(finalTask);
     }
@@ -2755,6 +3148,35 @@ async function buildModDatabase() {
   }
   taskHint.value = "准备重建数据库";
   await submitTask("build_mod_database", { mode: "incremental" });
+}
+
+async function importExternalZipmods() {
+  if (gameDirStatus.value !== "目录有效") {
+    taskHint.value = "请选择有效 HS2 目录";
+    log("[Task Error] 请先选择有效 HS2 目录");
+    return;
+  }
+  const sourceDir = await window.desktopApi?.selectDirectory?.("选择外部模组文件夹");
+  if (!sourceDir) return;
+  taskHint.value = "正在导入外部 zipmod";
+  await submitTask("import_external_zipmods", { source_dir: sourceDir });
+}
+
+function openOrganizeAllPrompt() {
+  if (gameDirStatus.value !== "目录有效") {
+    taskHint.value = "请选择有效 HS2 目录";
+    log("[Task Error] 请先选择有效 HS2 目录");
+    return;
+  }
+  organizeAllPrompt.error = "";
+  organizeAllPrompt.open = true;
+}
+
+async function submitOrganizeAllZipmods() {
+  if (isBusy.value) return;
+  organizeAllPrompt.open = false;
+  taskHint.value = "正在按作者整理全部模组";
+  await submitTask("organize_all_zipmods_by_author");
 }
 
 async function submitTask(type, overrides = {}) {
@@ -2882,6 +3304,8 @@ function toggleCardSelection(id) {
 
 function handleCardClick(card) {
   if (!card) return;
+  naviActionNotice.type = "";
+  naviActionNotice.message = "";
   selectedCardDetailPath.value = card.absolutePath;
   loadSelectedCardProfile(card);
   if (cardBulkMode.value) {
@@ -2929,6 +3353,30 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
   }
 }
 
+async function setSelectedCardAsNavi(slot) {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || !paths.gameDir || settingNaviSlot.value) return;
+  settingNaviSlot.value = slot;
+  naviActionNotice.type = "";
+  naviActionNotice.message = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/set-navi", {
+      method: "POST",
+      body: { game_dir: paths.gameDir, path: card.relativePath, slot }
+    });
+    if (!result?.ok) throw new Error(result?.error || "替换看板娘失败");
+    log(`[Cards] 已将 ${card.name} 设为看板娘 ${slot}: ${result.target_path}`);
+    naviActionNotice.type = "success";
+    naviActionNotice.message = `已替换 ${slot}.png`;
+  } catch (error) {
+    log(`[Cards Error] ${error.message}`);
+    naviActionNotice.type = "error";
+    naviActionNotice.message = error.message;
+  } finally {
+    settingNaviSlot.value = "";
+  }
+}
+
 function toggleAllVisibleCards() {
   const next = new Set(selectedCards.value);
   if (allVisibleCardsSelected.value) {
@@ -2967,6 +3415,7 @@ onMounted(() => {
     if (await waitForBackendReady()) {
       log("[Backend] Python backend is ready.");
       await measureStep("loadAppSettings", () => loadAppSettings());
+      await measureStep("loadAchievements", () => loadAchievements());
       log(`[Startup] onMounted startup path completed in ${formatDurationMs(performance.now() - startedAt)}`);
     } else {
       log("[Backend Error] Python backend startup timed out.");
@@ -2979,10 +3428,21 @@ const appCtx = reactive({
   activeAction,
   activeView,
   analyzeDuplicateZipmods,
+  achievements,
+  achievementPreferences,
+  achievementUnlockedCount,
+  visibleAchievements,
+  selectedAchievement,
+  formatAchievementProgress,
+  loadAchievements,
+  resetAchievementHistory,
+  updateAchievementPreference,
   allVisibleCardsSelected,
   allVisibleModsSelected,
   badgeClass,
   buildModDatabase,
+  importExternalZipmods,
+  openOrganizeAllPrompt,
   bulkActionBusy,
   bulkAuthorSuggestions,
   bulkDeletePrompt,
@@ -3020,7 +3480,13 @@ const appCtx = reactive({
   formatBytes,
   formatDatabaseTime,
   formatProfileValue,
+  formatPersonality,
+  formatCharacterSex,
   formatStat,
+  importResultData,
+  importResultGroups,
+  importResultPrompt,
+  organizeAllPrompt,
   gameDirDisplay,
   gameDirStatus,
   handleCardClick,
@@ -3066,6 +3532,7 @@ const appCtx = reactive({
   openDuplicateZipmodPrompt,
   openManifestAuthorPrompt,
   openManifestEditor,
+  openGameDirectory,
   openModItemInItemBrowser,
   openSelectedModInFolder,
   openThumbnailToolsPrompt,
@@ -3074,8 +3541,10 @@ const appCtx = reactive({
   paths,
   recentTasks,
   repairingThumbnailItemId,
+  exportingFbxItemId,
   repairingUnity3dPath,
   repairThumbnailItem,
+  exportItemFbx,
   repairUnity3dIssue,
   saveSetup,
   scheduleItemSearch,
@@ -3089,6 +3558,9 @@ const appCtx = reactive({
   selectedCardProfile,
   selectedCardProfileError,
   selectedCardProfileLoading,
+  naviActionNotice,
+  setSelectedCardAsNavi,
+  settingNaviSlot,
   selectedCards,
   selectedCount,
   selectedItem,
@@ -3125,6 +3597,7 @@ const appCtx = reactive({
   toggleThumbnailTarget,
   thumbnailIssueReason,
   thumbnailToolsPrompt,
+  itemUnity3dFileName,
   unity3dIssueFileName,
   unity3dIssueSolution,
   updateSetup,
@@ -3162,11 +3635,8 @@ watch([activeView, backendStatus], ([view, status]) => {
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">SM</div>
-        <div>
-          <div class="brand-title">Star_Manager</div>
-          <div class="brand-subtitle">HS2 resource desk</div>
-        </div>
+        <img class="brand-mark" :src="appIcon" alt="Star_Manager" />
+        <img class="brand-logo" :src="brandLogo" alt="Star Manager" />
       </div>
 
       <nav class="nav" aria-label="Main navigation">
@@ -3177,7 +3647,35 @@ watch([activeView, backendStatus], ([view, status]) => {
           :class="{ active: activeView === view.id }"
           @click="activeView = view.id"
         >
-          <span class="nav-icon">{{ view.icon }}</span>
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <g v-if="view.id === 'start'">
+                <path d="M7.5 8h9a4.5 4.5 0 0 1 4.2 6.1l-1.2 3.1a2 2 0 0 1-3.2.8l-2-1.7H9.7l-2 1.7a2 2 0 0 1-3.2-.8l-1.2-3.1A4.5 4.5 0 0 1 7.5 8Z"></path>
+                <path d="M7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"></path>
+              </g>
+              <g v-else-if="view.id === 'overview'">
+                <rect x="4" y="4" width="6" height="6" rx="1"></rect>
+                <rect x="14" y="4" width="6" height="6" rx="1"></rect>
+                <rect x="4" y="14" width="6" height="6" rx="1"></rect>
+                <path d="M14 20v-5M17 20v-8M20 20v-3"></path>
+              </g>
+              <g v-else-if="view.id === 'characters'">
+                <circle cx="12" cy="7" r="3.2"></circle>
+                <path d="M5.5 20a6.5 6.5 0 0 1 13 0M9 13.8l3 2.2 3-2.2"></path>
+              </g>
+              <g v-else-if="view.id === 'mods'">
+                <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
+                <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8M8 6l8 4"></path>
+              </g>
+              <g v-else-if="view.id === 'plugins'">
+                <path d="M9.5 4H4v5.5a2.5 2.5 0 1 1 0 5V20h5.5a2.5 2.5 0 1 1 5 0H20v-5.5a2.5 2.5 0 1 0 0-5V4h-5.5a2.5 2.5 0 1 0-5 0Z"></path>
+              </g>
+              <g v-else>
+                <path d="M6 3h9l3 3v15H6V3Z"></path>
+                <path d="M15 3v4h4M9 11h6M9 15h6M9 19h4"></path>
+              </g>
+            </svg>
+          </span>
           <span>{{ view.label }}</span>
         </button>
       </nav>
@@ -3220,8 +3718,72 @@ watch([activeView, backendStatus], ([view, status]) => {
         <OverviewView v-else-if="activeView === 'overview'" :ctx="appCtx" />
         <CharactersView v-else-if="activeView === 'characters'" :ctx="appCtx" />
         <ModsView v-else-if="activeView === 'mods'" :ctx="appCtx" />
+        <PluginsView v-show="activeView === 'plugins'" :ctx="appCtx" />
         <LogsView v-if="activeView === 'logs'" :ctx="appCtx" />
       </section>
+
+        <div v-if="organizeAllPrompt.open" class="prompt-backdrop" @click.self="organizeAllPrompt.open = false">
+          <div class="prompt-panel organize-all-panel">
+            <span class="risk-kicker">会移动游戏文件</span>
+            <strong>按作者整理全部模组</strong>
+            <p class="subtext">将扫描并移动当前 <code>mods</code> 下的全部 zipmod，结构为 <code>mods/作者/模组.zipmod</code>。</p>
+            <dl class="organize-impact">
+              <div><dt>源路径</dt><dd>{{ paths.gameDir }}\mods</dd></div>
+              <div><dt>未知作者</dt><dd>归入“未知作者”目录</dd></div>
+              <div><dt>重名处理</dt><dd>自动编号，不覆盖已有文件</dd></div>
+              <div><dt>空目录</dt><dd>整理完成后自动删除</dd></div>
+              <div><dt>完成后</dt><dd>自动刷新模组数据库</dd></div>
+            </dl>
+            <div v-if="organizeAllPrompt.error" class="prompt-error">{{ organizeAllPrompt.error }}</div>
+            <div class="prompt-actions">
+              <button type="button" @click="organizeAllPrompt.open = false">取消</button>
+              <button type="button" class="danger-action" :disabled="isBusy" @click="submitOrganizeAllZipmods">确认整理当前 mods 目录</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="importResultPrompt.open" class="prompt-backdrop" @click.self="importResultPrompt.open = false">
+          <div class="prompt-panel import-result-panel">
+            <div class="import-result-head">
+              <div>
+                <strong>导入结果</strong>
+                <p class="subtext">{{ importResultData.source_dir || "外部目录" }}</p>
+              </div>
+              <button type="button" @click="importResultPrompt.open = false">关闭</button>
+            </div>
+            <div class="import-result-metrics">
+              <span><strong>{{ importResultData.scanned_count || 0 }}</strong> zipmod</span>
+              <span><strong>{{ importResultData.imported_count || 0 }}</strong> 正常</span>
+              <span><strong>{{ importResultData.promoted_count || 0 }}</strong> 保留更优</span>
+              <span><strong>{{ importResultData.cleaned_count || 0 }}</strong> 清理重复</span>
+              <span><strong>{{ importResultData.unity3d_repaired_count || 0 }}</strong> Unity3D</span>
+              <span><strong>{{ importResultData.card_imported_count || 0 }}</strong> 角色卡</span>
+              <span><strong>{{ importResultData.failure_count || 0 }}</strong> 失败</span>
+            </div>
+            <div class="import-result-list">
+              <section
+                v-for="group in importResultGroups"
+                :key="group.key"
+                class="import-result-group"
+                :class="group.tone"
+              >
+                <header>
+                  <span>{{ group.label }}</span>
+                  <strong>{{ group.count }}</strong>
+                </header>
+                <p v-if="!group.items.length" class="subtext">{{ group.empty }}</p>
+                <article v-for="item in group.items" :key="group.key + ':' + item.title + ':' + item.detail" class="import-result-row">
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <small v-if="item.meta">{{ item.meta }}</small>
+                  </div>
+                  <p>{{ item.note }}</p>
+                  <code v-if="item.detail">{{ item.detail }}</code>
+                </article>
+              </section>
+            </div>
+          </div>
+        </div>
 
         <div v-if="cardDependencyExportPrompt.open" class="prompt-backdrop" @click.self="cardDependencyExportPrompt.open = false">
           <div class="prompt-panel">
@@ -3730,7 +4292,7 @@ watch([activeView, backendStatus], ([view, status]) => {
                   >
                   <span>
                     <strong>{{ item.name }}</strong>
-                    <small>{{ item.kind }} 路 {{ item.author }} 路 {{ item.sourceMod }}</small>
+                    <small>{{ item.kind }} · {{ item.author }} · {{ item.sourceMod }}</small>
                   </span>
                 </label>
               </div>
@@ -3748,6 +4310,11 @@ watch([activeView, backendStatus], ([view, status]) => {
         <datalist id="zipmod-author-list">
           <option v-for="author in zipmodAuthors" :key="author" :value="author" />
         </datalist>
+
+        <button v-if="achievementToast" class="achievement-toast" type="button" @click="activeView = 'overview'; selectedAchievement = achievementToast; achievementToast = null">
+          <span class="achievement-medal">{{ achievementToast.icon }}</span>
+          <span><small>成就解锁</small><strong>{{ achievementToast.title }}</strong><em>{{ achievementToast.description }}</em></span>
+        </button>
 
     </main>
   </div>

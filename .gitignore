@@ -28,6 +28,7 @@ node_modules/
 apps/node_modules/
 .npm-cache/
 apps/.npm-cache/
+apps/.dotnet-home/
 
 # Test and tooling caches
 .pytest_cache/

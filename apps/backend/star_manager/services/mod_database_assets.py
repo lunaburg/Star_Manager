@@ -1363,6 +1363,7 @@ def zipmod_unity3d_diagnostics(
                 FROM mod_items
                 WHERE zipmod_id = ?
                   AND parse_status = 'ok'
+                  AND TRIM(COALESCE(kind, '')) NOT IN ('500', '501')
                   AND (thumbnail_status = '' OR thumbnail_status NOT IN ('ready', 'ok'))
                 ORDER BY csv_path, item_id
                 """,
@@ -1473,7 +1474,7 @@ def cleanup_duplicate_zipmods(
 
         duplicates = conn.execute(
             f"""
-            SELECT id, file_path, file_name, relative_path
+            SELECT id, file_path, file_name, relative_path, file_size
             FROM duplicate_zipmods
             WHERE guid = ?{id_filter}
             """,
@@ -1485,6 +1486,7 @@ def cleanup_duplicate_zipmods(
         removed: list[str] = []
         skipped: list[str] = []
         cleared_ids: list[int] = []
+        freed_bytes = 0
         for row in duplicates:
             duplicate_id = int(row["id"])
             dup_path = Path(row["file_path"]).resolve()
@@ -1493,6 +1495,7 @@ def cleanup_duplicate_zipmods(
                     dup_path.unlink()
                     removed.append(str(dup_path))
                     cleared_ids.append(duplicate_id)
+                    freed_bytes += int(row["file_size"] or 0)
                 except OSError as exc:
                     skipped.append(f"{dup_path}: {exc}")
             else:
@@ -1513,6 +1516,7 @@ def cleanup_duplicate_zipmods(
             "removed": removed,
             "skipped": skipped,
             "cleared_ids": cleared_ids,
+            "freed_bytes": freed_bytes,
             "guid": zipmod["guid"],
         }
     except OSError as exc:
@@ -2011,7 +2015,9 @@ def analyze_duplicate_zipmods(
             thumbnail_issue_count = sum(
                 1
                 for item in items
-                if item.parse_status == "ok" and (not item.thumbnail_status or item.thumbnail_status not in {"ready", "ok"})
+                if item.parse_status == "ok"
+                and str(item.kind or "").strip() not in {"500", "501"}
+                and (not item.thumbnail_status or item.thumbnail_status not in {"ready", "ok"})
             )
             parse_error_count = sum(1 for item in items if item.parse_status != "ok")
             completeness_score = ok_count * 10 + unity3d_in_mod * 3 - unity3d_missing * 5 - unity3d_in_game - thumbnail_issue_count - parse_error_count * 2

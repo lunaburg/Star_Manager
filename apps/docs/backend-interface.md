@@ -22,6 +22,7 @@ Defined in `apps/electron/preload.cjs`.
 - `selectImageFile(title)`: open a native image picker.
 - `promptText(title, message, defaultValue)`: open a native text prompt.
 - `showItemInFolder(filePath)`: reveal a file in the system file manager.
+- `openDirectory(directoryPath)`: open an existing directory in the system file manager.
 - `launchGameExecutable(launchType, gameDir)`: launch `HoneySelect2.exe`, `StudioNEOV2.exe`, or `HoneySelect2VR.exe`.
 - `loadSettings()`: load persisted app settings.
 - `saveSettings(settings)`: save persisted app settings.
@@ -61,6 +62,11 @@ Read and file routes:
   - Returns whether a rebuild is needed, change counts, and whether an automatic incremental rebuild is recommended.
 - `GET /cards/database`
   - Returns character-card database status and summary counts.
+- `GET /plugins?game_dir=&search=&category=&offset=&limit=`
+  - Recursively scans `BepInEx/Plugins` without loading or executing DLL files, but returns only DLLs with a successfully parsed `BepInPlugin` attribute and non-empty plugin GUID. Dependency assemblies, `core`, and `patchers` are excluded from the plugin library.
+  - Returns assembly identity/version, BepInEx plugin GUID/name/version, functional description and its source/confidence/evidence, dependencies, process restrictions, incompatibilities, assembly references, file metadata, diagnostics, and summary counts. Descriptions prefer `AssemblyDescription`, then correlate matching `config/*.cfg` settings with `Translation/**/*.txt` labels; known-plugin and name-based descriptions are marked separately.
+  - The plugin library contains only DLLs with a valid `BepInPlugin` GUID. The maximum page size is 1000.
+  - Results are cached in the shared SQLite database. A fingerprint of plugin DLLs, config files, and translation files invalidates stale entries automatically. Pass `refresh=1` to force a complete rescan.
 - `GET /mods/zipmods?offset=&limit=&author=&status=&usage=`
   - Returns paged zipmod rows. `status` may be `normal`, `abnormal`, `warning`, `error`, `manifest_author`, `read_error`, `unity3d_missing`, `unity3d_in_game`, `thumbnail`, `duplicate_zipmod`, or empty. `usage` may be `used`, `unused`, or empty, based on character-card dependencies.
   - `normal`: `scan_status = ok`, author is present, no duplicate GUID, no thumbnail issue items, and `unity3d_status` is not `missing`, `in_game`, or `error`.
@@ -84,6 +90,8 @@ Read and file routes:
   - Returns item filter options.
 - `GET /mods/thumbnails?path=`
   - Serves a cached thumbnail file from the backend thumbnail cache.
+- `GET /mods/models/:file.glb`
+  - Serves a generated GLB from the runtime model-preview cache. Model files are generated on demand and are disposable runtime data.
 - `GET /library/cards/tree?game_dir=`
   - Returns the character-card folder tree.
 - `GET /library/cards?game_dir=&path=`
@@ -116,11 +124,15 @@ Direct mutation routes:
 - `POST /mods/zipmods/:id/delete`
   - Deletes one zipmod file and related database records.
 - `POST /mods/items/:id/import-thumbnail`
-  - Body: `{ "image_path": "D:\\path\\image.png" }`
+  - Body: `{ "image_path": "D:\\path\\image.png" }` for an external PNG, or `{ "image_data": "data:image/png;base64,..." }` for a screenshot captured from the 3D preview. Screenshot payloads are validated as PNG, capped at 2 MB decoded size, and passed through a short-lived runtime file before using the same single-item import path.
   - Imports one thumbnail into the source zipmod and updates the item CSV fields.
 - `POST /mods/items/:id/export-thumbnail`
   - Body: `{ "target_dir": "D:\\thumbs" }`
   - Exports the selected item's cached thumbnail PNG to a chosen directory.
+- `POST /mods/items/:id/model-preview`
+  - Reads the selected item's `MainAB` Unity3D resource with UnityPy, locates the GameObject named by CSV `MainData`, and converts only Renderer meshes below that object to a cached GLB. If `MainData` is empty or cannot be found, the converter explicitly falls back to the meshes in the complete MainAB; a matched MainData tree with no renderable mesh returns an error instead of showing unrelated objects. Standard color, base-color texture, normal texture, metallic, roughness, and basic transparency properties are mapped to glTF PBR; proprietary game shaders use this standard-material fallback. This is a read-only, single-item operation; it does not modify the source zipmod.
+- `POST /mods/items/:id/export-fbx`
+  - Body: `{ "target_dir": "D:\\Exports" }`. Exports the CSV `MainData`-selected static meshes as an ASCII FBX 7.4 file, with material colors, UVs, normals, and extracted texture PNGs in a sibling `textures` folder. The current exporter does not include bones, skin weights, blend shapes, or animation. A new collision-safe output folder is created for every export.
 - `POST /mods/items/:id/delete`
   - Deletes one item row from its source zipmod; if it was the final item, deletes the zipmod.
 
@@ -173,6 +185,11 @@ Current task types:
 - `build_mod_database`
   - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full" }`
   - Rebuilds the SQLite mod database, thumbnail cache, character-card database, and card preview cache. The frontend uses incremental mode for automatic small-change rebuilds.
+- `import_external_zipmods`
+  - Payload: `{ "game_dir": "D:\\HS2", "source_dir": "D:\\Downloads\\mods" }`
+  - Scans all external `*.zipmod` files, copies valid candidates into `mods/Imported`, rebuilds the index, analyzes duplicate GUIDs, and keeps the best candidate by the existing duplicate-completeness policy. Existing game files are only replaced when duplicate analysis marks the imported candidate as safer/better.
+  - Before indexing copied zipmods, recursively searches `abdata` directories under the import source folder. When a copied zipmod references a missing `abdata/**/*.unity3d`, the matching loose unity3d file is moved into the zipmod at that referenced path.
+  - Also scans external `*.png` files. PNG files that pass the AIS/HS2 card marker check are copied into `UserData/chara/female`; ordinary PNG images are skipped.
 - `build_card_database`
   - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full" }`
   - Rebuilds only the character-card database and card preview cache.
@@ -182,6 +199,9 @@ Current task types:
 - `bulk_organize_zipmods`
   - Payload: `{ "zipmod_ids": [1, 2], "target_dir": "..." }`
   - Copies selected zipmods into author-named folders.
+- `organize_all_zipmods_by_author`
+  - Payload: `{ "game_dir": "D:\\HS2" }`
+  - Moves every `*.zipmod` below the current game `mods` directory into `mods/<author>/`. Missing authors use `未知作者`, invalid Windows path characters are replaced, and filename collisions receive a numeric suffix instead of overwriting files. After moving files, empty directories below `mods` are deleted without deleting the `mods` root, then the task refreshes the mod database.
 - `bulk_repair_zipmods_unity3d`
   - Payload: `{ "zipmod_ids": [1, 2] }`
   - Repairs repairable item main Unity3D issues for selected zipmods. The backend first groups repairable `MainAB` `.unity3d` references by game-directory source path; sources needed by multiple selected zipmods are copied into each zipmod and kept in game `abdata`, while sources needed by only one selected zipmod may be moved into that zipmod.
@@ -207,3 +227,11 @@ Current task types:
 - The overview page recent-task list displays every task, including batch mod operations.
 - Direct HTTP mutations should update their local busy state and then refresh affected lists or diagnostics.
 - Task mutations should use `submitTask(...)`, let polling update logs/recent tasks, then refresh affected lists after completion.
+
+## Local achievement routes
+
+- `GET /achievements`: evaluates static library milestones and returns all local achievement progress plus preferences.
+- `POST /achievements/preferences`: updates `enabled`, `notifications`, or `hide_locked` preferences.
+- `POST /achievements/reset`: clears achievement progress and event history without changing indexed resources.
+
+Successful duplicate-cleanup operations record released bytes. Successful thumbnail and Unity3D repairs record repaired-resource counts. Event keys are idempotent so a completed task cannot be counted twice.

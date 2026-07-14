@@ -358,7 +358,7 @@ def find_zipmod_id(conn: sqlite3.Connection, mod_id: str) -> int | None:
         """
         SELECT id
         FROM zipmods
-        WHERE scan_status != 'stale' AND guid = ?
+        WHERE scan_status != 'stale' AND trim(guid) = trim(?) COLLATE NOCASE
         LIMIT 1
         """,
         (mod_id,),
@@ -382,12 +382,19 @@ def find_mod_item_id(
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
-              AND mod_items.zipmod_guid = ?
+              AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
               AND mod_items.kind = ?
-              AND mod_items.item_id = ?
+              AND (
+                  mod_items.item_id = ?
+                  OR (
+                      mod_items.item_id != '' AND mod_items.item_id NOT GLOB '*[^0-9]*'
+                      AND ? != '' AND ? NOT GLOB '*[^0-9]*'
+                      AND ltrim(mod_items.item_id, '0') = ltrim(?, '0')
+                  )
+              )
             LIMIT 1
             """,
-            (mod_id, category_no, item_id),
+            (mod_id, category_no, item_id, item_id, item_id, item_id),
         ).fetchone()
         if row:
             return int(row["id"])
@@ -401,11 +408,18 @@ def find_mod_item_id(
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
-              AND mod_items.zipmod_guid = ?
-              AND mod_items.item_id = ?
+              AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
+              AND (
+                  mod_items.item_id = ?
+                  OR (
+                      mod_items.item_id != '' AND mod_items.item_id NOT GLOB '*[^0-9]*'
+                      AND ? != '' AND ? NOT GLOB '*[^0-9]*'
+                      AND ltrim(mod_items.item_id, '0') = ltrim(?, '0')
+                  )
+              )
             LIMIT 1
             """,
-            (mod_id, item_id),
+            (mod_id, item_id, item_id, item_id, item_id),
         ).fetchone()
         if row:
             return int(row["id"])

@@ -1,9 +1,90 @@
 <script setup>
+import { computed, ref } from "vue";
+import ModelPreview from "../ModelPreview.vue";
 import LazyThumbnail from "../LazyThumbnail.vue";
 
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
 });
+
+const modelPreview = ref(null);
+const modelPreviewReady = ref(false);
+const thumbnailChoiceOpen = ref(false);
+const thumbnailChoiceBusy = ref(false);
+const thumbnailChoiceError = ref("");
+const kindFilterOpen = ref(false);
+
+const selectedKindOption = computed(() => (
+  ctx.itemKindOptions.find((option) => option.value === ctx.itemFilters.kind)
+  || ctx.itemKindOptions[0]
+));
+
+function kindOptionParts(option) {
+  if (!option?.value) return { category: "all", gender: "", text: option?.label || "\u5168\u90e8 Kind" };
+  const segments = String(option.label || "").split("/");
+  const hasGender = segments[0] === "\u2642" || segments[0] === "\u2640";
+  const category = hasGender ? segments[1] : segments[0];
+  const textSegments = hasGender ? segments.slice(2) : segments.slice(1);
+  return {
+    category: ["\u9762\u90e8", "\u8eab\u4f53", "\u670d\u9970", "\u5934\u53d1", "\u9970\u54c1"].includes(category) ? category : "other",
+    gender: hasGender ? segments[0] : "",
+    text: textSegments.length ? textSegments.join("/") : String(option.label || "")
+  };
+}
+
+function selectKindOption(option) {
+  ctx.itemFilters.kind = option.value;
+  kindFilterOpen.value = false;
+  ctx.applyItemFilters();
+}
+
+function closeKindFilterSoon() {
+  window.setTimeout(() => { kindFilterOpen.value = false; }, 100);
+}
+
+function openThumbnailChoice() {
+  thumbnailChoiceError.value = "";
+  thumbnailChoiceOpen.value = true;
+}
+
+async function importThumbnailFromFile() {
+  thumbnailChoiceOpen.value = false;
+  await ctx.repairThumbnailItem(ctx.selectedItem);
+}
+
+async function importThumbnailFromPreview() {
+  if (!modelPreviewReady.value || thumbnailChoiceBusy.value) return;
+  thumbnailChoiceBusy.value = true;
+  thumbnailChoiceError.value = "";
+  try {
+    const imageData = await modelPreview.value?.captureScreenshot?.();
+    if (!imageData) throw new Error("无法取得 3D 预览画面");
+    const imported = await ctx.repairThumbnailItem(ctx.selectedItem, { imageData });
+    if (!imported) throw new Error("缩略图写入失败，请查看运行日志");
+    thumbnailChoiceOpen.value = false;
+  } catch (error) {
+    thumbnailChoiceError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    thumbnailChoiceBusy.value = false;
+  }
+}
+
+const MOD_STATUS_TONES = {
+  normal: "ok",
+  warning: "warn",
+  manifest_author: "warn",
+  unity3d_in_game: "warn",
+  thumbnail: "warn",
+  duplicate_zipmod: "warn",
+  error: "danger",
+  read_error: "danger",
+  unity3d_missing: "danger",
+  unity3d_error: "danger"
+};
+
+function modStatusTone(status) {
+  return MOD_STATUS_TONES[status] || "neutral";
+}
 </script>
 
 <template>
@@ -48,11 +129,50 @@ const { ctx } = defineProps({
               placeholder="搜索物品名字 / 模组 GUID"
               @input="ctx.scheduleItemSearch"
             >
-            <select v-model="ctx.itemFilters.kind" aria-label="Kind 筛选" @change="ctx.applyItemFilters">
-              <option v-for="kind in ctx.itemKindOptions" :key="kind.value || 'all'" :value="kind.value">
-                {{ kind.label }}
-              </option>
-            </select>
+            <div class="kind-filter-select" @focusout="closeKindFilterSoon" @keydown.esc="kindFilterOpen = false">
+              <button
+                type="button"
+                class="kind-filter-trigger"
+                :class="`kind-option-${selectedKindOption.gender}`"
+                aria-label="Kind 筛选"
+                aria-haspopup="listbox"
+                :aria-expanded="kindFilterOpen"
+                @click="kindFilterOpen = !kindFilterOpen"
+              >
+                <span class="kind-option-content">
+                  <span v-if="kindOptionParts(selectedKindOption).gender" class="kind-gender">{{ kindOptionParts(selectedKindOption).gender }}</span>
+                  <svg v-if="kindOptionParts(selectedKindOption).category === '面部'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9 10h.01M15 10h.01M9 15c1.8 1.3 4.2 1.3 6 0"></path></svg>
+                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '身体'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"></circle><path d="M8.5 21 10 14 7 10l2-2h6l2 2-3 4 1.5 7M10 14h4"></path></svg>
+                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '服饰'" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-5 4 3 4 2-1v8h8v-8l2 1 3-4-5-4c-.8 1.2-2.1 2-4 2s-3.2-.8-4-2Z"></path></svg>
+                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '头发'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c1-3 1-6 1-9a6 6 0 0 1 12 0c0 3 0 6 1 9M8 20c1-4 1-8 1-12M12 20V7M16 20c-1-4-1-8-1-12"></path></svg>
+                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '饰品'" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.1 5.2L20 9l-4.4 3.8L17 19l-5-3.2L7 19l1.4-6.2L4 9l5.9-.8L12 3Z"></path><circle cx="12" cy="12" r="2.2"></circle></svg>
+                  <span>{{ kindOptionParts(selectedKindOption).text }}</span>
+                </span>
+                <span class="kind-filter-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div v-if="kindFilterOpen" class="kind-option-list" role="listbox" aria-label="Kind 筛选选项">
+                <button
+                  v-for="kind in ctx.itemKindOptions"
+                  :key="kind.value || 'all'"
+                  type="button"
+                  role="option"
+                  :aria-selected="ctx.itemFilters.kind === kind.value"
+                  :class="[`kind-option-${kind.gender}`, { active: ctx.itemFilters.kind === kind.value }]"
+                  @mousedown.prevent="selectKindOption(kind)"
+                >
+                  <span class="kind-option-content">
+                    <span v-if="kindOptionParts(kind).gender" class="kind-gender">{{ kindOptionParts(kind).gender }}</span>
+                    <svg v-if="kindOptionParts(kind).category === '面部'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9 10h.01M15 10h.01M9 15c1.8 1.3 4.2 1.3 6 0"></path></svg>
+                    <svg v-else-if="kindOptionParts(kind).category === '身体'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"></circle><path d="M8.5 21 10 14 7 10l2-2h6l2 2-3 4 1.5 7M10 14h4"></path></svg>
+                    <svg v-else-if="kindOptionParts(kind).category === '服饰'" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-5 4 3 4 2-1v8h8v-8l2 1 3-4-5-4c-.8 1.2-2.1 2-4 2s-3.2-.8-4-2Z"></path></svg>
+                    <svg v-else-if="kindOptionParts(kind).category === '头发'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c1-3 1-6 1-9a6 6 0 0 1 12 0c0 3 0 6 1 9M8 20c1-4 1-8 1-12M12 20V7M16 20c-1-4-1-8-1-12"></path></svg>
+                    <svg v-else-if="kindOptionParts(kind).category === '饰品'" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.1 5.2L20 9l-4.4 3.8L17 19l-5-3.2L7 19l1.4-6.2L4 9l5.9-.8L12 3Z"></path><circle cx="12" cy="12" r="2.2"></circle></svg>
+                    <span>{{ kindOptionParts(kind).text }}</span>
+                  </span>
+                  <span v-if="ctx.itemFilters.kind === kind.value" class="kind-option-check" aria-hidden="true">✓</span>
+                </button>
+              </div>
+            </div>
             <select v-model="ctx.itemFilters.author" aria-label="作者筛选" @change="ctx.applyItemFilters">
               <option v-for="author in ctx.itemAuthorOptions" :key="author || 'all'" :value="author">
                 {{ author || "全部作者" }}
@@ -130,19 +250,25 @@ const { ctx } = defineProps({
                 <div v-if="ctx.filteredZipmodAuthorOptions.length === 0" class="author-option-empty">没有匹配作者</div>
               </div>
             </div>
-            <select v-model="ctx.modFilters.status" aria-label="状态筛选" @change="ctx.applyModFilters">
-              <option value="">全部状态</option>
-              <option value="normal">正常</option>
-              <option value="abnormal">全部异常</option>
-              <option value="warning">全部警告</option>
-              <option value="error">全部错误</option>
-              <option value="manifest_author">缺少模组作者</option>
-              <option value="read_error">读取错误</option>
-              <option value="unity3d_missing">Unity3D 文件缺失</option>
-              <option value="unity3d_error">Unity3D 资源读取异常</option>
-              <option value="unity3d_in_game">Unity3D 仅在游戏目录</option>
-              <option value="thumbnail">缩略图缺失</option>
-              <option value="duplicate_zipmod">存在重复模组</option>
+            <select
+              v-model="ctx.modFilters.status"
+              class="mod-status-filter"
+              :class="`status-filter-${modStatusTone(ctx.modFilters.status)}`"
+              aria-label="状态筛选"
+              @change="ctx.applyModFilters"
+            >
+              <option class="status-option-neutral" value="">全部状态</option>
+              <option class="status-option-neutral" value="abnormal">全部异常</option>
+              <option class="status-option-ok" value="normal">正常</option>
+              <option class="status-option-warn" value="warning">警告</option>
+              <option class="status-option-warn" value="manifest_author">　缺少模组作者</option>
+              <option class="status-option-warn" value="unity3d_in_game">　Unity3D 仅在游戏目录</option>
+              <option class="status-option-warn" value="thumbnail">　缩略图缺失</option>
+              <option class="status-option-warn" value="duplicate_zipmod">　存在重复模组</option>
+              <option class="status-option-danger" value="error">错误</option>
+              <option class="status-option-danger" value="read_error">　读取错误</option>
+              <option class="status-option-danger" value="unity3d_missing">　Unity3D 文件缺失</option>
+              <option class="status-option-danger" value="unity3d_error">　Unity3D 资源读取异常</option>
             </select>
           </div>
 
@@ -408,15 +534,82 @@ const { ctx } = defineProps({
                 <div class="kv mod-kv"><span>包标识</span><strong>{{ ctx.selectedItem.raw.zipmod_guid || "-" }}</strong></div>
                 <div class="kv mod-kv"><span>物品 ID</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.id }}</strong></div>
                 <div class="kv mod-kv"><span>分类表</span><strong>{{ ctx.selectedItem.raw.csv_path || ctx.selectedItem.kind }}</strong></div>
+                <div class="kv mod-kv"><span>依赖 Unity3D</span><strong class="mono" :title="ctx.selectedItem.raw.main_ab || '-'">{{ ctx.itemUnity3dFileName(ctx.selectedItem) }}</strong></div>
               </div>
             </div>
             <div v-else class="drawer-tab-panel active">
-              <div class="drawer-section mod-detail-section">
-                <span class="drawer-section-title">物品工具</span>
-                <div class="kv mod-kv with-action"><span>来源模组</span><strong>{{ ctx.selectedItem.sourceMod }}</strong><button type="button" @click="ctx.locateSourceMod()">定位模组</button></div>
-                <div class="kv mod-kv with-action"><span>缩略图缓存</span><strong>{{ ctx.selectedItem.raw.thumbnail_status || "-" }}</strong><button type="button" :disabled="ctx.repairingThumbnailItemId === ctx.selectedItem.id" @click="ctx.repairThumbnailItem(ctx.selectedItem)">{{ ctx.repairingThumbnailItemId === ctx.selectedItem.id ? "导入中..." : "重建" }}</button></div>
-                <div class="kv mod-kv with-action"><span>导出缩略图</span><strong>当前筛选列表</strong><button type="button" :disabled="Boolean(ctx.bulkActionBusy)" @click="ctx.openThumbnailToolsPrompt">打开</button></div>
-                <div class="kv mod-kv with-action danger-action"><span>删除物品</span><strong>{{ ctx.selectedItem.name }}</strong><button type="button" :disabled="ctx.deletingItemId === ctx.selectedItem.id" @click="ctx.deleteModItemRow(ctx.selectedItem)">{{ ctx.deletingItemId === ctx.selectedItem.id ? "删除中..." : "删除" }}</button></div>
+              <ModelPreview ref="modelPreview" :item-id="ctx.selectedItem.id" @ready-change="modelPreviewReady = $event" />
+              <div class="drawer-section mod-detail-section item-tools-section">
+                <div class="item-tools-heading">
+                  <div>
+                    <span class="drawer-section-title">物品工具</span>
+                  </div>
+                  <span class="item-tools-count">4 项</span>
+                </div>
+                <div class="item-tools-list">
+                  <div class="item-tool-card">
+                    <span class="item-tool-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
+                        <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8"></path>
+                      </svg>
+                    </span>
+                    <div class="item-tool-copy">
+                      <strong>来源模组</strong>
+                      <small :title="ctx.selectedItem.sourceMod">{{ ctx.selectedItem.sourceMod }}</small>
+                    </div>
+                    <button type="button" @click="ctx.locateSourceMod()">定位</button>
+                  </div>
+                  <div class="item-tool-card">
+                    <span class="item-tool-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="m4 7 7-3 7 3-7 3-7-3ZM4 7v8l7 3 3-1.3M11 10v8"></path>
+                        <path d="M16 12v8M13.5 17.5 16 20l2.5-2.5M14 20h6"></path>
+                      </svg>
+                    </span>
+                    <div class="item-tool-copy">
+                      <strong>导出 FBX 模型</strong>
+                      <small>静态网格、材质与贴图</small>
+                    </div>
+                    <button type="button" :disabled="ctx.exportingFbxItemId === ctx.selectedItem.id" @click="ctx.exportItemFbx(ctx.selectedItem)">{{ ctx.exportingFbxItemId === ctx.selectedItem.id ? "导出中..." : "导出" }}</button>
+                  </div>
+                  <div class="item-tool-card">
+                    <span class="item-tool-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="3" y="5" width="16" height="14" rx="2"></rect>
+                        <circle cx="8" cy="10" r="1.5"></circle>
+                        <path d="m5 17 4-4 3 3 2-2 3 3M20 3v4M18 5h4"></path>
+                      </svg>
+                    </span>
+                    <div class="item-tool-copy">
+                      <strong>重建缩略图</strong>
+                      <small>从图片或当前 3D 视角生成</small>
+                    </div>
+                    <span class="item-tool-status" :class="{ ready: ctx.selectedItem.raw.thumbnail_status === 'ready' }">{{ ctx.selectedItem.raw.thumbnail_status || "未知" }}</span>
+                    <button type="button" :disabled="ctx.repairingThumbnailItemId === ctx.selectedItem.id" @click="openThumbnailChoice">{{ ctx.repairingThumbnailItemId === ctx.selectedItem.id ? "导入中..." : "重建" }}</button>
+                  </div>
+                  <div class="item-tool-card">
+                    <span class="item-tool-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="7" y="4" width="13" height="11" rx="2"></rect>
+                        <path d="M17 18H6a2 2 0 0 1-2-2V7M9 13l3-3 2.5 2.5L17 10l3 3"></path>
+                        <circle cx="11" cy="8" r="1"></circle>
+                      </svg>
+                    </span>
+                    <div class="item-tool-copy">
+                      <strong>批量缩略图工具</strong>
+                      <small>处理当前筛选列表</small>
+                    </div>
+                    <button type="button" :disabled="Boolean(ctx.bulkActionBusy)" @click="ctx.openThumbnailToolsPrompt">打开</button>
+                  </div>
+                </div>
+                <div class="item-danger-zone">
+                  <div class="item-tool-copy">
+                    <strong>删除物品</strong>
+                    <small :title="ctx.selectedItem.name">{{ ctx.selectedItem.name }}</small>
+                  </div>
+                  <button type="button" :disabled="ctx.deletingItemId === ctx.selectedItem.id" @click="ctx.deleteModItemRow(ctx.selectedItem)">{{ ctx.deletingItemId === ctx.selectedItem.id ? "删除中..." : "删除" }}</button>
+                </div>
               </div>
             </div>
           </template>
@@ -562,4 +755,28 @@ const { ctx } = defineProps({
       </aside>
     </div>
   </section>
+  <Teleport to="body">
+    <div v-if="thumbnailChoiceOpen" class="prompt-backdrop" @click.self="thumbnailChoiceOpen = false">
+      <div class="prompt-panel thumbnail-rebuild-panel" role="dialog" aria-modal="true" aria-labelledby="thumbnail-rebuild-title">
+        <strong id="thumbnail-rebuild-title">重建物品缩略图</strong>
+        <p>选择图片来源。两种方式都会写入当前 zipmod 并更新物品 CSV。</p>
+        <div class="thumbnail-source-options">
+          <button type="button" class="thumbnail-source-card" :disabled="thumbnailChoiceBusy" @click="importThumbnailFromFile">
+            <span class="thumbnail-source-index">01</span>
+            <strong>从外部导入</strong>
+            <small>选择一张本地 PNG 图片</small>
+          </button>
+          <button type="button" class="thumbnail-source-card preview-source" :disabled="!modelPreviewReady || thumbnailChoiceBusy" @click="importThumbnailFromPreview">
+            <span class="thumbnail-source-index">02</span>
+            <strong>{{ thumbnailChoiceBusy ? "正在生成…" : "使用 3D 截图" }}</strong>
+            <small>{{ modelPreviewReady ? "采用当前旋转与缩放视角" : "请先加载上方 3D 模型" }}</small>
+          </button>
+        </div>
+        <div v-if="thumbnailChoiceError" class="prompt-error">{{ thumbnailChoiceError }}</div>
+        <div class="prompt-actions">
+          <button type="button" :disabled="thumbnailChoiceBusy" @click="thumbnailChoiceOpen = false">取消</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

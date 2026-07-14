@@ -155,6 +155,16 @@ def extract_character_profile_from_card(file_path: str) -> dict[str, Any]:
     if not profile:
         return {}
 
+    # HS2 keeps a second set of gameplay profile fields in Parameter2. Changes
+    # made in the game can update this value without rewriting the legacy
+    # Parameter.personality field, so Parameter2 is authoritative when present.
+    parameter2_block = get_card_block(card_data, "Parameter2")
+    if parameter2_block:
+        _, parameter2_blob = parameter2_block
+        parameter2_profile = parse_partial_profile_map(parameter2_blob)
+        if "personality" in parameter2_profile:
+            profile["personality"] = parameter2_profile["personality"]
+
     return {
         key: profile.get(key)
         for key in [

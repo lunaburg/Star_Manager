@@ -127,7 +127,6 @@ def database_status(db_path: Path = DEFAULT_DB_PATH) -> dict:
     conn = sqlite3.connect(resolved)
     conn.row_factory = sqlite3.Row
     try:
-        init_db(conn)
         result["zipmod_count"] = int(
             conn.execute("SELECT COUNT(*) FROM zipmods WHERE scan_status != 'stale'").fetchone()[0]
         )
@@ -180,6 +179,7 @@ def database_status(db_path: Path = DEFAULT_DB_PATH) -> dict:
                           FROM mod_items mi
                           WHERE mi.zipmod_id = zipmods.id
                             AND mi.parse_status = 'ok'
+                            AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                             AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                       )
                   )
@@ -410,6 +410,7 @@ def list_zipmods(
                     FROM mod_items mi
                     WHERE mi.zipmod_id = zipmods.id
                       AND mi.parse_status = 'ok'
+                      AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                       AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                 )
                 """
@@ -431,6 +432,7 @@ def list_zipmods(
                         FROM mod_items mi
                         WHERE mi.zipmod_id = zipmods.id
                           AND mi.parse_status = 'ok'
+                          AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                           AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                     )
                 )
@@ -453,6 +455,7 @@ def list_zipmods(
                         FROM mod_items mi
                         WHERE mi.zipmod_id = zipmods.id
                           AND mi.parse_status = 'ok'
+                          AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                           AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                     )
                 )
@@ -503,6 +506,7 @@ def list_zipmods(
                     FROM mod_items mi
                     WHERE mi.zipmod_id = zipmods.id
                       AND mi.parse_status = 'ok'
+                      AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                       AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                 )
                 """
@@ -571,9 +575,10 @@ def list_zipmods(
                        , (
                            SELECT COUNT(*)
                            FROM mod_items mi
-                           WHERE mi.zipmod_id = zipmods.id
-                             AND mi.parse_status = 'ok'
-                             AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
+                             WHERE mi.zipmod_id = zipmods.id
+                               AND mi.parse_status = 'ok'
+                               AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
+                               AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                        ) AS thumbnail_issue_count
                 FROM zipmods
                 {where_sql}
@@ -875,7 +880,10 @@ def list_mod_items(
                 """
                 mod_items.parse_status = 'ok'
                 AND COALESCE(mod_items.unity3d_status, '') NOT IN ('missing', 'error')
-                AND mod_items.thumbnail_status IN ('ready', 'ok')
+                AND (
+                    mod_items.thumbnail_status IN ('ready', 'ok')
+                    OR TRIM(COALESCE(mod_items.kind, '')) IN ('500', '501')
+                )
                 """
             )
         elif status == "error":
@@ -887,6 +895,7 @@ def list_mod_items(
                 """
                 mod_items.parse_status = 'ok'
                 AND COALESCE(mod_items.unity3d_status, '') NOT IN ('missing', 'error')
+                AND TRIM(COALESCE(mod_items.kind, '')) NOT IN ('500', '501')
                 AND (mod_items.thumbnail_status = '' OR mod_items.thumbnail_status NOT IN ('ready', 'ok'))
                 """
             )
@@ -944,6 +953,7 @@ def list_mod_items(
                 "zipmod_guid": row["zipmod_guid"],
                 "item_id": row["item_id"],
                 "csv_path": row["csv_path"],
+                "main_ab": row["main_ab"],
             }
             for row in conn.execute(
                 """
@@ -951,6 +961,7 @@ def list_mod_items(
                        mod_items.thumbnail_cache_path, mod_items.unity3d_status,
                        mod_items.unity3d_error, mod_items.name, mod_items.kind,
                        mod_items.zipmod_author, mod_items.zipmod_guid, mod_items.item_id, mod_items.csv_path,
+                       mod_items.main_ab,
                        zipmods.name AS zipmod_name, zipmods.file_name AS zipmod_file_name
                 FROM mod_items
                 INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id

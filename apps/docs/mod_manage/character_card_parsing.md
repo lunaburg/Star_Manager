@@ -182,6 +182,24 @@ hsWish: [2, 5, 11]
 futanari: false
 ```
 
+HS2 may retain an older personality id in `Parameter.personality` while writing
+the personality selected in-game to `Parameter2.personality`. Production card
+detail parsing therefore treats `Parameter2.personality` as authoritative when
+present and falls back to `Parameter.personality` for cards without that field.
+
+Personality ids use the following game UI order (left-to-right, then
+top-to-bottom):
+
+```text
+0 酷妹      1 标准
+2 御姐      3 女友
+4 辣妹      5 弱妹
+6 人妻      7 女王
+8 腐女      9 正妹
+10 认真妹   11 软妹纸
+12 正太     13 病娇
+```
+
 Do not expose `hsWish` in UI as a named business field until it is verified against additional cards or upstream HS2 field definitions.
 
 Implementation note: the current exploratory scanner records individual MessagePack fragments. For production parsing, prefer decoding the complete `Parameter` map from the correct internal object offset so field names and values stay paired, instead of interpreting isolated key strings.

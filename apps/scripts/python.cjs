@@ -65,6 +65,8 @@ const pythonArgsByMode = {
     "pyexpat",
     "--hidden-import",
     "xml.parsers.expat",
+    "--add-data",
+    `${path.join(root, "backend", "star_manager", "data", "plugin_descriptions.json")}${path.delimiter}star_manager/data`,
     "--collect-all",
     "PIL",
     "--collect-all",

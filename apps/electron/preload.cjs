@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   selectImageFile: (title) => ipcRenderer.invoke("dialog:selectImageFile", title),
   promptText: (title, message, defaultValue) => ipcRenderer.invoke("dialog:promptText", title, message, defaultValue),
   showItemInFolder: (filePath) => ipcRenderer.invoke("shell:showItemInFolder", filePath),
+  openDirectory: (directoryPath) => ipcRenderer.invoke("shell:openDirectory", directoryPath),
   launchGameExecutable: (launchType, gameDir) => ipcRenderer.invoke("game:launchExecutable", launchType, gameDir),
   loadSettings: () => ipcRenderer.invoke("settings:load"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),

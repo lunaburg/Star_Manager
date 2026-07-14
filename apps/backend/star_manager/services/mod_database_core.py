@@ -291,6 +291,13 @@ def init_db(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS bepinex_plugin_cache (
+            game_dir TEXT PRIMARY KEY,
+            fingerprint TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            scanned_at TEXT NOT NULL
+        );
+
         """
     )
     ensure_column(conn, "zipmods", "file_size", "INTEGER NOT NULL DEFAULT 0")

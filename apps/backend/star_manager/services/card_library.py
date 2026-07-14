@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 from urllib.parse import quote
@@ -14,7 +15,7 @@ from star_manager.core.card_parser import (
 )
 from star_manager.core.runtime_paths import runtime_root
 from star_manager.core.zipmod_utils import is_hs2_game_dir
-from star_manager.services.mod_database_core import DEFAULT_DB_PATH, init_db
+from star_manager.services.mod_database_core import DEFAULT_DB_PATH
 
 
 CARD_ROOT_PARTS = ("UserData", "chara")
@@ -195,6 +196,32 @@ def get_character_card_detail(game_dir: str, relative_path: str) -> dict:
     }
 
 
+def set_character_card_as_navi(game_dir: str, relative_path: str, slot: str) -> dict:
+    """Replace one of the game's two navigation character card slots."""
+    normalized_slot = str(slot or "").strip().casefold()
+    if normalized_slot not in {"navi", "sitri"}:
+        return {"ok": False, "error": "看板娘槽位只能是 navi 或 sitri。"}
+
+    is_valid, root, error = validate_card_root(game_dir)
+    if not is_valid:
+        return {"ok": False, "error": error}
+
+    source = resolve_card_file(root, relative_path)
+    if not is_ais_card(str(source)):
+        return {"ok": False, "error": "未找到有效的人物卡。"}
+
+    target_dir = find_child_dir_case_insensitive(root, "navi") or root / "navi"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{normalized_slot}.png"
+    shutil.copy2(source, target)
+    return {
+        "ok": True,
+        "slot": normalized_slot,
+        "source_path": str(source),
+        "target_path": str(target),
+    }
+
+
 def resolve_card_dependencies(card_path: str, db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     records = extract_auto_resolver_records_from_card(card_path)
     resolved = []
@@ -203,14 +230,13 @@ def resolve_card_dependencies(card_path: str, db_path: Path = DEFAULT_DB_PATH) -
     if db_exists:
         conn = sqlite3.connect(db_path.resolve())
         conn.row_factory = sqlite3.Row
-        init_db(conn)
 
     try:
         for index, record in enumerate(records):
             mod_id = str(record.get("ModID") or "").strip()
-            category = str(record.get("CategoryNo") or "").strip()
-            slot = str(record.get("Slot") or "").strip()
-            local_slot = str(record.get("LocalSlot") or "").strip()
+            category = dependency_record_value(record.get("CategoryNo"))
+            slot = dependency_record_value(record.get("Slot"))
+            local_slot = dependency_record_value(record.get("LocalSlot"))
             item = find_dependency_item(conn, mod_id, category, slot, local_slot) if conn and mod_id else None
             zipmod = find_dependency_zipmod(conn, mod_id) if conn and mod_id else None
             resolved.append(
@@ -235,6 +261,13 @@ def resolve_card_dependencies(card_path: str, db_path: Path = DEFAULT_DB_PATH) -
     return resolved
 
 
+def dependency_record_value(value: object) -> str:
+    """Normalize resolver fields without discarding valid numeric zero values."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def find_dependency_item(
     conn: sqlite3.Connection | None,
     mod_id: str,
@@ -256,11 +289,18 @@ def find_dependency_item(
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
-              AND mod_items.zipmod_guid = ?
-              AND mod_items.item_id = ?
+              AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
+              AND (
+                  mod_items.item_id = ?
+                  OR (
+                      mod_items.item_id != '' AND mod_items.item_id NOT GLOB '*[^0-9]*'
+                      AND ? != '' AND ? NOT GLOB '*[^0-9]*'
+                      AND ltrim(mod_items.item_id, '0') = ltrim(?, '0')
+                  )
+              )
             LIMIT 1
             """,
-            (mod_id, item_id),
+            (mod_id, item_id, item_id, item_id, item_id),
         ).fetchone()
         if row:
             return dependency_item_payload(row, category)
@@ -274,7 +314,7 @@ def find_dependency_zipmod(conn: sqlite3.Connection | None, mod_id: str) -> dict
         """
         SELECT id, guid, name, author, version, file_name
         FROM zipmods
-        WHERE scan_status != 'stale' AND guid = ?
+        WHERE scan_status != 'stale' AND trim(guid) = trim(?) COLLATE NOCASE
         LIMIT 1
         """,
         (mod_id,),

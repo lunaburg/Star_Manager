@@ -161,12 +161,10 @@ const { ctx } = defineProps({
                       <div v-else-if="ctx.selectedCardProfileError" class="detail-inline-state">{{ ctx.selectedCardProfileError }}</div>
                       <template v-else>
                         <div class="kv mod-kv"><span>fullname</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.fullname) }}</strong></div>
-                        <div class="kv mod-kv"><span>sex</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.sex) }}</strong></div>
-                        <div class="kv mod-kv"><span>personality</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.personality) }}</strong></div>
-                        <div class="kv mod-kv"><span>birthMonth</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.birthMonth) }}</strong></div>
-                        <div class="kv mod-kv"><span>birthDay</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.birthDay) }}</strong></div>
+                        <div class="kv mod-kv"><span>sex</span><strong>{{ ctx.formatCharacterSex(ctx.selectedCardProfile?.sex) }}</strong></div>
+                        <div class="kv mod-kv"><span>personality</span><strong>{{ ctx.formatPersonality(ctx.selectedCardProfile?.personality) }}</strong></div>
+                        <div class="kv mod-kv"><span>birthday</span><strong>{{ ctx.selectedCardProfile?.birthMonth != null && ctx.selectedCardProfile?.birthDay != null ? `${ctx.selectedCardProfile.birthMonth}月${ctx.selectedCardProfile.birthDay}号` : '-' }}</strong></div>
                         <div class="kv mod-kv"><span>voiceRate</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.voiceRate) }}</strong></div>
-                        <div class="kv mod-kv"><span>hsWish</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.hsWish) }}</strong></div>
                         <div class="kv mod-kv"><span>futanari</span><strong>{{ ctx.formatProfileValue(ctx.selectedCardProfile?.futanari) }}</strong></div>
                       </template>
                     </div>
@@ -210,7 +208,28 @@ const { ctx } = defineProps({
                   <div v-else class="drawer-tab-panel active">
                     <div class="drawer-section mod-detail-section">
                       <span class="drawer-section-title">工具</span>
-                      <div class="detail-inline-state">暂无可用工具</div>
+                      <div class="card-navi-tool">
+                        <div>
+                          <strong>设为看板娘</strong>
+                        </div>
+                        <div class="card-navi-actions">
+                          <button class="primary" type="button" :disabled="Boolean(ctx.settingNaviSlot)" @click="ctx.setSelectedCardAsNavi('navi')">
+                            {{ ctx.settingNaviSlot === 'navi' ? '替换中...' : '替换 navi' }}
+                          </button>
+                          <button class="primary" type="button" :disabled="Boolean(ctx.settingNaviSlot)" @click="ctx.setSelectedCardAsNavi('sitri')">
+                            {{ ctx.settingNaviSlot === 'sitri' ? '替换中...' : '替换 sitri' }}
+                          </button>
+                        </div>
+                        <div
+                          v-if="ctx.naviActionNotice.message"
+                          class="card-navi-notice"
+                          :class="ctx.naviActionNotice.type"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          {{ ctx.naviActionNotice.message }}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </template>

@@ -3,6 +3,7 @@ import sqlite3
 import sys
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -265,6 +266,95 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
 
         self.assertEqual(duplicate_ids, [])
         self.assertEqual(reason, "A duplicate has a better completeness score")
+
+    def test_import_external_zipmods_copies_valid_candidates_under_game_mods(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            (game_dir / "mods").mkdir(parents=True)
+            (game_dir / "abdata").mkdir()
+            (game_dir / "UserData" / "chara").mkdir(parents=True)
+            (game_dir / "HoneySelect2.exe").write_bytes(b"")
+            source_dir = root / "external"
+            source_dir.mkdir()
+            external_zipmod = source_dir / "sample.zipmod"
+            card_png = source_dir / "card.png"
+            plain_png = source_dir / "plain.png"
+            card_png.write_bytes(b"fake card png")
+            plain_png.write_bytes(b"plain png")
+            external_unity3d = source_dir / "nested" / "abdata" / "chara" / "sample" / "main.unity3d"
+            external_unity3d.parent.mkdir(parents=True)
+            external_unity3d.write_bytes(b"external-bundle")
+
+            with zipfile.ZipFile(external_zipmod, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    (
+                        "<manifest>"
+                        "<guid>sample.guid</guid>"
+                        "<name>Sample</name>"
+                        "<version>1.0</version>"
+                        "<author>Tester</author>"
+                        "</manifest>"
+                    ),
+                )
+                zf.writestr(
+                    "abdata/list/characustom/sample.csv",
+                    (
+                        "210\r\n"
+                        "0\r\n"
+                        "list.bytes\r\n"
+                        "ID,Kind,Possess,Name,EN_US,MainManifest,MainAB,MainData,ThumbAB,ThumbTex\r\n"
+                        "1,0,1,Sample,0,abdata,chara/sample/main.unity3d,main,chara/sample/main.unity3d,thumb\r\n"
+                    ),
+                )
+
+            db_path = root / "star_manager.sqlite"
+            thumbnail_dir = root / "thumbs"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+            finally:
+                conn.close()
+
+            task = bridge.TaskState(id="test", task_type="import_external_zipmods")
+            reporter = bridge.build_reporter(task)
+
+            def fake_build_database(game, db, thumbs, progress_callback=None, mode="incremental"):
+                target = game / "mods" / "Imported" / "sample.zipmod"
+                self.assertTrue(target.is_file())
+                return {"primary_zipmods": 1, "mod_items": 0}
+
+            with patch.object(bridge, "build_database", side_effect=fake_build_database), patch.object(
+                bridge,
+                "is_ais_card",
+                side_effect=lambda value: Path(value).name == "card.png",
+            ):
+                result = bridge._import_external_zipmods(
+                    task,
+                    {
+                        "game_dir": str(game_dir),
+                        "source_dir": str(source_dir),
+                        "db_path": str(db_path),
+                        "thumbnail_dir": str(thumbnail_dir),
+                    },
+                    reporter,
+                )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["scanned_count"], 1)
+            self.assertEqual(result["png_scanned_count"], 2)
+            self.assertEqual(result["copied_count"], 1)
+            self.assertEqual(result["unity3d_repaired_count"], 1)
+            self.assertEqual(result["card_imported_count"], 1)
+            self.assertEqual(result["non_card_png_count"], 1)
+            self.assertTrue((game_dir / "mods" / "Imported" / "sample.zipmod").is_file())
+            with zipfile.ZipFile(game_dir / "mods" / "Imported" / "sample.zipmod") as zf:
+                self.assertEqual(zf.read("abdata/chara/sample/main.unity3d"), b"external-bundle")
+            self.assertFalse(external_unity3d.exists())
+            self.assertTrue((game_dir / "UserData" / "chara" / "female" / "card.png").is_file())
+            self.assertFalse((game_dir / "UserData" / "chara" / "female" / "plain.png").exists())
 
 
 if __name__ == "__main__":

@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import email.utils
+import base64
+import binascii
 import json
 import mimetypes
 import os
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from bridge import SUPPORTED_TASK_TYPES, create_health_payload, task_store
+from star_manager.services.achievements import (
+    achievement_status,
+    record_achievement_event,
+    reset_achievements,
+    update_achievement_preferences,
+)
 from star_manager.services.card_database import card_database_status
 from star_manager.services.card_library import (
     DEFAULT_CARD_PREVIEW_DIR,
@@ -21,12 +30,14 @@ from star_manager.services.card_library import (
     list_character_cards,
     normalize_card_preview,
     resolve_card_file,
+    set_character_card_as_navi,
 )
 from star_manager.services.mod_database import (
     DEFAULT_THUMBNAIL_DIR,
     analyze_duplicate_zipmods,
     assess_database_changes,
     database_status,
+    export_item_fbx,
     export_zipmod_item_thumbnail,
     import_zipmod_item_thumbnail,
     cleanup_duplicate_zipmods,
@@ -41,10 +52,14 @@ from star_manager.services.mod_database import (
     merge_duplicate_zipmod,
     repair_zipmod_unity3d_from_game,
     resolve_thumbnail_cache_path,
+    prepare_item_model_preview,
+    resolve_mannequin_model_file,
+    resolve_model_preview_file,
     update_zipmod_manifest,
     update_zipmod_manifest_author,
     zipmod_unity3d_diagnostics,
 )
+from star_manager.services.plugin_library import scan_bepinex_plugins
 
 
 def is_process_alive(pid: int) -> bool:
@@ -101,6 +116,26 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "database": database_status()})
             return
 
+        if route.startswith("/mods/models/"):
+            model_path = resolve_model_preview_file(route.removeprefix("/mods/models/"))
+            if model_path is None:
+                self.send_json({"ok": False, "error": "Model preview not found"}, status=404)
+            else:
+                self.send_file(str(model_path), model_path.parent.parent)
+            return
+
+        if route == "/mods/mannequin/body.fbx":
+            mannequin_path = resolve_mannequin_model_file()
+            if mannequin_path is None:
+                self.send_json({"ok": False, "error": "Mannequin model not found"}, status=404)
+            else:
+                self.send_file(str(mannequin_path), mannequin_path.parent)
+            return
+
+        if route == "/achievements":
+            self.send_json(achievement_status())
+            return
+
         if route == "/mods/database/changes":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
@@ -109,6 +144,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if route == "/cards/database":
             self.send_json({"ok": True, "database": card_database_status()})
+            return
+
+        if route == "/plugins":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            result = scan_bepinex_plugins(
+                game_dir,
+                search=(query.get("search") or [""])[0],
+                category=(query.get("category") or [""])[0],
+                offset=self.parse_int_query(query, "offset", 0),
+                limit=self.parse_int_query(query, "limit", 500),
+                refresh=(query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"},
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
         if route == "/mods/zipmods":
@@ -254,6 +303,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         body = self.read_json_body()
 
+        if route == "/library/cards/set-navi":
+            result = set_character_card_as_navi(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                str(body.get("slot") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/tasks":
             task_type = body.get("task_type", "")
             payload = body.get("payload") or {}
@@ -264,6 +322,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "task": task.to_dict()})
             return
 
+        if route == "/achievements/preferences":
+            self.send_json(update_achievement_preferences(body))
+            return
+
+        if route == "/achievements/reset":
+            self.send_json(reset_achievements())
+            return
+
         if route.startswith("/mods/zipmods/") and route.endswith("/repair-unity3d"):
             zipmod_id = self.parse_route_int(route, "/mods/zipmods/", "/repair-unity3d")
             if zipmod_id is None:
@@ -271,6 +337,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             reference_path = str(body.get("path") or "")
             result = repair_zipmod_unity3d_from_game(zipmod_id, reference_path)
+            if result.get("ok"):
+                repair_count = len(result.get("moved") or []) + len(result.get("copied") or [])
+                record_achievement_event("repairs", repair_count, f"unity3d:{zipmod_id}:{reference_path}")
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
@@ -280,7 +349,52 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
                 return
             image_path = str(body.get("image_path") or "")
-            result = import_zipmod_item_thumbnail(item_id, image_path)
+            image_data = str(body.get("image_data") or "")
+            temporary_path = None
+            if image_data:
+                try:
+                    prefix = "data:image/png;base64,"
+                    if not image_data.startswith(prefix) or len(image_data) > 3_000_000:
+                        raise ValueError("截图数据不是有效的 PNG")
+                    decoded = base64.b64decode(image_data[len(prefix) :], validate=True)
+                    if len(decoded) > 2_000_000 or not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+                        raise ValueError("截图数据不是有效的 PNG")
+                    upload_dir = DEFAULT_THUMBNAIL_DIR.parent / "thumbnail_uploads"
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    temporary_path = upload_dir / f"preview-{uuid.uuid4().hex}.png"
+                    temporary_path.write_bytes(decoded)
+                    image_path = str(temporary_path)
+                except (ValueError, binascii.Error, OSError) as error:
+                    self.send_json({"ok": False, "error": str(error)}, status=400)
+                    return
+            try:
+                result = import_zipmod_item_thumbnail(item_id, image_path)
+            finally:
+                if temporary_path is not None:
+                    try:
+                        temporary_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            if result.get("ok"):
+                record_achievement_event("repairs", 1, f"thumbnail:{item_id}:{result.get('image_path', '')}")
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route.startswith("/mods/items/") and route.endswith("/model-preview"):
+            item_id = self.parse_route_int(route, "/mods/items/", "/model-preview")
+            if item_id is None:
+                self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
+                return
+            result = prepare_item_model_preview(item_id)
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route.startswith("/mods/items/") and route.endswith("/export-fbx"):
+            item_id = self.parse_route_int(route, "/mods/items/", "/export-fbx")
+            if item_id is None:
+                self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
+                return
+            result = export_item_fbx(item_id, str(body.get("target_dir") or ""))
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
@@ -337,6 +451,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "duplicate_ids must be a list"}, status=400)
                 return
             result = cleanup_duplicate_zipmods(zipmod_id, duplicate_ids=duplicate_ids)
+            if result.get("ok"):
+                cleared = ",".join(str(value) for value in (result.get("cleared_ids") or []))
+                record_achievement_event(
+                    "duplicate_bytes",
+                    int(result.get("freed_bytes") or 0),
+                    f"duplicates:{result.get('guid', '')}:{cleared}",
+                )
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
@@ -421,6 +542,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if self.headers.get("if-none-match") == etag:
                 self.send_response(304)
                 self.send_header("etag", etag)
+                self.send_header("access-control-allow-origin", "*")
                 self.send_header("cache-control", "public, max-age=604800, immutable")
                 self.end_headers()
                 return
@@ -430,6 +552,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("content-type", content_type)
             self.send_header("content-length", str(len(body)))
+            self.send_header("access-control-allow-origin", "*")
             self.send_header("cache-control", "public, max-age=604800, immutable")
             self.send_header("etag", etag)
             self.send_header("last-modified", email.utils.formatdate(stat.st_mtime, usegmt=True))

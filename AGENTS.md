@@ -40,6 +40,7 @@ When gathering project context or learning how the app works, check the project 
 - `apps/docs/mod_manage/mod_database_design.md`: SQLite mod database schema, indexing flow, build rules, and current mod database API.
 - `apps/docs/mod_manage/mod_database_change_detection.md`: current implemented database change detection, incremental rebuild behavior, added/removed/modified zipmod handling, duplicate GUID handling, and character-card dependency relinking. Consult when updating rebuild detection, database association logic, or automatic startup rebuild behavior.
 - `apps/docs/mod_manage/mod_exception_catalog.md`: current mod exception types, trigger conditions, UI titles, and repair actions. Consult when updating diagnostics or adding new repair flows.
+- `apps/docs/assetstudio-helper.md`: C# AssetStudio helper location, JSON process boundary, initial commands, and integration rules. Consult when changing Unity resource browsing/export or helper packaging.
 
 When adding a new project document, update this `Project Documentation` section in the same change. Add the document path, a short content summary, and when an agent should consult it.
 

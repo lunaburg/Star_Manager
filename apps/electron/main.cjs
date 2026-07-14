@@ -6,7 +6,7 @@ const path = require("node:path");
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL || "";
 const isDev = Boolean(rendererUrl);
-const expectedBackendRevision = "item-thumbnail-tools-v2";
+const expectedBackendRevision = "external-zipmod-import-v1";
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
@@ -81,6 +81,16 @@ function runtimeDir() {
   return path.join(__dirname, "../backend/runtime");
 }
 
+function clearModelPreviewCache() {
+  const cacheDir = path.join(runtimeDir(), "model_previews");
+  try {
+    fs.rmSync(cacheDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    console.log(`[cache] cleared 3D model previews: ${cacheDir}`);
+  } catch (error) {
+    console.warn(`[cache] failed to clear 3D model previews at ${cacheDir}: ${error.message}`);
+  }
+}
+
 function createWindow() {
   const createWindowStart = process.hrtime.bigint();
   process.env.STAR_MANAGER_BACKEND_BASE_URL = `http://127.0.0.1:${backendPort}`;
@@ -90,6 +100,7 @@ function createWindow() {
     minWidth: 1180,
     minHeight: 780,
     title: "Star_Manager",
+    icon: path.join(__dirname, "../build-resources/app-icon.png"),
     backgroundColor: "#00000000",
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -526,6 +537,15 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => {
   app.isQuitting = true;
   shutdownBackend("app is quitting");
+  clearModelPreviewCache();
+});
+
+ipcMain.handle("shell:openDirectory", async (_event, directoryPath) => {
+  if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+    return { ok: false, error: "Directory not found" };
+  }
+  const error = await shell.openPath(directoryPath);
+  return error ? { ok: false, error } : { ok: true };
 });
 
 app.on("window-all-closed", () => {

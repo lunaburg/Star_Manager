@@ -1,4 +1,6 @@
 <script setup>
+import launcherArtwork from "../../assets/start-launcher-artwork.png";
+
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
 });
@@ -65,13 +67,7 @@ const { ctx } = defineProps({
               </section>
 
               <section class="panel launcher-card">
-                <h2 class="hero-title">HoneySelect2<br>Resource Desk</h2>
-                <p class="subtext">启动状态、版本信息与本地资源健康概览。</p>
-                <div class="status-strip">
-                  <div class="metric"><div class="metric-value">{{ ctx.formatStat(ctx.stats.cards) }}</div><div class="metric-label">角色卡</div></div>
-                  <div class="metric"><div class="metric-value">{{ ctx.formatStat(ctx.stats.zipmods) }}</div><div class="metric-label">zipmod</div></div>
-                  <div class="metric"><div class="metric-value">Copy</div><div class="metric-label">默认模式</div></div>
-                </div>
+                <img :src="launcherArtwork" alt="Star Manager 樱花街景插画">
               </section>
 
               <aside class="panel">
@@ -82,12 +78,22 @@ const { ctx } = defineProps({
                   </div>
                 </div>
                 <div class="quick-list">
-                  <button>游戏主目录</button>
-                  <button>UserData</button>
-                  <button>工作室场景</button>
-                  <button>截图</button>
-                  <button>人物卡（女）</button>
-                  <button>人物卡（男）</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('.')">游戏主目录</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData')">UserData</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\Studio\\scene')">工作室场景</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\cap')">截图</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\chara\\female')">人物卡（女）</button>
+                  <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\chara\\male')">人物卡（男）</button>
+                </div>
+                <div class="section achievement-preferences">
+                  <span class="label">本地成就</span>
+                  <button class="toggle-row" type="button" @click="ctx.updateAchievementPreference('enabled', !ctx.achievementPreferences.enabled)">
+                    <span>启用本地成就</span><span class="switch" :class="{ on: ctx.achievementPreferences.enabled }"></span>
+                  </button>
+                  <button class="toggle-row" type="button" :disabled="!ctx.achievementPreferences.enabled" @click="ctx.updateAchievementPreference('notifications', !ctx.achievementPreferences.notifications)">
+                    <span>显示解锁通知</span><span class="switch" :class="{ on: ctx.achievementPreferences.notifications }"></span>
+                  </button>
+                  <button class="danger-text-button" type="button" @click="ctx.resetAchievementHistory">重置成就记录</button>
                 </div>
               </aside>
             </div>

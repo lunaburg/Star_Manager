@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import importlib.util
 import sqlite3
+import shutil
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
@@ -14,9 +17,11 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from star_manager.core.card_parser import is_ais_card
 from star_manager.core.zipmod_utils import is_hs2_game_dir
+from star_manager.services.achievements import record_achievement_event
 from star_manager.services.card_database import build_card_database
-from star_manager.services.card_library import DEFAULT_CARD_PREVIEW_DIR
+from star_manager.services.card_library import DEFAULT_CARD_PREVIEW_DIR, get_card_root
 from star_manager.services.mod_database import (
     DEFAULT_DB_PATH,
     DEFAULT_THUMBNAIL_DIR,
@@ -32,6 +37,14 @@ from star_manager.services.mod_database import (
     list_mod_items,
     update_zipmod_manifest_author,
 )
+from star_manager.services.mod_database_assets import (
+    find_zip_member,
+    iter_zip_csv_items,
+    normalize_zip_path,
+    read_manifest,
+    unity3d_reference_paths,
+)
+from star_manager.services.mod_database_core import init_db
 from star_manager.services.mod_workflow import ExtractOptions, WorkflowReporter, extract_mods, search_ais_cards, sort_mods
 
 
@@ -97,8 +110,10 @@ SUPPORTED_TASK_TYPES = {
     "sort_mods",
     "build_card_database",
     "build_mod_database",
+    "import_external_zipmods",
     "bulk_export_zipmods",
     "bulk_organize_zipmods",
+    "organize_all_zipmods_by_author",
     "bulk_cleanup_duplicate_zipmods",
     "bulk_delete_zipmods",
     "bulk_repair_zipmods_unity3d",
@@ -113,10 +128,12 @@ SUPPORTED_API_ROUTES = {
     "/library/cards/image",
     "/library/cards/tree",
     "/cards/database",
+    "/plugins",
     "/mods/database",
     "/mods/items",
     "/mods/items/filters",
     "/mods/thumbnails",
+    "/mods/models/<file.glb>",
     "/mods/zipmods/<id>/diagnostics",
     "/mods/zipmods/<id>/repair-unity3d",
     "/mods/zipmods/<id>/update-author",
@@ -124,11 +141,101 @@ SUPPORTED_API_ROUTES = {
     "/mods/zipmods/<id>/delete",
     "/mods/items/<id>/import-thumbnail",
     "/mods/items/<id>/export-thumbnail",
+    "/mods/items/<id>/export-fbx",
+    "/mods/items/<id>/model-preview",
     "/mods/items/<id>/delete",
     "/mods/zipmods",
 }
 
-BACKEND_REVISION = "item-thumbnail-tools-v2"
+BACKEND_REVISION = "external-zipmod-import-v1"
+
+
+def _safe_author_directory(author: str) -> str:
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(author or "").strip())
+    name = name.rstrip(" .") or "未知作者"
+    if name.upper() in {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }:
+        name = f"_{name}"
+    return name[:120].rstrip(" .") or "未知作者"
+
+
+def organize_all_zipmods_by_author(game_dir: str, reporter: WorkflowReporter) -> dict:
+    game_root = Path(game_dir).expanduser().resolve()
+    if not is_hs2_game_dir(game_root):
+        raise ValueError("请先选择有效的 HS2 游戏目录。")
+
+    mods_root = (game_root / "mods").resolve()
+    zipmod_paths = sorted(
+        (path.resolve() for path in mods_root.rglob("*.zipmod") if path.is_file()),
+        key=lambda path: str(path).lower(),
+    )
+    moved: list[dict] = []
+    unchanged: list[dict] = []
+    failures: list[dict] = []
+    removed_empty_dirs: list[str] = []
+    total = max(len(zipmod_paths), 1)
+
+    reporter.title("按作者整理全部模组")
+    reporter.message(f"找到 {len(zipmod_paths)} 个 zipmod，开始按作者整理")
+    for index, source in enumerate(zipmod_paths, start=1):
+        try:
+            manifest = read_manifest(source)
+            author_dir = _safe_author_directory(manifest.author)
+            target_dir = (mods_root / author_dir).resolve()
+            if target_dir != mods_root and mods_root not in target_dir.parents:
+                raise ValueError("作者目录超出 mods 范围")
+            target = target_dir / source.name
+            if source.parent == target_dir:
+                unchanged.append({"source": str(source), "author": manifest.author or "未知作者"})
+            else:
+                counter = 1
+                while target.exists():
+                    target = target_dir / f"{source.stem}_{counter}{source.suffix}"
+                    counter += 1
+                target_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(target))
+                moved.append({
+                    "source": str(source),
+                    "target": str(target),
+                    "author": manifest.author or "未知作者",
+                })
+        except (OSError, ValueError) as exc:
+            failures.append({"path": str(source), "error": str(exc)})
+        finally:
+            reporter.progress(index * 70, total)
+            if should_report_step(index, total):
+                reporter.message(f"已处理 {index}/{len(zipmod_paths)} 个 zipmod")
+
+    for directory in sorted(
+        (path for path in mods_root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        try:
+            directory.rmdir()
+            removed_empty_dirs.append(str(directory))
+        except OSError:
+            pass
+    if removed_empty_dirs:
+        reporter.message(f"已删除 {len(removed_empty_dirs)} 个空目录")
+
+    return {
+        "ok": len(failures) == 0,
+        "game_dir": str(game_root),
+        "mods_dir": str(mods_root),
+        "scanned_count": len(zipmod_paths),
+        "moved_count": len(moved),
+        "unchanged_count": len(unchanged),
+        "removed_empty_dir_count": len(removed_empty_dirs),
+        "failure_count": len(failures),
+        "moved": moved,
+        "unchanged": unchanged,
+        "removed_empty_dirs": removed_empty_dirs,
+        "failures": failures,
+    }
 
 
 def create_health_payload() -> dict:
@@ -393,6 +500,352 @@ def choose_safe_duplicate_cleanup_action(analysis: dict) -> tuple[str, list[int]
     return "promote", cleanup_ids, promote_duplicate_id, ""
 
 
+def _unique_import_target(import_dir: Path, source_path: Path, used_targets: set[Path]) -> Path:
+    stem = source_path.stem
+    suffix = source_path.suffix or ".zipmod"
+    target = import_dir / source_path.name
+    index = 1
+    while target.exists() or target in used_targets:
+        target = import_dir / f"{stem} ({index}){suffix}"
+        index += 1
+    used_targets.add(target)
+    return target
+
+
+def _duplicate_ids_for_guid(guid: str, db_path: Path) -> list[int]:
+    resolved = db_path.resolve()
+    conn = sqlite3.connect(resolved)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        return [
+            int(row["id"])
+            for row in conn.execute(
+                "SELECT id FROM duplicate_zipmods WHERE guid = ? ORDER BY id",
+                (guid,),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _primary_id_for_guid(guid: str, db_path: Path) -> int | None:
+    resolved = db_path.resolve()
+    conn = sqlite3.connect(resolved)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        row = conn.execute("SELECT id FROM zipmods WHERE guid = ?", (guid,)).fetchone()
+        return int(row["id"]) if row else None
+    finally:
+        conn.close()
+
+
+def _iter_external_abdata_roots(source_dir: Path) -> list[Path]:
+    roots: list[Path] = []
+    if source_dir.name.casefold() == "abdata" and source_dir.is_dir():
+        roots.append(source_dir)
+    roots.extend(path for path in source_dir.rglob("abdata") if path.is_dir())
+
+    unique: dict[str, Path] = {}
+    for root in roots:
+        try:
+            unique[str(root.resolve()).casefold()] = root.resolve()
+        except OSError:
+            continue
+    return sorted(unique.values(), key=lambda item: str(item).casefold())
+
+
+def _external_unity3d_index(source_dir: Path) -> dict[str, Path]:
+    index: dict[str, Path] = {}
+    for abdata_root in _iter_external_abdata_roots(source_dir):
+        for path in sorted(abdata_root.rglob("*.unity3d")):
+            if not path.is_file():
+                continue
+            try:
+                relative = path.resolve().relative_to(abdata_root.resolve()).as_posix()
+            except ValueError:
+                continue
+            key = normalize_zip_path(f"abdata/{relative}").casefold()
+            index.setdefault(key, path.resolve())
+    return index
+
+
+def _repair_imported_zipmod_unity3d(zipmod_path: Path, source_dir: Path) -> dict:
+    source_index = _external_unity3d_index(source_dir)
+    if not source_index:
+        return {"repaired_count": 0, "moved": [], "missing": [], "source_count": 0}
+
+    referenced: list[str] = []
+    for item in iter_zip_csv_items(zipmod_path):
+        if item.parse_status != "ok":
+            continue
+        referenced.extend(unity3d_reference_paths(item))
+
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for reference in referenced:
+        normalized = normalize_zip_path(reference)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key not in seen:
+            seen.add(key)
+            wanted.append(normalized)
+
+    if not wanted:
+        return {"repaired_count": 0, "moved": [], "missing": [], "source_count": len(source_index)}
+
+    missing: list[str] = []
+    moves: list[tuple[str, Path]] = []
+    with zipfile.ZipFile(zipmod_path, "r") as zf:
+        for arcname in wanted:
+            if find_zip_member(zf, arcname) is not None:
+                continue
+            source_path = source_index.get(arcname.casefold())
+            if source_path is None or not source_path.is_file():
+                missing.append(arcname)
+                continue
+            moves.append((arcname, source_path))
+
+    moved: list[dict] = []
+    if moves:
+        with zipfile.ZipFile(zipmod_path, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+            for arcname, source_path in moves:
+                zf.write(source_path, arcname)
+                moved.append({"path": arcname, "source_path": str(source_path)})
+        for _arcname, source_path in moves:
+            try:
+                source_path.unlink()
+            except OSError:
+                pass
+
+    return {
+        "repaired_count": len(moved),
+        "moved": moved,
+        "missing": missing,
+        "source_count": len(source_index),
+    }
+
+
+def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowReporter) -> dict:
+    game_dir = Path(str(payload.get("game_dir") or "")).resolve()
+    source_dir = Path(str(payload.get("source_dir") or payload.get("input_dir") or "")).resolve()
+    db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH)).resolve()
+    thumbnail_dir = Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR)).resolve()
+    preview_dir = Path(str(payload.get("preview_dir") or DEFAULT_CARD_PREVIEW_DIR)).resolve()
+
+    if not is_hs2_game_dir(str(game_dir)):
+        raise ValueError("Please select a valid HS2 game directory before importing zipmods.")
+    if not source_dir.is_dir():
+        raise ValueError(f"Import folder not found: {source_dir}")
+    zipmod_paths = sorted(path for path in source_dir.rglob("*.zipmod") if path.is_file())
+    png_paths = sorted(path for path in source_dir.rglob("*.png") if path.is_file())
+    if zipmod_paths and not db_path.exists():
+        raise ValueError("Mod database not found. Rebuild the database before importing external zipmods.")
+
+    task.title = "Import external zipmods"
+    reporter.message(f"Scanning external folder: {source_dir}")
+    card_import_dir = get_card_root(str(game_dir)) / "female"
+    card_import_dir.mkdir(parents=True, exist_ok=True)
+    import_dir = game_dir / "mods" / "Imported"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    used_targets: set[Path] = set()
+    used_card_targets: set[Path] = set()
+    copied: list[dict] = []
+    unity3d_repaired: list[dict] = []
+    imported_cards: list[dict] = []
+    non_card_pngs: list[str] = []
+    invalid: list[dict] = []
+    failures: list[dict] = []
+
+    card_total = max(len(png_paths), 1)
+    for index, source_path in enumerate(png_paths, start=1):
+        try:
+            if not is_ais_card(str(source_path)):
+                non_card_pngs.append(str(source_path))
+                set_step_progress(task, index, card_total, start=2, end=14)
+                continue
+            target_path = _unique_import_target(card_import_dir, source_path, used_card_targets)
+            shutil.copy2(source_path, target_path)
+            imported_cards.append({"source_path": str(source_path), "target_path": str(target_path)})
+        except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+            failures.append({"source_path": str(source_path), "error": str(exc)})
+        set_step_progress(task, index, card_total, start=2, end=14)
+        if should_report_step(index, card_total):
+            reporter.message(f"Imported {len(imported_cards)}/{len(png_paths)} AIS card PNG files")
+
+    total = max(len(zipmod_paths), 1)
+    for index, source_path in enumerate(zipmod_paths, start=1):
+        manifest = read_manifest(source_path)
+        if manifest.scan_status != "ok" or not manifest.guid:
+            invalid.append(
+                {
+                    "source_path": str(source_path),
+                    "status": manifest.scan_status,
+                    "error": manifest.scan_error,
+                }
+            )
+            set_step_progress(task, index, total, start=14, end=25)
+            continue
+        try:
+            target_path = _unique_import_target(import_dir, source_path, used_targets)
+            shutil.copy2(source_path, target_path)
+            repair_result = _repair_imported_zipmod_unity3d(target_path, source_dir)
+            copied_item = {"guid": manifest.guid, "source_path": str(source_path), "target_path": str(target_path)}
+            if repair_result.get("repaired_count"):
+                copied_item["unity3d_repair"] = repair_result
+                unity3d_repaired.append({"guid": manifest.guid, "zipmod_path": str(target_path), **repair_result})
+            copied.append(copied_item)
+        except OSError as exc:
+            failures.append({"source_path": str(source_path), "error": str(exc)})
+        set_step_progress(task, index, total, start=14, end=25)
+        if should_report_step(index, total):
+            reporter.message(f"Copied {index}/{total} external zipmods into game mods")
+
+    if copied:
+        reporter.message("Rebuilding database after import copy")
+        def report_database_progress(value: int, message: str) -> None:
+            reporter.progress(25 + value * 0.45, 100)
+            reporter.message(message)
+
+        build_database(game_dir, db_path, thumbnail_dir, report_database_progress, mode="incremental")
+
+    imported: list[dict] = []
+    promoted: list[dict] = []
+    skipped: list[dict] = []
+    cleaned: list[dict] = []
+    processed_guids: set[str] = set()
+    copied_by_guid: dict[str, list[dict]] = {}
+    for item in copied:
+        copied_by_guid.setdefault(str(item.get("guid") or ""), []).append(item)
+    guid_total = max(len({item["guid"] for item in copied}), 1)
+    for index, guid in enumerate(sorted({item["guid"] for item in copied}), start=1):
+        processed_guids.add(guid)
+        zipmod_id = _primary_id_for_guid(guid, db_path)
+        if not zipmod_id:
+            skipped.append({"guid": guid, "reason": "Imported zipmod was not indexed"})
+            set_step_progress(task, index, guid_total, start=70, end=94)
+            continue
+
+        duplicate_ids = _duplicate_ids_for_guid(guid, db_path)
+        if not duplicate_ids:
+            for copied_item in copied_by_guid.get(guid, []):
+                imported.append(
+                    {
+                        "guid": guid,
+                        "zipmod_id": zipmod_id,
+                        "file_name": Path(str(copied_item.get("target_path") or "")).name,
+                        "source_path": copied_item.get("source_path", ""),
+                        "target_path": copied_item.get("target_path", ""),
+                    }
+                )
+            set_step_progress(task, index, guid_total, start=70, end=94)
+            continue
+
+        analysis = analyze_duplicate_zipmods(zipmod_id, db_path=db_path, thumbnail_dir=thumbnail_dir)
+        if not analysis.get("ok"):
+            skipped.append({"guid": guid, "id": zipmod_id, "reason": str(analysis.get("error") or "Duplicate analysis failed")})
+            set_step_progress(task, index, guid_total, start=70, end=94)
+            continue
+
+        action, cleanup_ids, promote_duplicate_id, reason = choose_safe_duplicate_cleanup_action(analysis)
+        if action == "promote":
+            result = delete_primary_and_promote_duplicate(zipmod_id, promote_duplicate_id, db_path=db_path, thumbnail_dir=thumbnail_dir)
+            if result.get("ok"):
+                if cleanup_ids:
+                    cleanup_result = cleanup_duplicate_zipmods(
+                        int(result.get("promoted_zipmod_id") or zipmod_id),
+                        duplicate_ids=cleanup_ids,
+                        db_path=db_path,
+                    )
+                    result = {**result, "cleanup_after_promote": cleanup_result}
+                promoted.append(
+                    {
+                        "guid": guid,
+                        "id": zipmod_id,
+                        "file_name": Path(str(result.get("promoted_file_path") or "")).name,
+                        **result,
+                    }
+                )
+            else:
+                failures.append({"guid": guid, "id": zipmod_id, "error": str(result.get("error") or "Promote imported zipmod failed")})
+        elif action == "cleanup":
+            result = cleanup_duplicate_zipmods(zipmod_id, duplicate_ids=cleanup_ids, db_path=db_path)
+            if result.get("ok"):
+                analysis_keep = (analysis.get("recommendation") or {}).get("keep") or {}
+                cleaned.append(
+                    {
+                        "guid": guid,
+                        "id": zipmod_id,
+                        "kept_file_name": analysis_keep.get("file_name", ""),
+                        "kept_file_path": analysis_keep.get("file_path", ""),
+                        **result,
+                    }
+                )
+                for copied_item in copied_by_guid.get(guid, []):
+                    copied_target = str(copied_item.get("target_path") or "")
+                    if copied_target and copied_target not in set(result.get("removed") or []):
+                        imported.append(
+                            {
+                                "guid": guid,
+                                "zipmod_id": zipmod_id,
+                                "file_name": Path(copied_target).name,
+                                "source_path": copied_item.get("source_path", ""),
+                                "target_path": copied_target,
+                            }
+                        )
+            else:
+                failures.append({"guid": guid, "id": zipmod_id, "error": str(result.get("error") or "Duplicate cleanup failed")})
+        else:
+            skipped.append({"guid": guid, "id": zipmod_id, "reason": reason or "No safe duplicate action"})
+
+        set_step_progress(task, index, guid_total, start=70, end=94)
+        if should_report_step(index, guid_total):
+            reporter.message(f"Compared {index}/{guid_total} imported GUIDs; promoted {len(promoted)}, skipped {len(skipped)}")
+
+    reporter.progress(96, 100)
+    if copied or imported_cards:
+        reporter.message("Refreshing database after duplicate decisions")
+        if copied:
+            build_database(game_dir, db_path, thumbnail_dir, lambda _value, message: reporter.message(message), mode="incremental")
+        reporter.message("Refreshing character card dependencies after import")
+        build_card_database(game_dir, db_path, preview_dir, lambda _value, message: reporter.message(message), mode="incremental")
+
+    return {
+        "ok": True,
+        "source_dir": str(source_dir),
+        "target_dir": str(import_dir),
+        "card_target_dir": str(card_import_dir),
+        "scanned_count": len(zipmod_paths),
+        "png_scanned_count": len(png_paths),
+        "copied_count": len(copied),
+        "unity3d_repaired_count": sum(int(item.get("repaired_count") or 0) for item in unity3d_repaired),
+        "card_imported_count": len(imported_cards),
+        "non_card_png_count": len(non_card_pngs),
+        "invalid_count": len(invalid),
+        "imported_count": len(imported),
+        "promoted_count": len(promoted),
+        "cleaned_count": len(cleaned),
+        "skipped_count": len(skipped),
+        "failure_count": len(failures),
+        "invalid": invalid,
+        "unity3d_repaired": unity3d_repaired,
+        "imported_cards": imported_cards,
+        "non_card_pngs": non_card_pngs,
+        "imported": imported,
+        "promoted": promoted,
+        "cleaned": cleaned,
+        "skipped": skipped,
+        "failures": failures,
+        "message": (
+            f"Imported {len(imported)} zipmod GUID(s), promoted {len(promoted)} better duplicate(s), "
+            f"repaired {sum(int(item.get('repaired_count') or 0) for item in unity3d_repaired)} unity3d file(s), "
+            f"copied {len(imported_cards)} card(s), skipped {len(skipped)}, invalid {len(invalid)}, failed {len(failures)}"
+        ),
+    }
+
+
 def run_task(task: TaskState, payload: dict) -> None:
     reporter = build_reporter(task)
     task.status = "running"
@@ -513,6 +966,11 @@ def run_task(task: TaskState, payload: dict) -> None:
             }
             reporter.message(f"Character card database created: {db_path.resolve()}")
             reporter.message(f"Card preview cache: {preview_dir.resolve()}")
+        elif task.task_type == "import_external_zipmods":
+            task.data = _import_external_zipmods(task, payload, reporter)
+            reporter.message(str(task.data.get("message") or "External zipmod import completed"))
+            if not task.data.get("ok"):
+                raise ValueError("External zipmod import failed")
         elif task.task_type == "bulk_export_zipmods":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             mode = str(payload.get("mode") or "copy")
@@ -556,6 +1014,29 @@ def run_task(task: TaskState, payload: dict) -> None:
             if not result.get("ok"):
                 raise ValueError(str(result.get("error") or "Organize failed"))
             task.data = result
+        elif task.task_type == "organize_all_zipmods_by_author":
+            game_dir = str(payload.get("game_dir") or "")
+            result = organize_all_zipmods_by_author(game_dir, reporter)
+            reporter.message("文件整理完成，正在刷新本地索引")
+
+            def report_database_progress(value: int, message: str) -> None:
+                reporter.progress(70 + value * 0.3, 100)
+                reporter.message(message)
+
+            stats = build_database(
+                Path(game_dir),
+                Path(str(payload.get("db_path") or DEFAULT_DB_PATH)),
+                Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR)),
+                report_database_progress,
+                mode="incremental",
+            )
+            result["stats"] = stats
+            task.data = result
+            reporter.message(
+                f"整理完成：移动 {result['moved_count']} 个，"
+                f"无需移动 {result['unchanged_count']} 个，"
+                f"删除空目录 {result['removed_empty_dir_count']} 个，失败 {result['failure_count']} 个"
+            )
         elif task.task_type == "bulk_repair_zipmods_unity3d":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             task.title = "Repair selected zipmods"
@@ -578,6 +1059,11 @@ def run_task(task: TaskState, payload: dict) -> None:
             reporter.message(str(task.data.get("message") or "unity3d repair completed"))
             if not task.data["ok"]:
                 raise ValueError("unity3d repair failed")
+            repair_count = sum(
+                len(item.get("moved") or []) + len(item.get("copied") or [])
+                for item in (task.data.get("repaired") or [])
+            )
+            record_achievement_event("repairs", repair_count, f"task:{task.id}:unity3d")
         elif task.task_type == "bulk_cleanup_duplicate_zipmods":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             task.title = "Smart cleanup duplicate zipmods"
@@ -648,6 +1134,12 @@ def run_task(task: TaskState, payload: dict) -> None:
             }
             if not task.data["ok"]:
                 raise ValueError("Duplicate cleanup failed")
+            freed_bytes = sum(int(item.get("freed_bytes") or 0) for item in cleaned)
+            freed_bytes += sum(
+                int((item.get("cleanup_after_promote") or {}).get("freed_bytes") or 0)
+                for item in promoted
+            )
+            record_achievement_event("duplicate_bytes", freed_bytes, f"task:{task.id}:duplicates")
         elif task.task_type == "bulk_delete_zipmods":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             task.title = "Delete selected zipmods"
@@ -751,6 +1243,7 @@ def run_task(task: TaskState, payload: dict) -> None:
             }
             if not task.data["ok"]:
                 raise ValueError("Thumbnail apply failed")
+            record_achievement_event("repairs", len(imported), f"task:{task.id}:thumbnails")
         elif task.task_type == "bulk_delete_error_items":
             targets, total_count = resolve_filtered_error_item_targets(payload)
             if total_count > 1000:

@@ -18,6 +18,9 @@ const selectedKindOption = computed(() => (
   ctx.itemKindOptions.find((option) => option.value === ctx.itemFilters.kind)
   || ctx.itemKindOptions[0]
 ));
+const selectedItemIsClothing = computed(() => (
+  String(ctx.selectedItem?.kind || "").includes("\u670d\u9970")
+));
 
 function kindOptionParts(option) {
   if (!option?.value) return { category: "all", gender: "", text: option?.label || "\u5168\u90e8 Kind" };
@@ -538,7 +541,12 @@ function modStatusTone(status) {
               </div>
             </div>
             <div v-else class="drawer-tab-panel active">
-              <ModelPreview ref="modelPreview" :item-id="ctx.selectedItem.id" @ready-change="modelPreviewReady = $event" />
+              <ModelPreview
+                ref="modelPreview"
+                :item-id="ctx.selectedItem.id"
+                :auto-load="selectedItemIsClothing"
+                @ready-change="modelPreviewReady = $event"
+              />
               <div class="drawer-section mod-detail-section item-tools-section">
                 <div class="item-tools-heading">
                   <div>

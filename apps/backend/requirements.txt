@@ -6,3 +6,4 @@ astc-encoder-py
 fmod-toolkit
 archspec
 dnfile>=0.15.1
+lz4>=4.3.3

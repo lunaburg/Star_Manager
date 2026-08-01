@@ -20,12 +20,18 @@
 `mod_items` 是物品级明细索引。它通过 `zipmod_id` 关联到 `zipmods.id`，并冗余保存 `zipmod_guid` 和 `zipmod_author`，便于筛选和诊断。当前唯一约束是：
 
 ```text
-UNIQUE(zipmod_guid, item_id)
+UNIQUE(zipmod_guid, kind, item_id)
 ```
 
 `duplicate_zipmods` 记录同一 `guid` 下未被选为主记录的重复 zipmod 文件。重复文件不进入 `zipmods` 主索引，也不解析 `mod_items`。
 
 `character_cards` 和 `character_card_dependencies` 用于角色卡索引。依赖表通过可空外键关联到 `zipmods.id` 和 `mod_items.id`：
+
+`character_cards` 同时缓存人物卡浏览器需要的姓名、收藏、评分和标签。`tags_json` 保存 `star.manager.cardmetadata.tags` 的 JSON 数组，`favorite` 与 `rating` 保存对应展示值；`metadata_file_size` 和 `metadata_modified_ns` 是这组浏览缓存的文件签名。目录切换时，签名未变化的人物卡直接使用 SQLite，不再打开 PNG；新增、外部修改或旧数据库中尚未补齐签名的卡只读取一次，并同步刷新浏览缓存。
+
+浏览缓存签名与用于依赖变动检测的 `modified_at` 分开维护。目录浏览补齐姓名、收藏、评分和标签时不得覆盖 `modified_at`，否则外部修改过依赖数据的人物卡会被误判为无需重建。应用内明确知道只修改了收藏、评分、标签、人物参数或封面的单卡操作，可以同时同步两组签名，因为这些操作会保留依赖区块。
+
+标签弹窗从 SQLite 汇总全库标签，不在每次打开时重新解析所有 PNG。旧数据库首次读取标签时执行一次性回填并写入 `character_card_tags_cache_root` 元数据；人物卡数据库重建和单卡标签修改都会同步该缓存。
 
 ```text
 character_card_dependencies.zipmod_id -> zipmods.id ON DELETE SET NULL
@@ -89,7 +95,7 @@ modified_at
 6. 每个 `guid` 选择一个主 zipmod。
 7. 只对变化过的主 zipmod 重新解析 CSV、缩略图和 Unity3D 状态。
 8. 将主记录 upsert 到 `zipmods`。
-9. 对重新解析过的 zipmod，删除旧 `mod_items` 并插入新 `mod_items`。
+9. 对重新解析过的 zipmod，按 `zipmod_guid + kind + item_id` 更新现有 `mod_items`，尽量保留物品主键和角色卡依赖；本轮已不存在的物品才删除，新增物品才插入。
 10. 回填 `zipmods.item_count` 和 zipmod 级 Unity3D 汇总状态。
 11. 删除本轮未见到的旧 zipmod 记录。
 12. 更新 `database_metadata.last_built_at`。
@@ -163,13 +169,13 @@ scan_error = 'moved by export'
 
 ## item 替换与汇总
 
-重新解析某个 zipmod 时，`replace_mod_items()` 会先执行：
+重新解析某个 zipmod 时，`replace_mod_items()` 会按以下稳定键匹配已有物品：
 
 ```text
-DELETE FROM mod_items WHERE zipmod_id = ?
+zipmod_guid + kind + item_id
 ```
 
-然后插入本次解析出的物品行。插入完成后回填 `zipmods`：
+匹配到的物品原地更新并保留 `mod_items.id`，不存在的旧物品才删除，新增物品才插入。这样角色卡依赖不会因为普通重解析而被外键置空。写入完成后回填 `zipmods`：
 
 - `item_count`
 - `unity3d_status`
@@ -181,14 +187,32 @@ DELETE FROM mod_items WHERE zipmod_id = ?
 zipmod 级 Unity3D 状态优先级是：
 
 ```text
-missing > in_game > in_mod > empty
+error > missing > in_game > in_mod > empty
 ```
 
-因此只要有任意 item 缺失 Unity3D，整个 zipmod 就会标记为 `missing`；没有缺失但依赖游戏目录 `abdata` 时标记为 `in_game`；全部资源都在 zipmod 内时标记为 `in_mod`。
+因此只要有任意 item 的 Unity3D 资源不可用，整个 zipmod 就会标记为 `error`；没有 error 但有缺失引用时标记为 `missing`；没有缺失但依赖游戏目录 `abdata` 时标记为 `in_game`；全部资源都在 zipmod 内时标记为 `in_mod`。
 
 ## 角色卡依赖关联更新
 
-`build_mod_database` 任务会在模组数据库完成后继续调用 `build_card_database()`，因此角色卡依赖会基于最新的 `zipmods` 和 `mod_items` 重新解析。
+`build_mod_database` 任务会在模组数据库完成后继续调用 `build_card_database()`。增量模式不会再重新关联所有角色卡，而是由模组阶段返回本轮受影响的 GUID，再只更新引用这些 GUID 的缓存卡片。
+
+受影响 GUID 包括：
+
+- 新增或内容发生变化、需要替换 `mod_items` 的主 zipmod；
+- 已删除的旧 GUID；
+- 同一路径的 manifest GUID 发生变化时的旧 GUID 和新 GUID；
+- 重复 GUID 的主文件发生切换；
+- 因缩略图或 Unity3D 重试而重新生成物品记录的 GUID。
+
+角色卡增量处理规则：
+
+1. 新增或修改的角色卡仍读取 PNG，并重新提取全部原始依赖。
+2. 未变化、但引用了受影响 GUID 的卡片，从已有依赖行读取原始键并重新关联。
+3. 未变化且不引用受影响 GUID 的卡片保留原依赖行，不执行删除和重新插入。
+4. 独立调用 `build_card_database` 且没有提供 GUID 影响集合时，为兼容旧调用仍重新关联所有缓存卡。
+5. `mode = full` 时重新解析全部卡片。
+
+关联阶段一次加载有效 `zipmods` 和 `mod_items`，建立大小写无关、去除首尾空白并兼容数字前导零的内存索引。所有卡片共享该索引，避免为每条依赖重复执行 SQLite 查询。
 
 角色卡依赖解析时：
 
@@ -204,7 +228,7 @@ missing > in_game > in_mod > empty
 - `missing_item`：找到 zipmod，但找不到对应 item。
 - `missing_zipmod`：找不到对应 zipmod。
 
-当 zipmod 或 item 记录被删除时，已有依赖表的外键会被置空。但正常建库流程会在后续角色卡重建阶段删除旧依赖并重新插入新依赖。
+当 zipmod 或 item 记录被删除时，已有依赖表的外键会被置空。模组阶段必须把对应 GUID 放入影响集合，使后续角色卡阶段更新 `zipmod_id`、`mod_item_id`、`resolve_status` 和卡片缺失依赖统计。
 
 ## 前端行为
 
@@ -221,6 +245,8 @@ payload.mode = incremental
 ```
 
 如果返回 `manual_rebuild`，前端只提示用户手动重建数据库，避免大规模扫描或写库在启动时自动发生。
+
+如果用户在应用内只修改人物卡收藏、评分、标签、人物参数或封面，单卡接口会同步 SQLite 浏览缓存的文件签名，不需要再提交完整 `build_mod_database`；移动、删除和外部程序修改文件则仍通过下一次变动检测发现。插件页面使用独立的 BepInEx 文件指纹缓存，不参与 zipmod/角色卡自动重建阈值。
 
 ## 维护注意事项
 

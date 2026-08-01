@@ -3,9 +3,12 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import StartView from "./components/views/StartView.vue";
 import OverviewView from "./components/views/OverviewView.vue";
 import CharactersView from "./components/views/CharactersView.vue";
+import CardCoverCropper from "./components/CardCoverCropper.vue";
 import ModsView from "./components/views/ModsView.vue";
+import WorkbenchView from "./components/views/WorkbenchView.vue";
 import PluginsView from "./components/views/PluginsView.vue";
 import LogsView from "./components/views/LogsView.vue";
+import SettingsView from "./components/views/SettingsView.vue";
 import appIcon from "../build-resources/app-icon.png";
 import brandLogo from "../build-resources/brand-logo.png";
 
@@ -15,6 +18,7 @@ const views = [
   { id: "characters", icon: "CH", label: "角色管理" },
   { id: "mods", icon: "MD", label: "模组管理" },
   { id: "plugins", icon: "PL", label: "插件管理" },
+  { id: "workbench", icon: "WB", label: "工作台" },
   { id: "logs", icon: "LG", label: "运行日志" }
 ];
 
@@ -33,6 +37,14 @@ const taskHint = ref("请选择有效目录后点击重建");
 const extractMode = ref("copy");
 const isBusy = ref(false);
 const activeAction = ref("");
+const settingsNotice = reactive({ type: "", message: "" });
+const blenderExecutablePath = ref("");
+
+const managerSettings = reactive({
+  startupView: "start",
+  favoriteCardTheme: "gold",
+  checkDatabaseChangesOnStartup: true
+});
 
 const paths = reactive({
   gameDir: "",
@@ -81,6 +93,7 @@ const cardFolders = ref([]);
 const cardTree = ref(null);
 const expandedCardFolders = ref(new Set());
 const cards = ref([]);
+const cardDependencyFilter = ref("all");
 const selectedCardFolder = ref("");
 const selectedCardDetailPath = ref("");
 const characterSideMode = ref("tree");
@@ -90,7 +103,83 @@ const selectedCardDependencies = ref([]);
 const selectedCardProfileLoading = ref(false);
 const settingNaviSlot = ref("");
 const naviActionNotice = reactive({ type: "", message: "" });
+const exportingCoordinateCard = ref(false);
+const coordinateExportDir = ref("");
+const coordinateExportPrompt = reactive({ open: false, draft: "", error: "" });
+const coordinateExportNotice = reactive({ type: "", message: "", path: "" });
+const exportingPortablePackage = ref(false);
+const portablePackageDir = ref("");
+const portablePackageCompress = ref(true);
+const PORTABLE_PACKAGE_TYPES = [
+  { key: "face", label: "面部与五官", marker: "脸", description: "脸型、眉眼、妆容与面部细节" },
+  { key: "hair", label: "发型", marker: "发", description: "前发、后发、侧发与扩展发型" },
+  { key: "body", label: "身体与肌肤", marker: "身", description: "身体肌肤、细节、晒痕与人体彩绘" },
+  { key: "clothes", label: "服装", marker: "衣", description: "上衣、下装、内衣、袜子与鞋子" },
+  { key: "accessory", label: "配饰", marker: "饰", description: "头部、脸部、身体与四肢配饰" }
+];
+const portablePackageTypes = ref(PORTABLE_PACKAGE_TYPES.map((type) => type.key));
+const portablePackagePrompt = reactive({ open: false, draftDir: "", compress: true, types: [], error: "" });
+const portablePackageNotice = reactive({ type: "", message: "", path: "" });
+const replacingCardCover = ref(false);
+const cardCoverNotice = reactive({ type: "", message: "" });
+const cardCoverCrop = reactive({
+  open: false,
+  imagePath: "",
+  imageData: "",
+  imageName: ""
+});
+const favoritingCardPath = ref("");
+const cardFavoriteNotice = reactive({ type: "", message: "" });
+const ratingCardPath = ref("");
+const cardRatingNotice = reactive({ type: "", message: "" });
+const cardTagNotice = reactive({ type: "", message: "" });
+const cardTagPrompt = reactive({
+  open: false,
+  busy: false,
+  loading: false,
+  error: "",
+  draft: "",
+  selected: [],
+  available: []
+});
+const bulkCardTagPrompt = reactive({
+  open: false,
+  busy: false,
+  loading: false,
+  error: "",
+  draft: "",
+  selected: [],
+  available: []
+});
+const cardTagCatalog = reactive({ gameDir: "", loaded: false, tags: [] });
+const cardTagFilter = reactive({
+  open: false,
+  loading: false,
+  error: "",
+  search: "",
+  available: [],
+  scope: "directory",
+  resultsLoading: false,
+  resultsError: "",
+  libraryTag: "",
+  libraryCards: []
+});
+let cardTagLibraryRequestId = 0;
 const selectedCardProfileError = ref("");
+const cardProfileEditor = reactive({
+  editing: false,
+  busy: false,
+  error: "",
+  message: "",
+  values: {
+    fullname: "",
+    personality: 0,
+    birthMonth: 1,
+    birthDay: 1,
+    voiceRate: 0.5,
+    futanari: false
+  }
+});
 const cardLibrary = reactive({
   checked: false,
   loading: false,
@@ -119,6 +208,7 @@ const PERSONALITY_LABELS = [
   "\u6b63\u592a",
   "\u75c5\u5a07"
 ];
+const personalityOptions = PERSONALITY_LABELS.map((label, value) => ({ label, value }));
 const ITEM_KIND_LABELS = {
   8: "男/身体/人体彩绘",
   110: "男/面部/眼睛",
@@ -317,6 +407,22 @@ const cardDependencyExportPrompt = reactive({
   confirmMove: false,
   error: ""
 });
+const cardDeletePrompt = reactive({
+  open: false,
+  busy: false,
+  error: ""
+});
+const cardMovePrompt = reactive({
+  open: false,
+  busy: false,
+  folderBusy: false,
+  error: "",
+  sourceGender: "",
+  targetPath: "",
+  expanded: new Set(),
+  editMode: "",
+  nameDraft: ""
+});
 const deleteItemPrompt = reactive({
   open: false,
   item: null,
@@ -393,13 +499,71 @@ const modDatabase = reactive({
 });
 
 const selectedCount = computed(() => selectedCards.value.size);
-const selectedCardDetail = computed(() => {
-  return cards.value.find((card) => card.absolutePath === selectedCardDetailPath.value) || null;
+const cardTagOptions = computed(() => {
+  const tags = new Map();
+  for (const card of cards.value) {
+    for (const tag of card.tags || []) tags.set(String(tag).toLocaleLowerCase(), String(tag));
+  }
+  if (cardDependencyFilter.value.startsWith("tag:")) {
+    const activeTag = cardDependencyFilter.value.slice(4);
+    if (activeTag) tags.set(activeTag.toLocaleLowerCase(), activeTag);
+  }
+  return [...tags.values()].sort((left, right) => left.localeCompare(right, "zh-CN"));
 });
-const visibleCardPaths = computed(() => cards.value.map((card) => card.absolutePath).filter(Boolean));
+const cardTagFilterSuggestions = computed(() => {
+  const query = cardTagFilter.search.trim().toLocaleLowerCase();
+  const matchedTags = uniqueCardTags([
+    ...(cardTagCatalog.gameDir === paths.gameDir ? cardTagCatalog.tags : []),
+    ...cardTagOptions.value
+  ])
+    .filter((tag) => !query || tag.toLocaleLowerCase().includes(query))
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  return query ? matchedTags.slice(0, 12) : matchedTags;
+});
+const visibleCards = computed(() => {
+  if (cardDependencyFilter.value === "missing") {
+    return cards.value.filter((card) => Number(card.missingCount || 0) > 0);
+  }
+  if (cardDependencyFilter.value === "favorite") {
+    return cards.value.filter((card) => card.favorite);
+  }
+  if (cardDependencyFilter.value.startsWith("tag:")) {
+    const targetTag = cardDependencyFilter.value.slice(4).toLocaleLowerCase();
+    const sourceCards = cardTagFilter.scope === "library" ? cardTagFilter.libraryCards : cards.value;
+    return sourceCards.filter((card) => (card.tags || []).some(
+      (tag) => String(tag).toLocaleLowerCase() === targetTag
+    ));
+  }
+  return cards.value;
+});
+const cardBrowserCountText = computed(() => {
+  if (cardDependencyFilter.value === "missing") {
+    return `依赖缺失 ${visibleCards.value.length} / ${cards.value.length}`;
+  }
+  if (cardDependencyFilter.value === "favorite") {
+    return `已收藏 ${visibleCards.value.length} / ${cards.value.length}`;
+  }
+  if (cardDependencyFilter.value.startsWith("tag:")) {
+    if (cardTagFilter.scope === "library") {
+      return `全库标签“${cardDependencyFilter.value.slice(4)}” ${visibleCards.value.length}`;
+    }
+    return `标签“${cardDependencyFilter.value.slice(4)}” ${visibleCards.value.length} / ${cards.value.length}`;
+  }
+  return `已加载 ${cards.value.length}`;
+});
+const selectedCardDetail = computed(() => {
+  return visibleCards.value.find((card) => card.absolutePath === selectedCardDetailPath.value) || null;
+});
+const visibleCardPaths = computed(() => visibleCards.value.map((card) => card.absolutePath).filter(Boolean));
 const visibleSelectedCardCount = computed(() => visibleCardPaths.value.filter((path) => selectedCards.value.has(path)).length);
 const allVisibleCardsSelected = computed(() => visibleCardPaths.value.length > 0 && visibleSelectedCardCount.value === visibleCardPaths.value.length);
 const someVisibleCardsSelected = computed(() => visibleSelectedCardCount.value > 0 && !allVisibleCardsSelected.value);
+const cardMoveAvailable = computed(() => (
+  cardTagFilter.scope !== "library"
+  && /^(female|male)(\/|$)/i.test(selectedCardFolder.value)
+));
+const cardMoveDestinationReady = computed(() => Boolean(cardMovePrompt.targetPath) && cardMovePrompt.targetPath !== selectedCardFolder.value);
+const cardMoveFolderRows = computed(() => flattenManagedMoveTree(cardTree.value));
 const gameDirDisplay = computed(() => paths.gameDir || "D:\\HoneySelect2");
 const backendReady = computed(() => backendStatus.value === "ready");
 function formatProgressPercent(value) {
@@ -479,6 +643,19 @@ const importResultGroups = computed(() => {
       }))
     },
     {
+      key: "coordinates",
+      label: "服装卡",
+      count: Number(data.coordinate_imported_count || 0),
+      tone: "ok",
+      empty: "没有识别到可导入的服装卡。",
+      items: (data.imported_coordinates || []).map((item) => ({
+        title: item.target_path?.split(/[\\/]/).pop() || "服装卡",
+        meta: "AIS/HS2 Clothes PNG",
+        detail: item.target_path || "",
+        note: item.source_path ? `来源：${item.source_path}` : "已复制到 UserData/coordinate/female/imoprted"
+      }))
+    },
+    {
       key: "unity3d",
       label: "补入 Unity3D",
       count: Number(data.unity3d_repaired_count || 0),
@@ -534,7 +711,7 @@ const importResultGroups = computed(() => {
         note: item.error || "处理失败"
       }))
     }
-  ];
+  ].filter((group) => group.count > 0);
 });
 const zipmodAuthorOptions = computed(() => ["", ...zipmodAuthors.value, UNKNOWN_AUTHOR_LABEL]);
 const filteredZipmodAuthorOptions = computed(() => {
@@ -734,6 +911,24 @@ function backendAssetUrl(path) {
   return `${baseUrl}${path}`;
 }
 
+function mapCharacterCardRows(rows) {
+  return (rows || []).map((card) => ({
+    id: card.id,
+    name: card.name || card.filename,
+    filename: card.filename,
+    absolutePath: card.absolute_path,
+    relativePath: card.relative_path,
+    thumbnailUrl: backendAssetUrl(card.thumbnail_url),
+    coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    dependencyCount: card.dependency_count == null ? null : Number(card.dependency_count),
+    missingCount: card.missing_count == null ? null : Number(card.missing_count),
+    favorite: Boolean(card.favorite),
+    rating: Math.min(5, Math.max(0, Number(card.rating) || 0)),
+    tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : []
+  }));
+}
+
 async function refreshCharacterCardsAfterDatabaseBuild() {
   if (!backendReady.value || !paths.gameDir || !cardLibrary.checked) return;
   await loadCardTree();
@@ -836,6 +1031,10 @@ function databaseTaskHint(task) {
 }
 
 function taskSummary(task) {
+  if (task.task_type === "export_character_dependency_package") {
+    const archive = task.data?.compressed ? "压缩包" : "文件夹";
+    return `已生成${archive}，包含 ${task.data?.exported_zipmod_count ?? 0} 个 zipmod`;
+  }
   if (task.task_type === "extract_mods") {
     const count = task.data?.card_paths?.length ?? task.data?.card_count ?? selectedCount.value;
     return `${count} 张人物卡 · ${String(extractMode.value || "copy").toUpperCase()} 模式`;
@@ -860,8 +1059,14 @@ function taskSummary(task) {
   if (task.task_type === "bulk_cleanup_duplicate_zipmods") {
     return `已清理 ${task.data?.cleaned_duplicate_count ?? 0} 个重复文件，跳过 ${task.data?.skipped_count ?? 0} 个`;
   }
+  if (task.task_type === "bulk_delete_character_cards") {
+    return `已删除 ${task.data?.deleted_count ?? 0} 张，失败 ${task.data?.failure_count ?? 0} 张`;
+  }
+  if (task.task_type === "bulk_add_character_card_tags") {
+    return `已添加 ${task.data?.updated_count ?? 0} 张，失败 ${task.data?.failure_count ?? 0} 张`;
+  }
   if (task.task_type === "import_external_zipmods") {
-    return `导入 ${task.data?.imported_count ?? 0} 个，替换 ${task.data?.promoted_count ?? 0} 个，补入 ${task.data?.unity3d_repaired_count ?? 0} 个 unity3d，角色卡 ${task.data?.card_imported_count ?? 0} 张`;
+    return `导入 ${task.data?.imported_count ?? 0} 个，替换 ${task.data?.promoted_count ?? 0} 个，补入 ${task.data?.unity3d_repaired_count ?? 0} 个 unity3d，角色卡 ${task.data?.card_imported_count ?? 0} 张，服装卡 ${task.data?.coordinate_imported_count ?? 0} 张`;
   }
   if (task.task_type === "bulk_update_zipmod_authors") {
     return `已更新 ${task.data?.updated_count ?? 0} 个`;
@@ -1030,6 +1235,64 @@ function refreshVisibleCardFolders() {
   cardFolders.value = flattenCardTree(cardTree.value);
 }
 
+function collectExpandableCardFolderPaths(node, output = new Set()) {
+  if (!node) return output;
+  const children = Array.isArray(node.children) ? node.children : [];
+  if (node.has_children || children.length) output.add(node.relative_path || "");
+  for (const child of children) collectExpandableCardFolderPaths(child, output);
+  return output;
+}
+
+function flattenManagedMoveTree(node, depth = 0) {
+  if (!node) return [];
+  const relativePath = String(node.relative_path || "");
+  const children = Array.isArray(node.children) ? node.children : [];
+  const isManagedRoot = /^(female|male)$/i.test(relativePath);
+  const isManagedChild = /^(female|male)\//i.test(relativePath);
+  if (!relativePath) {
+    return children.flatMap((child) => flattenManagedMoveTree(child, 0));
+  }
+  if (!isManagedRoot && !isManagedChild) return [];
+  if (cardMovePrompt.sourceGender && !new RegExp(`^${cardMovePrompt.sourceGender}(\\/|$)`, "i").test(relativePath)) {
+    return [];
+  }
+  const managedChildren = children.filter((child) => /^(female|male)(\/|$)/i.test(String(child.relative_path || "")));
+  const row = {
+    id: node.id,
+    name: node.name,
+    relativePath,
+    count: Number(node.count || 0),
+    depth,
+    hasChildren: managedChildren.length > 0,
+    expanded: cardMovePrompt.expanded.has(relativePath),
+    isGenderRoot: isManagedRoot
+  };
+  if (!row.expanded) return [row];
+  return [row, ...managedChildren.flatMap((child) => flattenManagedMoveTree(child, depth + 1))];
+}
+
+function collectManagedFolderPaths(node, output = [], gender = "") {
+  if (!node) return output;
+  const relativePath = String(node.relative_path || "");
+  const managed = /^(female|male)(\/|$)/i.test(relativePath);
+  if (managed && (!gender || new RegExp(`^${gender}(\\/|$)`, "i").test(relativePath))) output.push(relativePath);
+  for (const child of node.children || []) collectManagedFolderPaths(child, output, gender);
+  return output;
+}
+
+async function refreshCardTreeStructure() {
+  const result = await window.desktopApi?.backendRequest?.(
+    `/library/cards/tree?game_dir=${encodeQuery(paths.gameDir)}`
+  );
+  if (!result?.ok || !result.is_valid_game_dir) {
+    throw new Error(result?.error || "人物卡目录读取失败");
+  }
+  cardTree.value = result.tree || null;
+  expandedCardFolders.value = collectExpandableCardFolderPaths(cardTree.value);
+  stats.cards = Number(result.total || 0);
+  refreshVisibleCardFolders();
+}
+
 function resetCardTree() {
   cardTree.value = null;
   cardFolders.value = [];
@@ -1089,10 +1352,13 @@ async function loadCardTree() {
     }
 
     cardTree.value = result.tree || null;
-    expandedCardFolders.value = new Set([""]);
+    expandedCardFolders.value = collectExpandableCardFolderPaths(cardTree.value);
     refreshVisibleCardFolders();
     stats.cards = Number(result.total || 0);
     await selectCardFolder(selectedCardFolder.value);
+    if (cardTagFilter.scope === "library" && cardDependencyFilter.value.startsWith("tag:")) {
+      await loadLibraryCardsByTag(cardDependencyFilter.value.slice(4));
+    }
     log(
       `[Startup] loadCardTree completed in ${formatDurationMs(
         performance.now() - startedAt
@@ -1148,15 +1414,7 @@ async function selectCardFolder(relativePath = "") {
     }
 
     cardLibrary.validGameDir = true;
-    cards.value = (result.cards || []).map((card) => ({
-      id: card.id,
-      name: card.name || card.filename,
-      filename: card.filename,
-      absolutePath: card.absolute_path,
-      relativePath: card.relative_path,
-      thumbnailUrl: backendAssetUrl(card.thumbnail_url),
-      modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : ""
-    }));
+    cards.value = mapCharacterCardRows(result.cards);
     log(
       `[Startup] selectCardFolder(${selectedCardFolder.value || "/"}) completed in ${formatDurationMs(
         performance.now() - startedAt
@@ -1503,19 +1761,21 @@ async function locateSourceMod(row = selectedItem.value) {
   modFilters.author = sourceAuthor && sourceAuthor !== "-" ? sourceAuthor : UNKNOWN_AUTHOR_LABEL;
   modFilters.status = "";
   dependencyUsageFilter.value = "";
-  await ensureModDatabaseLoaded({ force: true });
-
-  let target = modRows.value.find((mod) => Number(mod.id) === zipmodId);
-  while (!target && modDatabase.hasMore) {
-    await loadModRows();
-    target = modRows.value.find((mod) => Number(mod.id) === zipmodId);
-  }
+  const query = new URLSearchParams({ zipmod_id: String(zipmodId), limit: "1" });
+  const result = await window.desktopApi?.backendRequest?.(`/mods/zipmods?${query.toString()}`);
+  const targetRow = result?.data?.rows?.[0];
+  const target = targetRow ? mapZipmodRow(targetRow) : null;
 
   if (!target) {
     log(`[Items Error] 未找到来源模组：${row.sourceMod || zipmodId}`);
     return;
   }
-
+  modRows.value = [target];
+  modDatabase.checked = true;
+  modDatabase.exists = true;
+  modDatabase.offset = 1;
+  modDatabase.total = 1;
+  modDatabase.hasMore = false;
   selectMod(target);
 }
 
@@ -2104,12 +2364,27 @@ async function repairThumbnailItem(item = selectedItem.value, options = {}) {
       if (modTab.value === "诊断") await loadSelectedModDiagnostics();
       if (modTab.value === "物品") await loadSelectedModItems();
     }
-    await refreshModDatabaseList();
-    await loadAchievements({ notify: true });
-    if (libraryMode.value === "items") {
-      const updatedItem = itemRows.value.find((row) => row.id === itemId);
-      if (updatedItem) selectedItem.value = updatedItem;
+    // Importing one thumbnail updates one zipmod and reindexes only that
+    // zipmod's item rows. Update the visible row/detail in place instead of
+    // resetting and reloading the entire item database list.
+    const updatedRow = result.item ? mapModItemRow(result.item) : null;
+    if (updatedRow && libraryMode.value === "items") {
+      const rowIndex = itemRows.value.findIndex((row) => (
+        Number(row.id) === Number(item.id)
+        || (
+          String(row.raw?.item_id || "") === String(item.raw?.item_id || "")
+          && Number(row.raw?.zipmod_id || row.zipmodId) === Number(item.raw?.zipmod_id || item.zipmodId)
+          && String(row.raw?.csv_path || "") === String(item.raw?.csv_path || "")
+        )
+      ));
+      if (rowIndex >= 0) {
+        itemRows.value[rowIndex] = updatedRow;
+      }
+      if (selectedItem.value && (rowIndex >= 0 || Number(selectedItem.value.id) === Number(item.id))) {
+        selectedItem.value = updatedRow;
+      }
     }
+    await loadAchievements({ notify: true });
     return true;
   } catch (error) {
     if (selectedMod.value) selectedModDiagnosticsError.value = error.message;
@@ -2851,9 +3126,61 @@ async function ensureItemDatabaseLoaded({ force = false } = {}) {
   }
 }
 
+function selectedItemRefreshSnapshot() {
+  const row = selectedItem.value;
+  if (!row?.id) return null;
+  return {
+    id: Number(row.id),
+    itemId: String(row.raw?.item_id || ""),
+    zipmodId: Number(row.raw?.zipmod_id || row.zipmodId || 0),
+    zipmodGuid: String(row.raw?.zipmod_guid || ""),
+    csvPath: String(row.raw?.csv_path || "")
+  };
+}
+
+function itemMatchesRefreshSnapshot(row, snapshot) {
+  if (!row || !snapshot) return false;
+  const raw = row.raw || {};
+  const stableMatch = Boolean(
+    snapshot.itemId
+    && snapshot.zipmodId
+    && String(raw.item_id || "") === snapshot.itemId
+    && Number(raw.zipmod_id || row.zipmodId || 0) === snapshot.zipmodId
+    && (!snapshot.csvPath || String(raw.csv_path || "") === snapshot.csvPath)
+  ) || Boolean(
+    snapshot.itemId
+    && snapshot.zipmodGuid
+    && String(raw.item_id || "") === snapshot.itemId
+    && String(raw.zipmod_guid || "") === snapshot.zipmodGuid
+  );
+  if (snapshot.itemId && (snapshot.zipmodId || snapshot.zipmodGuid)) {
+    return stableMatch;
+  }
+  return Boolean(snapshot.id && Number(row.id) === snapshot.id);
+}
+
+async function restoreSelectedItemAfterRefresh(snapshot) {
+  if (!snapshot || libraryMode.value !== "items") return;
+  // A user click that happens while the list is loading takes precedence.
+  if (selectedItem.value) return;
+
+  let target = itemRows.value.find((row) => itemMatchesRefreshSnapshot(row, snapshot));
+  while (!target && itemDatabase.hasMore) {
+    const loadedCount = itemRows.value.length;
+    await loadItemRows();
+    if (itemRows.value.length === loadedCount) break;
+    target = itemRows.value.find((row) => itemMatchesRefreshSnapshot(row, snapshot));
+  }
+  if (target && !selectedItem.value) {
+    selectedItem.value = target;
+  }
+}
+
 async function refreshModDatabaseList() {
   if (libraryMode.value === "items") {
+    const snapshot = selectedItemRefreshSnapshot();
     await ensureItemDatabaseLoaded({ force: true });
+    await restoreSelectedItemAfterRefresh(snapshot);
     return;
   }
   await ensureModDatabaseLoaded({ force: true });
@@ -2887,11 +3214,20 @@ async function saveAppSettings() {
   const result = await window.desktopApi?.saveSettings?.({
     gameDir: paths.gameDir,
     inputDir: paths.inputDir,
-    outputDir: paths.outputDir
+    outputDir: paths.outputDir,
+    coordinateExportDir: coordinateExportDir.value,
+    portablePackageDir: portablePackageDir.value,
+    blenderExecutablePath: blenderExecutablePath.value,
+    portablePackageCompress: portablePackageCompress.value,
+    portablePackageTypes: portablePackageTypes.value,
+    startupView: managerSettings.startupView,
+    favoriteCardTheme: managerSettings.favoriteCardTheme,
+    checkDatabaseChangesOnStartup: managerSettings.checkDatabaseChangesOnStartup
   });
   if (!result?.ok) {
     log(`[Settings Error] ${result?.error || "settings save failed"}`);
   }
+  return result;
 }
 
 async function loadAppSettings() {
@@ -2901,17 +3237,87 @@ async function loadAppSettings() {
       log(`[Settings Error] ${result?.error || "settings load failed"}`);
       return;
     }
+    coordinateExportDir.value = result.settings?.coordinateExportDir || "";
+    portablePackageDir.value = result.settings?.portablePackageDir || "";
+    blenderExecutablePath.value = result.settings?.blenderExecutablePath || "";
+    portablePackageCompress.value = result.settings?.portablePackageCompress !== false;
+    portablePackageTypes.value = Array.isArray(result.settings?.portablePackageTypes)
+      ? PORTABLE_PACKAGE_TYPES.map((type) => type.key).filter((type) => result.settings.portablePackageTypes.includes(type))
+      : PORTABLE_PACKAGE_TYPES.map((type) => type.key);
+    managerSettings.startupView = result.settings?.startupView || "start";
+    managerSettings.favoriteCardTheme = ["gold", "neon", "sakura", "obsidian"].includes(result.settings?.favoriteCardTheme)
+      ? result.settings.favoriteCardTheme
+      : "gold";
+    managerSettings.checkDatabaseChangesOnStartup = result.settings?.checkDatabaseChangesOnStartup !== false;
+    paths.outputDir = result.settings?.outputDir || "";
+    activeView.value = managerSettings.startupView;
     const gameDir = result.settings?.gameDir || "";
     if (!gameDir) return;
     applyGameDir(gameDir);
-    paths.outputDir = result.settings?.outputDir || "";
     log(`[Settings] 已读取游戏目录：${gameDir}`);
     await measureStep("check_game_dir task", () => submitTask("check_game_dir"));
     await measureStep("loadCardTree after settings", () => loadCardTree());
-    await measureStep("checkStartupDatabaseChanges", () => checkStartupDatabaseChanges());
+    if (managerSettings.checkDatabaseChangesOnStartup) {
+      await measureStep("checkStartupDatabaseChanges", () => checkStartupDatabaseChanges());
+    }
   } catch (error) {
     log(`[Settings Error] ${error.message}`);
   }
+}
+
+async function updateManagerSetting(key, value) {
+  if (!(key in managerSettings)) return;
+  managerSettings[key] = value;
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "设置已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function updatePortablePackageCompress(value) {
+  portablePackageCompress.value = Boolean(value);
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "设置已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function selectSettingsDirectory(kind) {
+  const config = {
+    output: { title: "选择默认导出目录", apply: (value) => { paths.outputDir = value; } },
+    coordinate: { title: "选择服装卡导出目录", apply: (value) => { coordinateExportDir.value = value; } },
+    portable: { title: "选择便携依赖包导出目录", apply: (value) => { portablePackageDir.value = value; } }
+  }[kind];
+  if (!config) return;
+  const selected = await window.desktopApi?.selectDirectory?.(config.title);
+  if (!selected) return;
+  config.apply(selected);
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "默认目录已更新" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function saveDefaultOutputDirectory(directoryPath) {
+  paths.outputDir = String(directoryPath || "");
+  const result = await saveAppSettings();
+  if (!result?.ok) {
+    log(`[Settings Error] ${result?.error || "default output directory save failed"}`);
+  }
+  return result;
+}
+
+async function selectBlenderExecutable() {
+  const selected = await window.desktopApi?.selectBlenderExecutable?.("选择 Blender 可执行文件（blender.exe）");
+  if (!selected) return;
+  blenderExecutablePath.value = selected;
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "Blender 路径已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function clearBlenderExecutable() {
+  blenderExecutablePath.value = "";
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "Blender 路径已清除" : `保存失败：${result?.error || "未知错误"}`;
 }
 
 async function selectGameDir() {
@@ -3059,7 +3465,7 @@ function applyTask(task) {
       modDatabase.checked = false;
       itemDatabase.checked = false;
       if (libraryMode.value === "items") {
-        ensureItemDatabaseLoaded({ force: true });
+        void refreshModDatabaseList();
       } else {
         ensureModDatabaseLoaded({ force: true });
       }
@@ -3075,6 +3481,7 @@ function applyTask(task) {
       "bulk_cleanup_duplicate_zipmods",
       "import_external_zipmods",
       "bulk_delete_zipmods",
+      "bulk_delete_character_cards",
       "bulk_update_zipmod_authors",
       "bulk_apply_item_thumbnail",
       "bulk_delete_error_items"
@@ -3082,7 +3489,8 @@ function applyTask(task) {
   ) {
     const failureCount = Number(task.data?.failure_count || 0);
     if (failureCount > 0 && task.status === "completed") {
-      (task.data?.failures || []).slice(0, 5).forEach((failure) => log(`[Mods Error] #${failure.id}: ${failure.error}`));
+      const scope = task.task_type === "bulk_delete_character_cards" ? "Cards" : "Mods";
+      (task.data?.failures || []).slice(0, 5).forEach((failure) => log(`[${scope} Error] #${failure.id}: ${failure.error}`));
     }
     if (task.task_type === "bulk_cleanup_duplicate_zipmods" && task.status === "completed") {
       (task.data?.skipped || []).slice(0, 5).forEach((item) => {
@@ -3294,6 +3702,187 @@ function exitCardBulkMode() {
   selectedCards.value = new Set();
 }
 
+function openCardDeletePrompt() {
+  if (selectedCount.value === 0 || cardDeletePrompt.busy) return;
+  cardDeletePrompt.error = "";
+  cardDeletePrompt.open = true;
+}
+
+function selectedCardRelativePaths() {
+  const selectedPaths = new Set(selectedCards.value);
+  return visibleCards.value
+    .filter((card) => selectedPaths.has(card.absolutePath))
+    .map((card) => card.relativePath)
+    .filter(Boolean);
+}
+
+function openCardMovePrompt() {
+  if (selectedCount.value === 0 || cardMovePrompt.busy) return;
+  const sourceGender = selectedCardFolder.value.split("/")[0]?.toLowerCase() || "";
+  if (!/^(female|male)$/.test(sourceGender)) return;
+  cardMovePrompt.sourceGender = sourceGender;
+  const managedPaths = collectManagedFolderPaths(cardTree.value, [], sourceGender);
+  const currentPath = new RegExp(`^${sourceGender}(\\/|$)`, "i").test(selectedCardFolder.value)
+    ? selectedCardFolder.value
+    : "";
+  cardMovePrompt.targetPath = currentPath || managedPaths[0] || "";
+  cardMovePrompt.expanded = new Set(managedPaths);
+  cardMovePrompt.editMode = "";
+  cardMovePrompt.nameDraft = "";
+  cardMovePrompt.error = "";
+  cardMovePrompt.open = true;
+}
+
+function closeCardMovePrompt() {
+  if (cardMovePrompt.busy || cardMovePrompt.folderBusy) return;
+  cardMovePrompt.open = false;
+  cardMovePrompt.editMode = "";
+  cardMovePrompt.error = "";
+}
+
+function toggleCardMoveFolder(folder) {
+  if (!folder?.hasChildren) return;
+  const next = new Set(cardMovePrompt.expanded);
+  if (next.has(folder.relativePath)) next.delete(folder.relativePath);
+  else next.add(folder.relativePath);
+  cardMovePrompt.expanded = next;
+}
+
+function selectCardMoveFolder(folder) {
+  cardMovePrompt.targetPath = folder.relativePath;
+  cardMovePrompt.editMode = "";
+  cardMovePrompt.nameDraft = "";
+  cardMovePrompt.error = "";
+}
+
+function beginCardMoveFolderEdit(mode) {
+  if (!cardMovePrompt.targetPath || cardMovePrompt.folderBusy) return;
+  if (mode === "rename" && /^(female|male)$/i.test(cardMovePrompt.targetPath)) {
+    cardMovePrompt.error = "female 和 male 根目录不能重命名。";
+    return;
+  }
+  cardMovePrompt.editMode = mode;
+  cardMovePrompt.nameDraft = mode === "rename"
+    ? cardMovePrompt.targetPath.split("/").pop() || ""
+    : "";
+  cardMovePrompt.error = "";
+}
+
+function replaceFolderPathPrefix(path, oldPrefix, newPrefix) {
+  if (path === oldPrefix) return newPrefix;
+  return path.startsWith(`${oldPrefix}/`) ? `${newPrefix}${path.slice(oldPrefix.length)}` : path;
+}
+
+async function submitCardMoveFolderEdit() {
+  const name = String(cardMovePrompt.nameDraft || "").trim();
+  if (!name) {
+    cardMovePrompt.error = "请输入目录名称。";
+    return;
+  }
+  cardMovePrompt.folderBusy = true;
+  cardMovePrompt.error = "";
+  try {
+    const isRename = cardMovePrompt.editMode === "rename";
+    const oldPath = cardMovePrompt.targetPath;
+    const result = await window.desktopApi?.backendRequest?.(
+      isRename ? "/library/cards/folders/rename" : "/library/cards/folders/create",
+      {
+        method: "POST",
+        body: isRename
+          ? { game_dir: paths.gameDir, path: oldPath, name }
+          : { game_dir: paths.gameDir, parent_path: oldPath, name }
+      }
+    );
+    if (!result?.ok) throw new Error(result?.error || (isRename ? "目录重命名失败" : "新建目录失败"));
+
+    const nextPath = String(result.relative_path || oldPath);
+    if (isRename && (selectedCardFolder.value === oldPath || selectedCardFolder.value.startsWith(`${oldPath}/`))) {
+      selectedCardFolder.value = replaceFolderPathPrefix(selectedCardFolder.value, oldPath, nextPath);
+      cardMovePrompt.open = false;
+      await loadCardTree();
+      return;
+    }
+    await refreshCardTreeStructure();
+    cardMovePrompt.expanded = new Set(collectManagedFolderPaths(cardTree.value, [], cardMovePrompt.sourceGender));
+    cardMovePrompt.targetPath = nextPath;
+    cardMovePrompt.editMode = "";
+    cardMovePrompt.nameDraft = "";
+  } catch (error) {
+    cardMovePrompt.error = error.message;
+  } finally {
+    cardMovePrompt.folderBusy = false;
+  }
+}
+
+async function submitBulkMoveCharacterCards() {
+  if (selectedCount.value === 0 || cardMovePrompt.busy) return;
+  const cardPaths = selectedCardRelativePaths();
+  if (cardPaths.length !== selectedCount.value) {
+    cardMovePrompt.error = "选中的人物卡已发生变化，请退出多选后重试。";
+    return;
+  }
+  if (!cardMovePrompt.targetPath) {
+    cardMovePrompt.error = "请选择目标目录。";
+    return;
+  }
+  if (cardMovePrompt.targetPath === selectedCardFolder.value) {
+    cardMovePrompt.error = "请选择不同于当前目录的目标目录。";
+    return;
+  }
+
+  cardMovePrompt.busy = true;
+  cardMovePrompt.error = "";
+  try {
+    await submitTaskInBackground(
+      "bulk_move_character_cards",
+      { card_paths: cardPaths, target_directory: cardMovePrompt.targetPath },
+      async (task) => {
+        cardMovePrompt.busy = false;
+        if (task.status === "completed") {
+          cardMovePrompt.open = false;
+          await loadCardTree();
+        } else {
+          cardMovePrompt.open = true;
+          cardMovePrompt.error = task.error || "批量移动人物卡失败";
+        }
+      }
+    );
+  } catch (error) {
+    cardMovePrompt.busy = false;
+    cardMovePrompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  }
+}
+
+async function submitBulkDeleteCharacterCards() {
+  if (selectedCount.value === 0 || cardDeletePrompt.busy) return;
+  const cardPaths = selectedCardRelativePaths();
+  if (cardPaths.length !== selectedCount.value) {
+    cardDeletePrompt.error = "选中的人物卡已发生变化，请退出多选后重试。";
+    return;
+  }
+
+  cardDeletePrompt.busy = true;
+  cardDeletePrompt.error = "";
+  try {
+    await submitTaskInBackground("bulk_delete_character_cards", { card_paths: cardPaths }, async (task) => {
+      cardDeletePrompt.busy = false;
+      if (task.status === "completed") {
+        cardDeletePrompt.open = false;
+        await loadCardTree();
+      } else {
+        cardDeletePrompt.open = true;
+        cardDeletePrompt.error = task.error || "批量删除人物卡失败";
+      }
+    });
+    cardDeletePrompt.open = false;
+  } catch (error) {
+    cardDeletePrompt.busy = false;
+    cardDeletePrompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  }
+}
+
 function toggleCardSelection(id) {
   if (!id) return;
   const next = new Set(selectedCards.value);
@@ -3306,10 +3895,449 @@ function handleCardClick(card) {
   if (!card) return;
   naviActionNotice.type = "";
   naviActionNotice.message = "";
+  coordinateExportNotice.type = "";
+  coordinateExportNotice.message = "";
+  coordinateExportNotice.path = "";
+  portablePackageNotice.type = "";
+  portablePackageNotice.message = "";
+  portablePackageNotice.path = "";
+  cardCoverNotice.type = "";
+  cardCoverNotice.message = "";
+  cardFavoriteNotice.type = "";
+  cardFavoriteNotice.message = "";
+  cardRatingNotice.type = "";
+  cardRatingNotice.message = "";
+  cardTagNotice.type = "";
+  cardTagNotice.message = "";
   selectedCardDetailPath.value = card.absolutePath;
   loadSelectedCardProfile(card);
   if (cardBulkMode.value) {
     toggleCardSelection(card.absolutePath);
+  } else {
+    characterSideMode.value = "detail";
+  }
+}
+
+async function replaceSelectedCardCover() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || replacingCardCover.value) return;
+  const selected = await window.desktopApi?.selectImageForCrop?.("选择人物卡封面图片");
+  if (!selected) return;
+  if (!selected.ok) {
+    cardCoverNotice.type = "error";
+    cardCoverNotice.message = selected.error || "封面图片读取失败";
+    return;
+  }
+
+  cardCoverNotice.type = "";
+  cardCoverNotice.message = "";
+  cardCoverCrop.imagePath = selected.path;
+  cardCoverCrop.imageData = selected.dataUrl;
+  cardCoverCrop.imageName = selected.name;
+  cardCoverCrop.open = true;
+}
+
+function clearCardCoverCrop() {
+  cardCoverCrop.open = false;
+  cardCoverCrop.imagePath = "";
+  cardCoverCrop.imageData = "";
+  cardCoverCrop.imageName = "";
+}
+
+function cancelCardCoverCrop() {
+  if (!replacingCardCover.value) clearCardCoverCrop();
+}
+
+async function confirmCardCoverCrop(crop) {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || !cardCoverCrop.imagePath || replacingCardCover.value) return;
+
+  replacingCardCover.value = true;
+  cardCoverNotice.type = "";
+  cardCoverNotice.message = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/replace-cover", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        image_path: cardCoverCrop.imagePath,
+        crop
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物卡封面替换失败");
+    const cacheBuster = `cover=${encodeURIComponent(result.image_version || Date.now())}`;
+    card.thumbnailUrl = `${card.thumbnailUrl}${card.thumbnailUrl.includes("?") ? "&" : "?"}${cacheBuster}`;
+    card.coverUrl = `${card.coverUrl}${card.coverUrl.includes("?") ? "&" : "?"}${cacheBuster}`;
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    cardCoverNotice.type = result.warning ? "warning" : "success";
+    cardCoverNotice.message = result.warning || `封面已按 63:88 裁剪为 ${result.width} × ${result.height}`;
+    log(`[Cards] 人物卡封面已替换：${card.relativePath}`);
+    if (result.warning) log(`[Cards Warning] ${result.warning}`);
+    clearCardCoverCrop();
+  } catch (error) {
+    cardCoverNotice.type = "error";
+    cardCoverNotice.message = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    replacingCardCover.value = false;
+  }
+}
+
+async function toggleSelectedCardFavorite() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || favoritingCardPath.value) return;
+  const targetFavorite = !card.favorite;
+  favoritingCardPath.value = card.absolutePath;
+  cardFavoriteNotice.type = "";
+  cardFavoriteNotice.message = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/set-favorite", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        favorite: targetFavorite
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物卡收藏状态保存失败");
+    card.favorite = Boolean(result.favorite);
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    cardFavoriteNotice.type = result.warning ? "warning" : "success";
+    cardFavoriteNotice.message = result.warning || (card.favorite ? "已收藏，状态已写入人物卡" : "已取消收藏");
+    log(`[Cards] ${card.favorite ? "已收藏" : "已取消收藏"}：${card.relativePath}`);
+    if (result.warning) log(`[Cards Warning] ${result.warning}`);
+  } catch (error) {
+    cardFavoriteNotice.type = "error";
+    cardFavoriteNotice.message = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    favoritingCardPath.value = "";
+  }
+}
+
+async function setSelectedCardRating(rating) {
+  const card = selectedCardDetail.value;
+  const targetRating = Number(rating);
+  if (
+    !card?.relativePath ||
+    ratingCardPath.value ||
+    !Number.isInteger(targetRating) ||
+    targetRating < 1 ||
+    targetRating > 5
+  ) return;
+
+  ratingCardPath.value = card.absolutePath;
+  cardRatingNotice.type = "";
+  cardRatingNotice.message = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/set-rating", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        rating: targetRating
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物卡评分保存失败");
+    card.rating = Math.min(5, Math.max(0, Number(result.rating) || 0));
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    cardRatingNotice.type = result.warning ? "warning" : "success";
+    cardRatingNotice.message = result.warning || `已评为 ${card.rating} 星，评分已写入人物卡`;
+    log(`[Cards] 已评为 ${card.rating} 星：${card.relativePath}`);
+    if (result.warning) log(`[Cards Warning] ${result.warning}`);
+  } catch (error) {
+    cardRatingNotice.type = "error";
+    cardRatingNotice.message = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    ratingCardPath.value = "";
+  }
+}
+
+function uniqueCardTags(values) {
+  const tags = new Map();
+  for (const value of values || []) {
+    const tag = String(value || "").trim();
+    if (tag) tags.set(tag.toLocaleLowerCase(), tag);
+  }
+  return [...tags.values()];
+}
+
+async function openCardTagPrompt() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardTagPrompt.busy) return;
+  cardTagPrompt.selected = uniqueCardTags(card.tags);
+  cardTagPrompt.available = uniqueCardTags([...cardTagOptions.value, ...cardTagPrompt.selected]);
+  cardTagPrompt.draft = "";
+  cardTagPrompt.error = "";
+  cardTagPrompt.open = true;
+  await loadCardTagCatalogForPrompt(cardTagPrompt);
+}
+
+async function loadCardTagCatalogForPrompt(prompt) {
+  prompt.loading = false;
+  if (cardTagCatalog.loaded && cardTagCatalog.gameDir === paths.gameDir) {
+    prompt.available = uniqueCardTags([
+      ...cardTagCatalog.tags,
+      ...prompt.available
+    ]).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    return;
+  }
+  prompt.loading = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/cards/tags?game_dir=${encodeQuery(paths.gameDir)}`
+    );
+    if (!result?.ok) throw new Error(result?.error || "已有标签读取失败");
+    prompt.available = uniqueCardTags([
+      ...(result.tags || []),
+      ...prompt.available
+    ]).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    cardTagCatalog.gameDir = paths.gameDir;
+    cardTagCatalog.loaded = true;
+    cardTagCatalog.tags = [...prompt.available];
+  } catch (error) {
+    prompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    prompt.loading = false;
+  }
+}
+
+async function openCardTagFilter() {
+  cardTagFilter.open = true;
+  cardTagFilter.error = "";
+  cardTagFilter.available = uniqueCardTags(cardTagOptions.value);
+  if (!cardTagFilter.loading) await loadCardTagCatalogForPrompt(cardTagFilter);
+}
+
+function updateCardTagFilterSearch(value) {
+  cardTagFilter.search = String(value || "");
+  cardTagFilter.open = true;
+}
+
+function closeCardTagFilter() {
+  cardTagFilter.open = false;
+}
+
+function closeCardTagFilterSoon() {
+  window.setTimeout(closeCardTagFilter, 120);
+}
+
+async function loadLibraryCardsByTag(tag) {
+  const selectedTag = String(tag || "").trim();
+  const requestId = ++cardTagLibraryRequestId;
+  cardTagFilter.libraryTag = selectedTag;
+  cardTagFilter.libraryCards = [];
+  cardTagFilter.resultsError = "";
+  if (!selectedTag || !backendReady.value || !paths.gameDir) {
+    cardTagFilter.resultsLoading = false;
+    return;
+  }
+
+  cardTagFilter.resultsLoading = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/cards?game_dir=${encodeQuery(paths.gameDir)}&scope=library&tag=${encodeQuery(selectedTag)}`
+    );
+    if (requestId !== cardTagLibraryRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "全库人物卡读取失败");
+    cardTagFilter.libraryCards = mapCharacterCardRows(result.cards);
+  } catch (error) {
+    if (requestId !== cardTagLibraryRequestId) return;
+    cardTagFilter.resultsError = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === cardTagLibraryRequestId) cardTagFilter.resultsLoading = false;
+  }
+}
+
+function setCardTagScope(scope) {
+  const normalizedScope = scope === "library" ? "library" : "directory";
+  if (cardTagFilter.scope === normalizedScope) return;
+  cardTagFilter.scope = normalizedScope;
+  setCardDependencyFilter(cardDependencyFilter.value);
+}
+
+function selectCardTagFilter(tag) {
+  const selectedTag = String(tag || "").trim();
+  if (!selectedTag) return;
+  cardTagFilter.search = selectedTag;
+  setCardDependencyFilter(`tag:${selectedTag}`);
+}
+
+function applyFirstCardTagFilterSuggestion() {
+  const firstTag = cardTagFilterSuggestions.value[0];
+  if (firstTag) selectCardTagFilter(firstTag);
+}
+
+function clearCardTagFilter() {
+  cardTagFilter.search = "";
+  cardTagFilter.error = "";
+  cardTagFilter.open = true;
+  if (cardDependencyFilter.value.startsWith("tag:")) setCardDependencyFilter("all");
+}
+
+function toggleTagPromptValue(prompt, tag) {
+  if (prompt.busy) return;
+  const key = String(tag).toLocaleLowerCase();
+  const index = prompt.selected.findIndex(
+    (item) => String(item).toLocaleLowerCase() === key
+  );
+  if (index >= 0) {
+    prompt.selected.splice(index, 1);
+  } else if (prompt.selected.length >= 12) {
+    prompt.error = "一次最多选择 12 个标签。";
+    return;
+  } else {
+    prompt.selected.push(tag);
+  }
+  prompt.error = "";
+}
+
+function toggleCardTagPromptTag(tag) {
+  toggleTagPromptValue(cardTagPrompt, tag);
+}
+
+function addTagPromptDraft(prompt) {
+  const tag = String(prompt.draft || "").trim();
+  if (!tag) {
+    prompt.error = "请输入新标签名称。";
+    return;
+  }
+  if (tag.length > 24) {
+    prompt.error = "单个标签不能超过 24 个字符。";
+    return;
+  }
+  const existing = prompt.available.find(
+    (item) => String(item).toLocaleLowerCase() === tag.toLocaleLowerCase()
+  );
+  const value = existing || tag;
+  if (!existing) prompt.available.push(value);
+  if (!prompt.selected.some((item) => String(item).toLocaleLowerCase() === value.toLocaleLowerCase())) {
+    if (prompt.selected.length >= 12) {
+      prompt.error = "一次最多选择 12 个标签。";
+      return;
+    }
+    prompt.selected.push(value);
+  }
+  prompt.available.sort((left, right) => left.localeCompare(right, "zh-CN"));
+  prompt.draft = "";
+  prompt.error = "";
+}
+
+function addCardTagDraft() {
+  addTagPromptDraft(cardTagPrompt);
+}
+
+async function openBulkCardTagPrompt() {
+  if (selectedCount.value === 0 || bulkCardTagPrompt.busy) return;
+  bulkCardTagPrompt.selected = [];
+  bulkCardTagPrompt.available = uniqueCardTags(cardTagOptions.value);
+  bulkCardTagPrompt.draft = "";
+  bulkCardTagPrompt.error = "";
+  bulkCardTagPrompt.open = true;
+  await loadCardTagCatalogForPrompt(bulkCardTagPrompt);
+}
+
+function toggleBulkCardTagPromptTag(tag) {
+  toggleTagPromptValue(bulkCardTagPrompt, tag);
+}
+
+function addBulkCardTagDraft() {
+  addTagPromptDraft(bulkCardTagPrompt);
+}
+
+async function submitBulkAddCharacterCardTags() {
+  if (selectedCount.value === 0 || bulkCardTagPrompt.busy) return;
+  const cardPaths = selectedCardRelativePaths();
+  if (cardPaths.length !== selectedCount.value) {
+    bulkCardTagPrompt.error = "选中的人物卡已发生变化，请退出多选后重试。";
+    return;
+  }
+  const tags = uniqueCardTags(bulkCardTagPrompt.selected);
+  if (!tags.length) {
+    bulkCardTagPrompt.error = "请至少选择一个要添加的标签。";
+    return;
+  }
+
+  bulkCardTagPrompt.busy = true;
+  bulkCardTagPrompt.error = "";
+  try {
+    await submitTaskInBackground(
+      "bulk_add_character_card_tags",
+      { card_paths: cardPaths, tags },
+      async (task) => {
+        bulkCardTagPrompt.busy = false;
+        if (task.status === "completed") {
+          const updatedByPath = new Map(
+            (task.data?.updated || []).map((item) => [String(item.relative_path || ""), item])
+          );
+          for (const card of [...cards.value, ...cardTagFilter.libraryCards]) {
+            const updated = updatedByPath.get(card.relativePath);
+            if (!updated) continue;
+            card.tags = Array.isArray(updated.tags) ? updated.tags.map((tag) => String(tag)) : card.tags;
+            card.modifiedAt = updated.modified_at
+              ? new Date(updated.modified_at * 1000).toLocaleDateString()
+              : card.modifiedAt;
+          }
+          if (cardTagCatalog.loaded && cardTagCatalog.gameDir === paths.gameDir) {
+            cardTagCatalog.tags = uniqueCardTags([...cardTagCatalog.tags, ...tags])
+              .sort((left, right) => left.localeCompare(right, "zh-CN"));
+          }
+          const failureCount = Number(task.data?.failure_count || 0);
+          bulkCardTagPrompt.open = failureCount > 0;
+          bulkCardTagPrompt.error = failureCount > 0
+            ? `已完成 ${task.data?.updated_count || 0} 张，${failureCount} 张添加失败；可查看运行日志。`
+            : "";
+          log(`[Cards] ${task.data?.message || "批量人物卡标签添加完成"}`);
+        } else {
+          bulkCardTagPrompt.open = true;
+          bulkCardTagPrompt.error = task.error || "批量添加人物卡标签失败";
+        }
+      }
+    );
+    bulkCardTagPrompt.open = false;
+  } catch (error) {
+    bulkCardTagPrompt.busy = false;
+    bulkCardTagPrompt.open = true;
+    bulkCardTagPrompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  }
+}
+
+async function saveSelectedCardTags() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardTagPrompt.busy) return;
+  cardTagPrompt.busy = true;
+  cardTagPrompt.error = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/set-tags", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        tags: [...cardTagPrompt.selected]
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物卡标签保存失败");
+    card.tags = Array.isArray(result.tags) ? result.tags.map((tag) => String(tag)) : [];
+    if (cardTagCatalog.loaded && cardTagCatalog.gameDir === paths.gameDir) {
+      cardTagCatalog.tags = uniqueCardTags([...cardTagCatalog.tags, ...card.tags])
+        .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    }
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    cardTagNotice.type = result.warning ? "warning" : "success";
+    cardTagNotice.message = result.warning || (card.tags.length ? "人物卡标签已保存" : "已清空人物卡标签");
+    cardTagPrompt.open = false;
+    log(`[Cards] 人物卡标签已保存：${card.relativePath}`);
+    if (result.warning) log(`[Cards Warning] ${result.warning}`);
+  } catch (error) {
+    cardTagPrompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    cardTagPrompt.busy = false;
   }
 }
 
@@ -3319,6 +4347,9 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
   selectedCardProfileError.value = "";
   selectedCardProfile.value = null;
   selectedCardDependencies.value = [];
+  cardProfileEditor.editing = false;
+  cardProfileEditor.error = "";
+  cardProfileEditor.message = "";
   const targetPath = card.absolutePath;
 
   try {
@@ -3329,6 +4360,9 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
       throw new Error(result?.error || "人物卡详情读取失败");
     }
     if (selectedCardDetailPath.value === targetPath) {
+      card.favorite = Boolean(result.card?.favorite);
+      card.rating = Math.min(5, Math.max(0, Number(result.card?.rating) || 0));
+      card.tags = Array.isArray(result.card?.tags) ? result.card.tags.map((tag) => String(tag)) : [];
       selectedCardProfile.value = result.card?.profile || {};
       selectedCardDependencies.value = (result.card?.dependencies || []).map((dependency) => ({
         ...dependency,
@@ -3353,6 +4387,57 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
   }
 }
 
+function openCardProfileEditor() {
+  const profile = selectedCardProfile.value;
+  if (!profile || cardProfileEditor.busy) return;
+  cardProfileEditor.values = {
+    fullname: String(profile.fullname || ""),
+    personality: Number(profile.personality ?? 0),
+    birthMonth: Number(profile.birthMonth ?? 1),
+    birthDay: Number(profile.birthDay ?? 1),
+    voiceRate: Number(profile.voiceRate ?? 0.5),
+    futanari: Boolean(profile.futanari)
+  };
+  cardProfileEditor.error = "";
+  cardProfileEditor.message = "";
+  cardProfileEditor.editing = true;
+}
+
+function cancelCardProfileEditor() {
+  if (cardProfileEditor.busy) return;
+  cardProfileEditor.editing = false;
+  cardProfileEditor.error = "";
+}
+
+async function saveCardProfile() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardProfileEditor.busy) return;
+  cardProfileEditor.busy = true;
+  cardProfileEditor.error = "";
+  cardProfileEditor.message = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/update-profile", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        profile: { ...cardProfileEditor.values }
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物参数保存失败");
+    selectedCardProfile.value = result.profile || selectedCardProfile.value;
+    cardProfileEditor.editing = false;
+    cardProfileEditor.message = result.warning || "人物参数已保存";
+    log(`[Cards] 人物参数已保存：${card.relativePath}`);
+    if (result.warning) log(`[Cards Warning] ${result.warning}`);
+  } catch (error) {
+    cardProfileEditor.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    cardProfileEditor.busy = false;
+  }
+}
+
 async function setSelectedCardAsNavi(slot) {
   const card = selectedCardDetail.value;
   if (!card?.relativePath || !paths.gameDir || settingNaviSlot.value) return;
@@ -3374,6 +4459,194 @@ async function setSelectedCardAsNavi(slot) {
     naviActionNotice.message = error.message;
   } finally {
     settingNaviSlot.value = "";
+  }
+}
+
+function setCardDependencyFilter(value) {
+  const normalizedValue = String(value || "");
+  cardDependencyFilter.value = ["missing", "favorite"].includes(normalizedValue) || normalizedValue.startsWith("tag:")
+    ? normalizedValue
+    : "all";
+  cardTagFilter.search = cardDependencyFilter.value.startsWith("tag:")
+    ? cardDependencyFilter.value.slice(4)
+    : "";
+  cardTagFilter.open = false;
+  cardTagLibraryRequestId += 1;
+  cardTagFilter.resultsLoading = false;
+  cardTagFilter.resultsError = "";
+  if (cardTagFilter.scope === "library" && cardDependencyFilter.value.startsWith("tag:")) {
+    void loadLibraryCardsByTag(cardDependencyFilter.value.slice(4));
+  }
+  selectedCards.value = new Set();
+  selectedCardDetailPath.value = "";
+  selectedCardProfile.value = null;
+  selectedCardDependencies.value = [];
+  selectedCardProfileError.value = "";
+  cardBulkMode.value = false;
+}
+
+async function exportSelectedCardCoordinate() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || !paths.gameDir || exportingCoordinateCard.value) return;
+
+  exportingCoordinateCard.value = true;
+  coordinateExportNotice.type = "";
+  coordinateExportNotice.message = "";
+  coordinateExportNotice.path = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/export-coordinate", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath,
+        output_dir: coordinateExportDir.value
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "服装卡导出失败");
+    const skippedCount = Array.isArray(result.skipped_plugins) ? result.skipped_plugins.length : 0;
+    const skippedHint = skippedCount > 0 ? `，已跳过 ${skippedCount} 个非服装插件` : "";
+    coordinateExportNotice.type = "success";
+    coordinateExportNotice.message = `已导出服装卡，包含 ${result.coordinate_dependencies || 0} 条模组依赖${skippedHint}`;
+    coordinateExportNotice.path = result.target_path || "";
+    log(`[Cards] 已导出服装卡 ${result.coordinate_name || card.name}: ${result.target_path}`);
+  } catch (error) {
+    coordinateExportNotice.type = "error";
+    coordinateExportNotice.message = error.message;
+    coordinateExportNotice.path = "";
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    exportingCoordinateCard.value = false;
+  }
+}
+
+function openCoordinateExportSettings() {
+  coordinateExportPrompt.draft = coordinateExportDir.value;
+  coordinateExportPrompt.error = "";
+  coordinateExportPrompt.open = true;
+}
+
+async function selectCoordinateExportDir() {
+  const selected = await window.desktopApi?.selectDirectory?.("选择服装卡导出目录");
+  if (!selected) return;
+  coordinateExportPrompt.draft = selected;
+  coordinateExportPrompt.error = "";
+}
+
+async function saveCoordinateExportSettings() {
+  const previousDir = coordinateExportDir.value;
+  coordinateExportDir.value = String(coordinateExportPrompt.draft || "").trim();
+  const result = await saveAppSettings();
+  if (!result?.ok) {
+    coordinateExportDir.value = previousDir;
+    coordinateExportPrompt.error = result?.error || "无法保存导出路径";
+    return;
+  }
+  coordinateExportPrompt.open = false;
+}
+
+async function revealExportedCoordinate() {
+  if (!coordinateExportNotice.path) return;
+  const result = await window.desktopApi?.showItemInFolder?.(coordinateExportNotice.path);
+  if (!result?.ok) {
+    coordinateExportNotice.type = "error";
+    coordinateExportNotice.message = result?.error || "无法打开导出位置";
+  }
+}
+
+function openPortablePackageSettings() {
+  portablePackagePrompt.draftDir = portablePackageDir.value;
+  portablePackagePrompt.compress = portablePackageCompress.value;
+  portablePackagePrompt.types = [...portablePackageTypes.value];
+  portablePackagePrompt.error = "";
+  portablePackagePrompt.open = true;
+}
+
+async function selectPortablePackageDir() {
+  const selected = await window.desktopApi?.selectDirectory?.("选择便携依赖包导出目录");
+  if (!selected) return;
+  portablePackagePrompt.draftDir = selected;
+  portablePackagePrompt.error = "";
+}
+
+async function savePortablePackageSettings() {
+  const draftDir = String(portablePackagePrompt.draftDir || "").trim();
+  if (!draftDir) {
+    portablePackagePrompt.error = "请选择导出目录。";
+    return;
+  }
+  const previousDir = portablePackageDir.value;
+  const previousCompress = portablePackageCompress.value;
+  const previousTypes = [...portablePackageTypes.value];
+  portablePackageDir.value = draftDir;
+  portablePackageCompress.value = Boolean(portablePackagePrompt.compress);
+  portablePackageTypes.value = PORTABLE_PACKAGE_TYPES
+    .map((type) => type.key)
+    .filter((type) => portablePackagePrompt.types.includes(type));
+  const result = await saveAppSettings();
+  if (!result?.ok) {
+    portablePackageDir.value = previousDir;
+    portablePackageCompress.value = previousCompress;
+    portablePackageTypes.value = previousTypes;
+    portablePackagePrompt.error = result?.error || "无法保存便携包配置";
+    return;
+  }
+  portablePackagePrompt.open = false;
+}
+
+async function exportSelectedCardPortablePackage() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || !paths.gameDir || exportingPortablePackage.value) return;
+  if (!portablePackageDir.value) {
+    openPortablePackageSettings();
+    portablePackagePrompt.error = "请先选择导出目录，再生成便携依赖包。";
+    return;
+  }
+
+  exportingPortablePackage.value = true;
+  portablePackageNotice.type = "";
+  portablePackageNotice.message = "正在解析依赖并复制文件…";
+  portablePackageNotice.path = "";
+  try {
+    await submitTaskInBackground(
+      "export_character_dependency_package",
+      {
+        path: card.relativePath,
+        target_dir: portablePackageDir.value,
+        compress: portablePackageCompress.value,
+        dependency_types: portablePackageTypes.value
+      },
+      async (task) => {
+        exportingPortablePackage.value = false;
+        if (task.status !== "completed") {
+          portablePackageNotice.type = "error";
+          portablePackageNotice.message = task.error || "便携依赖包生成失败";
+          return;
+        }
+        const missingCount = task.data?.missing_mod_ids?.length || 0;
+        const failureCount = task.data?.failure_count || 0;
+        const issueHint = missingCount || failureCount
+          ? `，${missingCount} 个依赖缺失，${failureCount} 个文件复制失败`
+          : "";
+        portablePackageNotice.type = missingCount || failureCount ? "warning" : "success";
+        portablePackageNotice.message = `已生成${task.data?.compressed ? "压缩包" : "便携文件夹"}，包含 ${task.data?.exported_zipmod_count || 0} 个 zipmod 和 ${task.data?.exported_unity3d_count || 0} 个外部 Unity3D${issueHint}`;
+        portablePackageNotice.path = task.data?.target_path || "";
+        log(`[Cards] 便携依赖包已生成: ${portablePackageNotice.path}`);
+      }
+    );
+  } catch (error) {
+    exportingPortablePackage.value = false;
+    portablePackageNotice.type = "error";
+    portablePackageNotice.message = error.message;
+    log(`[Cards Error] ${error.message}`);
+  }
+}
+
+async function revealPortablePackage() {
+  if (!portablePackageNotice.path) return;
+  const result = await window.desktopApi?.showItemInFolder?.(portablePackageNotice.path);
+  if (!result?.ok) {
+    portablePackageNotice.type = "error";
+    portablePackageNotice.message = result?.error || "无法打开导出位置";
   }
 }
 
@@ -3427,6 +4700,7 @@ onMounted(() => {
 const appCtx = reactive({
   activeAction,
   activeView,
+  backendStatus,
   analyzeDuplicateZipmods,
   achievements,
   achievementPreferences,
@@ -3437,6 +4711,11 @@ const appCtx = reactive({
   loadAchievements,
   resetAchievementHistory,
   updateAchievementPreference,
+  updateManagerSetting,
+  updatePortablePackageCompress,
+  blenderExecutablePath,
+  selectBlenderExecutable,
+  clearBlenderExecutable,
   allVisibleCardsSelected,
   allVisibleModsSelected,
   badgeClass,
@@ -3446,14 +4725,40 @@ const appCtx = reactive({
   bulkActionBusy,
   bulkAuthorSuggestions,
   bulkDeletePrompt,
+  cardDeletePrompt,
+  cardMovePrompt,
+  cardMoveAvailable,
+  cardMoveDestinationReady,
+  cardMoveFolderRows,
   bulkDeleteErrorItemsPrompt,
+  bulkCardTagPrompt,
   bulkDuplicateCleanupPrompt,
   cardBulkMode,
+  cardBrowserCountText,
+  cardCoverNotice,
+  cardFavoriteNotice,
+  cardRatingNotice,
+  cardTagNotice,
+  cardTagPrompt,
+  cardTagFilter,
+  cardTagFilterSuggestions,
+  cardTagOptions,
+  cardDependencyFilter,
   cardDependencyExportPrompt,
   cardDetailTab,
+  coordinateExportDir,
+  coordinateExportPrompt,
+  coordinateExportNotice,
+  portablePackageDir,
+  portablePackageCompress,
+  portablePackagePrompt,
+  portablePackageNotice,
+  managerSettings,
+  settingsNotice,
   cardFolderDisplay,
   cardFolders,
   cardLibrary,
+  cardProfileEditor,
   cards,
   characterSideMode,
   checkModDatabase,
@@ -3474,9 +4779,17 @@ const appCtx = reactive({
   duplicateZipmodPrompt,
   enterCardBulkMode,
   enterModBulkMode,
+  exportSelectedCardCoordinate,
+  exportingCoordinateCard,
+  exportingPortablePackage,
+  exportSelectedCardPortablePackage,
+  openCoordinateExportSettings,
+  openPortablePackageSettings,
   exitCardBulkMode,
   exitModBulkMode,
   filteredZipmodAuthorOptions,
+  favoritingCardPath,
+  ratingCardPath,
   formatBytes,
   formatDatabaseTime,
   formatProfileValue,
@@ -3522,12 +4835,17 @@ const appCtx = reactive({
   openBulkAuthorPrompt,
   openBulkDeletePrompt,
   openBulkDeleteErrorItemsPrompt,
+  openBulkCardTagPrompt,
   openBulkDuplicateCleanupPrompt,
   openBulkExportPrompt,
   openBulkOrganizePrompt,
   openBulkRepairUnity3dPrompt,
   openCardDependencyExportPrompt,
+  openCardDeletePrompt,
+  openCardMovePrompt,
   openCardDependencyItem,
+  openCardProfileEditor,
+  openCardTagPrompt,
   openDuplicateZipmodInFolder,
   openDuplicateZipmodPrompt,
   openManifestAuthorPrompt,
@@ -3539,6 +4857,7 @@ const appCtx = reactive({
   openSummaryCard,
   overviewSummaryCards,
   paths,
+  personalityOptions,
   recentTasks,
   repairingThumbnailItemId,
   exportingFbxItemId,
@@ -3546,7 +4865,17 @@ const appCtx = reactive({
   repairThumbnailItem,
   exportItemFbx,
   repairUnity3dIssue,
+  replaceSelectedCardCover,
+  replacingCardCover,
+  revealExportedCoordinate,
+  revealPortablePackage,
+  saveCardProfile,
+  saveSelectedCardTags,
+  addCardTagDraft,
+  addBulkCardTagDraft,
   saveSetup,
+  saveDefaultOutputDirectory,
+  selectSettingsDirectory,
   scheduleItemSearch,
   scheduleModAuthorFilter,
   selectGameDir,
@@ -3579,7 +4908,17 @@ const appCtx = reactive({
   selectItem,
   selectBulkAuthorSuggestion,
   selectMod,
+  applyFirstCardTagFilterSuggestion,
+  clearCardTagFilter,
+  closeCardTagFilter,
+  closeCardTagFilterSoon,
+  openCardTagFilter,
+  selectCardTagFilter,
   setDependencyUsageFilter,
+  setCardDependencyFilter,
+  setCardTagScope,
+  toggleCardTagPromptTag,
+  toggleBulkCardTagPromptTag,
   setLibraryMode,
   setModTab,
   setup,
@@ -3591,13 +4930,17 @@ const appCtx = reactive({
   taskName,
   taskPercent,
   toggleAllVisibleCards,
+  toggleSelectedCardFavorite,
+  setSelectedCardRating,
   toggleAllVisibleMods,
   toggleCardFolder,
   toggleModSelection,
   toggleThumbnailTarget,
+  updateCardTagFilterSearch,
   thumbnailIssueReason,
   thumbnailToolsPrompt,
   itemUnity3dFileName,
+  visibleCards,
   unity3dIssueFileName,
   unity3dIssueSolution,
   updateSetup,
@@ -3611,8 +4954,17 @@ const appCtx = reactive({
   setAllThumbnailTargets,
   selectModAuthorFilter,
   submitBulkDeleteZipmods,
+  submitBulkDeleteCharacterCards,
+  submitBulkAddCharacterCardTags,
+  submitBulkMoveCharacterCards,
+  submitCardMoveFolderEdit,
+  beginCardMoveFolderEdit,
+  closeCardMovePrompt,
+  selectCardMoveFolder,
+  toggleCardMoveFolder,
   submitBulkDeleteErrorItems,
-  submitBulkDuplicateCleanup
+  submitBulkDuplicateCleanup,
+  cancelCardProfileEditor
 });
 
 watch([activeView, backendStatus], ([view, status]) => {
@@ -3667,6 +5019,10 @@ watch([activeView, backendStatus], ([view, status]) => {
                 <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
                 <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8M8 6l8 4"></path>
               </g>
+              <g v-else-if="view.id === 'workbench'">
+                <rect x="3" y="7" width="18" height="13" rx="2"></rect>
+                <path d="M8 7V4h8v3M3 12h18M10 12v3h4v-3"></path>
+              </g>
               <g v-else-if="view.id === 'plugins'">
                 <path d="M9.5 4H4v5.5a2.5 2.5 0 1 1 0 5V20h5.5a2.5 2.5 0 1 1 5 0H20v-5.5a2.5 2.5 0 1 0 0-5V4h-5.5a2.5 2.5 0 1 0-5 0Z"></path>
               </g>
@@ -3677,6 +5033,22 @@ watch([activeView, backendStatus], ([view, status]) => {
             </svg>
           </span>
           <span>{{ view.label }}</span>
+        </button>
+      </nav>
+
+      <nav class="nav nav-secondary" aria-label="Manager navigation">
+        <button
+          type="button"
+          :class="{ active: activeView === 'settings' }"
+          @click="activeView = 'settings'"
+        >
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path>
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.96 4.6 1.7 1.7 0 0 0 10 3.08V3h4v.08a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"></path>
+            </svg>
+          </span>
+          <span>设置</span>
         </button>
       </nav>
     </aside>
@@ -3718,9 +5090,20 @@ watch([activeView, backendStatus], ([view, status]) => {
         <OverviewView v-else-if="activeView === 'overview'" :ctx="appCtx" />
         <CharactersView v-else-if="activeView === 'characters'" :ctx="appCtx" />
         <ModsView v-else-if="activeView === 'mods'" :ctx="appCtx" />
+        <WorkbenchView v-else-if="activeView === 'workbench'" :ctx="appCtx" />
         <PluginsView v-show="activeView === 'plugins'" :ctx="appCtx" />
         <LogsView v-if="activeView === 'logs'" :ctx="appCtx" />
+        <SettingsView v-if="activeView === 'settings'" :ctx="appCtx" />
       </section>
+
+      <CardCoverCropper
+        :open="cardCoverCrop.open"
+        :image-data="cardCoverCrop.imageData"
+        :image-name="cardCoverCrop.imageName"
+        :busy="replacingCardCover"
+        @cancel="cancelCardCoverCrop"
+        @confirm="confirmCardCoverCrop"
+      />
 
         <div v-if="organizeAllPrompt.open" class="prompt-backdrop" @click.self="organizeAllPrompt.open = false">
           <div class="prompt-panel organize-all-panel">
@@ -3758,6 +5141,7 @@ watch([activeView, backendStatus], ([view, status]) => {
               <span><strong>{{ importResultData.cleaned_count || 0 }}</strong> 清理重复</span>
               <span><strong>{{ importResultData.unity3d_repaired_count || 0 }}</strong> Unity3D</span>
               <span><strong>{{ importResultData.card_imported_count || 0 }}</strong> 角色卡</span>
+              <span><strong>{{ importResultData.coordinate_imported_count || 0 }}</strong> 服装卡</span>
               <span><strong>{{ importResultData.failure_count || 0 }}</strong> 失败</span>
             </div>
             <div class="import-result-list">
@@ -3781,6 +5165,101 @@ watch([activeView, backendStatus], ([view, status]) => {
                   <code v-if="item.detail">{{ item.detail }}</code>
                 </article>
               </section>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="coordinateExportPrompt.open" class="prompt-backdrop" @click.self="coordinateExportPrompt.open = false">
+          <div class="prompt-panel coordinate-export-settings-panel" role="dialog" aria-modal="true" aria-labelledby="coordinate-export-settings-title">
+            <strong id="coordinate-export-settings-title">配置服装卡导出路径</strong>
+            <p class="subtext">未配置时，服装卡会按人物性别保存到游戏目录下的 <code>UserData/coordinate/female</code> 或 <code>male</code>。</p>
+            <label class="coordinate-path-field">
+              <span>自定义导出目录</span>
+              <div class="prompt-field-row">
+                <input
+                  v-model="coordinateExportPrompt.draft"
+                  class="search"
+                  type="text"
+                  placeholder="使用游戏默认目录"
+                  readonly
+                >
+                <button type="button" @click="selectCoordinateExportDir">选择目录</button>
+              </div>
+            </label>
+            <button
+              v-if="coordinateExportPrompt.draft"
+              class="coordinate-use-default"
+              type="button"
+              @click="coordinateExportPrompt.draft = ''; coordinateExportPrompt.error = ''"
+            >
+              恢复默认路径
+            </button>
+            <div v-if="coordinateExportPrompt.error" class="prompt-error">{{ coordinateExportPrompt.error }}</div>
+            <div class="prompt-actions">
+              <button type="button" @click="coordinateExportPrompt.open = false">取消</button>
+              <button class="primary" type="button" @click="saveCoordinateExportSettings">保存配置</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="portablePackagePrompt.open" class="prompt-backdrop" @click.self="portablePackagePrompt.open = false">
+          <div class="prompt-panel portable-package-settings-panel" role="dialog" aria-modal="true" aria-labelledby="portable-package-settings-title">
+            <strong id="portable-package-settings-title">配置便携依赖包</strong>
+            <p class="subtext">打包当前人物卡、已匹配的 zipmod 与外部 Unity3D。包内保留游戏目录结构，原文件不会被移动。</p>
+            <label class="coordinate-path-field">
+              <span>导出目录</span>
+              <div class="prompt-field-row">
+                <input
+                  v-model="portablePackagePrompt.draftDir"
+                  class="search"
+                  type="text"
+                  placeholder="请选择导出目录"
+                  readonly
+                >
+                <button type="button" @click="selectPortablePackageDir">选择目录</button>
+              </div>
+            </label>
+            <label class="portable-compress-option">
+              <input v-model="portablePackagePrompt.compress" type="checkbox">
+              <span>
+                <strong>压缩为 ZIP</strong>
+                <small>{{ portablePackagePrompt.compress ? '生成便于分享的单个文件' : '生成可直接浏览的文件夹' }}</small>
+              </span>
+            </label>
+            <fieldset class="portable-type-picker">
+              <legend>
+                <span>导出的模组类型</span>
+                <small>已选 {{ portablePackagePrompt.types.length }} / {{ PORTABLE_PACKAGE_TYPES.length }}</small>
+              </legend>
+              <p>按人物卡实际使用部位筛选依赖；关闭的类型不会加入导出包。</p>
+              <div class="portable-type-grid">
+                <label
+                  v-for="type in PORTABLE_PACKAGE_TYPES"
+                  :key="type.key"
+                  class="portable-type-option"
+                  :class="[`portable-type-${type.key}`, { selected: portablePackagePrompt.types.includes(type.key) }]"
+                >
+                  <input v-model="portablePackagePrompt.types" type="checkbox" :value="type.key">
+                  <span class="portable-type-marker" aria-hidden="true">{{ type.marker }}</span>
+                  <span class="portable-type-copy">
+                    <strong>{{ type.label }}</strong>
+                    <small>{{ type.description }}</small>
+                  </span>
+                  <span class="portable-type-check" aria-hidden="true">✓</span>
+                </label>
+              </div>
+              <small v-if="portablePackagePrompt.types.length === 0" class="portable-type-empty">未选择模组类型时，只导出人物卡与依赖清单。</small>
+            </fieldset>
+            <div class="portable-package-structure" aria-label="便携包目录结构">
+              <code>UserData/chara</code>
+              <code>mods</code>
+              <code>abdata</code>
+              <span>+ 依赖清单</span>
+            </div>
+            <div v-if="portablePackagePrompt.error" class="prompt-error">{{ portablePackagePrompt.error }}</div>
+            <div class="prompt-actions">
+              <button type="button" @click="portablePackagePrompt.open = false">取消</button>
+              <button class="primary" type="button" @click="savePortablePackageSettings">保存配置</button>
             </div>
           </div>
         </div>
@@ -3817,6 +5296,101 @@ watch([activeView, backendStatus], ([view, status]) => {
               <button type="button" :disabled="isBusy" @click="cardDependencyExportPrompt.open = false; cardDependencyExportPrompt.confirmMove = false">取消</button>
               <button type="button" :disabled="isBusy" @click="submitCardDependencyExport">
                 {{ isBusy && activeAction === "extract_mods" ? "导出中..." : cardDependencyExportPrompt.confirmMove ? `确认剪切 ${selectedCount} 张人物卡依赖` : `导出 ${selectedCount} 张人物卡依赖` }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="cardMovePrompt.open" class="prompt-backdrop" @click.self="closeCardMovePrompt">
+          <div class="prompt-panel card-move-panel" role="dialog" aria-modal="true" aria-labelledby="card-move-title">
+            <header class="card-move-head">
+              <div>
+                <span class="card-move-kicker">{{ cardMovePrompt.sourceGender }} card library</span>
+                <strong id="card-move-title">移动人物卡</strong>
+                <p class="subtext">选择同一性别下的目标目录，已选 {{ selectedCount }} 张。</p>
+              </div>
+              <button type="button" :disabled="cardMovePrompt.busy || cardMovePrompt.folderBusy" aria-label="关闭" @click="closeCardMovePrompt">×</button>
+            </header>
+
+            <div class="card-move-toolbar">
+              <div class="card-move-target">
+                <span>目标目录</span>
+                <strong class="mono">{{ cardMovePrompt.targetPath || "尚未选择" }}</strong>
+              </div>
+              <div class="card-move-folder-actions">
+                <button type="button" :disabled="!cardMovePrompt.targetPath || cardMovePrompt.folderBusy" @click="beginCardMoveFolderEdit('create')">+ 新建子目录</button>
+                <button type="button" :disabled="!cardMovePrompt.targetPath || cardMovePrompt.folderBusy" @click="beginCardMoveFolderEdit('rename')">重命名</button>
+              </div>
+            </div>
+
+            <form v-if="cardMovePrompt.editMode" class="card-move-edit" @submit.prevent="submitCardMoveFolderEdit">
+              <label>
+                <span>{{ cardMovePrompt.editMode === 'create' ? '新目录名称' : '新的目录名称' }}</span>
+                <input v-model="cardMovePrompt.nameDraft" class="search" type="text" maxlength="120" autofocus :placeholder="cardMovePrompt.editMode === 'create' ? '在当前选中目录下创建' : '输入新名称'">
+              </label>
+              <button type="button" :disabled="cardMovePrompt.folderBusy" @click="cardMovePrompt.editMode = ''; cardMovePrompt.error = ''">取消</button>
+              <button type="submit" :disabled="cardMovePrompt.folderBusy">{{ cardMovePrompt.folderBusy ? '处理中...' : '确认' }}</button>
+            </form>
+
+            <div class="card-move-tree" role="tree" :aria-label="`${cardMovePrompt.sourceGender} 人物卡目录`">
+              <button
+                v-for="folder in cardMoveFolderRows"
+                :key="folder.id"
+                type="button"
+                class="card-move-tree-row"
+                :class="{ selected: cardMovePrompt.targetPath === folder.relativePath }"
+                :style="{ '--folder-depth': folder.depth }"
+                role="treeitem"
+                :aria-selected="cardMovePrompt.targetPath === folder.relativePath"
+                :aria-expanded="folder.hasChildren ? folder.expanded : undefined"
+                @click="selectCardMoveFolder(folder)"
+              >
+                <span
+                  class="card-move-tree-toggle"
+                  :class="{ placeholder: !folder.hasChildren }"
+                  role="button"
+                  :aria-label="folder.hasChildren ? (folder.expanded ? '收起目录' : '展开目录') : undefined"
+                  @click.stop="toggleCardMoveFolder(folder)"
+                >{{ folder.hasChildren ? (folder.expanded ? '−' : '+') : '' }}</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3Z" /></svg>
+                <span>{{ folder.name }}</span>
+                <small>{{ folder.count }}</small>
+              </button>
+              <div v-if="cardMoveFolderRows.length === 0" class="card-move-empty">未找到可用目录</div>
+            </div>
+
+            <div v-if="cardMovePrompt.error" class="prompt-error">{{ cardMovePrompt.error }}</div>
+            <div class="prompt-actions card-move-submit">
+              <button type="button" :disabled="cardMovePrompt.busy || cardMovePrompt.folderBusy" @click="closeCardMovePrompt">取消</button>
+              <button type="button" class="primary" :disabled="!cardMoveDestinationReady || cardMovePrompt.busy || cardMovePrompt.folderBusy" @click="submitBulkMoveCharacterCards">
+                {{ cardMovePrompt.busy ? "移动中..." : `移动 ${selectedCount} 张人物卡` }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="cardDeletePrompt.open" class="prompt-backdrop" @click.self="!cardDeletePrompt.busy && (cardDeletePrompt.open = false)">
+          <div class="prompt-panel duplicate-delete-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="card-delete-title">
+            <span class="risk-kicker">不可恢复的文件操作</span>
+            <strong id="card-delete-title">批量删除人物卡</strong>
+            <p class="subtext">将从当前人物卡目录永久删除已选择的 PNG 文件。</p>
+            <div class="prompt-note">
+              <span>将要删除</span>
+              <strong>{{ selectedCount }} 张人物卡</strong>
+            </div>
+            <div class="prompt-note">
+              <span>所在目录</span>
+              <strong class="mono">{{ cardFolderDisplay }}</strong>
+            </div>
+            <div class="prompt-note">
+              <span>可逆性</span>
+              <strong>应用不会保留备份，删除后无法自动恢复</strong>
+            </div>
+            <div v-if="cardDeletePrompt.error" class="prompt-error">{{ cardDeletePrompt.error }}</div>
+            <div class="prompt-actions">
+              <button type="button" :disabled="cardDeletePrompt.busy" @click="cardDeletePrompt.open = false">取消</button>
+              <button type="button" class="danger-action" :disabled="cardDeletePrompt.busy" @click="submitBulkDeleteCharacterCards">
+                {{ cardDeletePrompt.busy ? "删除中..." : `确认删除 ${selectedCount} 张人物卡` }}
               </button>
             </div>
           </div>

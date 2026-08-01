@@ -429,7 +429,7 @@ GET /mods/items?offset=0&limit=500&search=&kind=&author=&status=
 GET /mods/items?zipmod_id=<zipmod_id>&offset=0&limit=1000
 ```
 
-物品浏览首批加载 500 条 `mod_items`，滚动接近底部后继续分页加载。模组详情的“物品” tab 使用 `zipmod_id` 查询当前模组的关联物品，并展示缩略图、物品名、Kind 映射和状态。`search` 同时匹配 `name`、`item_id` 和 `zipmod_guid`；`status` 当前支持 `ready`、`parse` 和 `thumb`。
+物品浏览首批加载 500 条 `mod_items`，滚动接近底部后继续分页加载。模组详情的“物品” tab 使用 `zipmod_id` 查询当前模组的关联物品，并展示缩略图、物品名、Kind 映射和状态。`search` 同时匹配 `name`、`item_id` 和 `zipmod_guid`；`status` 当前支持 `ready`、`error` 和 `thumb`。
 
 筛选项：
 
@@ -472,20 +472,40 @@ POST /mods/items/<id>/delete
 
 这些接口会直接改写 zipmod 或删除文件，调用侧必须走高风险确认或清晰的单项确认流程。
 
+当前实现还提供：
+
+```text
+GET  /plugins?game_dir=&search=&category=&offset=&limit=&refresh=
+POST /mods/items/<id>/model-preview
+POST /mods/items/<id>/export-fbx
+POST /mods/items/<id>/export-thumbnail
+GET  /mods/models/<file.glb>
+GET  /mods/mannequin/body.fbx
+```
+
+这些资源预览和导出接口不改变数据库源记录；模型缓存、缩略图缓存和插件扫描缓存都属于可重建运行时数据。完整 HTTP/task payload 以 `apps/docs/backend-interface.md` 为准。
+
 ## 当前后端模块
 
 ```text
 apps/backend/star_manager/
 |-- core/
+|   |-- card_metadata.py
 |   |-- card_parser.py
-|   |-- config.py
+|   |-- character_profile.py
+|   |-- coordinate_card.py
 |   `-- zipmod_utils.py
 |-- services/
+|   |-- achievements.py
+|   |-- card_database.py
 |   |-- card_library.py
+|   |-- model_preview.py
 |   |-- mod_database.py
 |   |-- mod_database_assets.py
 |   |-- mod_database_core.py
 |   |-- mod_database_queries.py
+|   |-- plugin_library.py
+|   |-- sims4_workbench.py
 |   `-- mod_workflow.py
 |-- tools/
 |   `-- mod_sorter.py
@@ -500,25 +520,29 @@ apps/backend/star_manager/
 - `mod_database_queries.py`：数据库状态、zipmod/物品列表、筛选项、GUID 查找和 zipmod 导出等读写边界较轻的查询/导出接口。
 - `mod_database_assets.py`：zipmod 扫描、manifest/CSV 解析、Unity3D 引用诊断、缩略图提取、CSV/zip 写回、模组修复和删除类操作。
 - `card_library.py`：读取 `UserData/chara` 目录树、过滤 AIS PNG、生成标准化人物卡预览。
+- `plugin_library.py`：扫描 BepInEx DLL 元数据，并将带有效 GUID 的结果缓存到同一个 SQLite 文件。
+- `model_preview.py`：读取 item 的 MainAB，生成运行时 GLB 或静态 FBX。
+- `achievements.py`：维护本地成就表，不参与资源索引。
+- `sims4_workbench.py`：调度 Sims 4 Package 的 LOD0 FBX/PNG 导出和可选 Blender T-Pose 固化。
 - `mod_workflow.py`：执行人物卡依赖搜索、模组提取和整理任务。
 - `bridge.py`：管理异步任务状态，把 HTTP `POST /tasks` 映射到业务服务。
 
-## 初版边界
+## 当前实现边界
 
-初版只保证：
+当前已经实现：
 
-- 能从 `manifest.xml` 建立 zipmod 列表。
-- 能从 CSV 实际数据行建立物品列表。
-- 能统计每个 zipmod 的物品总数。
-- 能按 GUID、名称、作者、物品名称搜索。
-- 能记录解析失败状态，不因单个坏 zipmod 或坏 CSV 中断全量扫描。
+- 从 `manifest.xml` 建立 zipmod 主索引，并把重复 GUID 放入 `duplicate_zipmods`。
+- 从 CSV 实际数据行建立 `mod_items`，记录解析、缩略图和 MainAB Unity3D 状态。
+- 统计 zipmod 物品数、Unity3D 汇总、缩略图问题和角色卡依赖使用关系。
+- 支持 GUID、名称、作者、物品名称、Kind、状态和使用关系查询。
+- 单个坏 zipmod、坏 CSV 或不可读资源只记录错误，不中断整个扫描。
+- 角色卡数据库、BepInEx 插件缓存和本地成就复用同一 SQLite 文件。
 
-以下能力可以后续再做：
+当前仍未实现或不作为数据库保证的能力：
 
-- 资源存在性检查。
-- 缺失依赖分析。
-- 用户标签、收藏、分类。
-- 内容哈希去重。
+- 通用内容哈希去重；变动检测仍以路径、文件大小和修改时间为主。
+- AssetStudio helper 尚未成为主扫描路径；Unity3D 读取主要使用 UnityPy/内置诊断流程。
+- 数据库不是源文件备份，也不保存完整 zipmod/PNG 二进制内容。
 
 ## Unity3D resource status
 

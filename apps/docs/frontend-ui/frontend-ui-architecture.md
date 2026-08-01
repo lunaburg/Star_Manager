@@ -1,12 +1,15 @@
 # Star_Manager 前端 UI 架构
 
-本文档是拆分后的前端 UI 架构文档入口。当前静态预览基线见 [frontend-ui-preview.html](frontend-ui-preview.html)。
+本文档是拆分后的前端 UI 架构文档入口。仓库不再维护独立的静态预览 HTML；当前实现以 `apps/src/` 的 Vue 组件和 `apps/src/styles.css` 为准。
 
 UI 架构按业务职责拆分为：
 
 - [项目内容总览](../project-overview.md)：当前产品范围、运行架构、目录职责、前后端模块、数据模型、主要工作流、命令和开发规则。
 - [主布局](main-layout.md)：应用外壳、全局导航、顶部栏、工作区区域、通用交互规则。
 - [开始页布局](start-layout.md)：启动游戏、路径入口、游戏配置、管理器配置、高风险操作策略。
+- [工作台布局](workbench-layout.md)：模组制作辅助工具、Sims 4 Package 到 LOD0 FBX 的提取流程与当前限制。
+- [插件管理布局](plugins-layout.md)：BepInEx 插件扫描、元数据、依赖、缓存和只读边界。
+- [设置页布局](settings-layout.md)：启动行为、自动检查、本地成就、导出偏好、收藏主题和 Blender 集成。
 - [角色卡库布局](character-cards-layout.md)：`UserData/chara` 目录树、人物卡网格、批量选择、依赖提取。
 - [Zipmod 库布局](zipmod-library-layout.md)：本地 zipmod 索引浏览、筛选、表格、详情抽屉、诊断与修复。
 - [总览页布局](overview-layout.md)：游戏目录概况、资源健康状态、最近任务、建议操作。
@@ -25,7 +28,7 @@ UI 架构按业务职责拆分为：
 
 当前实现基线：
 
-- Electron preload 暴露目录选择、PNG 选择、设置读写、游戏启动、打开文件所在目录和 `backendRequest`。
+- Electron preload 暴露目录选择、PNG/Package 文件选择、设置读写、游戏启动、打开文件所在目录和 `backendRequest`。
 - 后端是本地 HTTP 服务，默认端口 `8765`，支持 `/health` 返回当前 task type 和 API route 列表。
 - 模组管理已经接入筛选、分页、缩略图、关联物品、诊断和部分修复动作。
 - 角色管理已经接入目录树、当前目录卡片列表和标准化卡片预览。
@@ -34,7 +37,7 @@ UI 架构按业务职责拆分为：
 当前预览基线：
 
 - 应用外壳由左侧导航、顶部全局栏和主工作区组成。
-- 左侧品牌为 `Star_Manager / HS2 resource desk`，导航顺序为开始游戏、总览、角色管理、模组管理、运行日志。
+- 左侧品牌为 `Star_Manager / HS2 resource desk`，导航顺序为开始游戏、总览、角色管理、模组管理、插件管理、工作台、运行日志，设置固定在底部。
 - 侧栏只保留品牌和主导航，不固定显示安全上下文，也不放“导出诊断信息”入口。
 - 顶部全局栏包含 HS2 目录选择、当前目录路径、目录有效状态、后台任务进度、后端状态和单一“重建数据库”入口。
 - 角色管理页使用“人物卡浏览器 + 卡片目录”双栏，不在人物卡浏览器标题栏右侧放刷新、视图或更多按钮；这些操作属于下方工具栏或全局栏。

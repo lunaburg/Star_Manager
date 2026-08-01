@@ -362,6 +362,7 @@ def list_zipmods(
     author: str = "",
     status: str = "",
     usage: str = "",
+    zipmod_id: int = 0,
 ) -> dict:
     resolved = db_path.resolve()
     offset = max(0, int(offset))
@@ -369,6 +370,7 @@ def list_zipmods(
     author = str(author or "").strip()
     status = str(status or "").strip()
     usage = str(usage or "").strip()
+    zipmod_id = max(0, int(zipmod_id or 0))
     if not resolved.exists() or not resolved.is_file():
         return {
             "exists": False,
@@ -378,7 +380,7 @@ def list_zipmods(
             "limit": limit,
             "total": 0,
             "has_more": False,
-            "filters": {"author": author, "status": status, "usage": usage},
+            "filters": {"author": author, "status": status, "usage": usage, "zipmod_id": zipmod_id},
         }
 
     conn = sqlite3.connect(resolved)
@@ -386,8 +388,11 @@ def list_zipmods(
     try:
         init_db(conn)
         where_sql = ""
-        params: list[str] = []
+        params: list[object] = []
         where_clauses: list[str] = ["scan_status != 'stale'"]
+        if zipmod_id:
+            where_clauses.append("id = ?")
+            params.append(zipmod_id)
         if author:
             if author == UNKNOWN_AUTHOR:
                 where_clauses.append("TRIM(COALESCE(author, '')) = ''")
@@ -596,7 +601,7 @@ def list_zipmods(
             "limit": limit,
             "total": total,
             "has_more": offset + len(rows) < total,
-            "filters": {"author": author, "status": status, "usage": usage},
+            "filters": {"author": author, "status": status, "usage": usage, "zipmod_id": zipmod_id},
         }
     finally:
         conn.close()
@@ -627,7 +632,7 @@ def export_zipmods(
         return {"ok": False, "error": "Invalid export mode"}
 
     export_layout = str(layout or "tree").lower()
-    if export_layout not in {"tree", "by_author"}:
+    if export_layout not in {"tree", "by_author", "portable"}:
         return {"ok": False, "error": "Invalid export layout"}
 
     target_root = Path(target_dir).expanduser().resolve()
@@ -683,7 +688,8 @@ def export_zipmods(
                 if relative.is_absolute() or ".." in relative.parts:
                     relative = Path(source.name)
 
-            target = (target_root / relative).resolve()
+            zipmod_root = target_root / "mods" if export_layout == "portable" else target_root
+            target = (zipmod_root / relative).resolve()
             if target != target_root and target_root not in target.parents:
                 failures.append({"id": zipmod_id, "error": "Unsafe target path"})
                 if progress_callback is not None:
@@ -814,6 +820,76 @@ def export_zipmods(
         conn.close()
 
 
+def _normalized_usage_item_keys(value: object) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    keys = [raw]
+    if raw.isdigit():
+        normalized = raw.lstrip("0") or "0"
+        if normalized not in keys:
+            keys.append(normalized)
+    return keys
+
+
+def _orphaned_usage_item_ids(conn: sqlite3.Connection) -> set[int]:
+    """Resolve legacy dependencies whose item FK was cleared during reindexing."""
+    items_by_kind: dict[tuple[int, str, str], int] = {}
+    items_by_id: dict[tuple[int, str], int] = {}
+    for row in conn.execute(
+        """
+        SELECT mod_items.id, mod_items.zipmod_id, mod_items.kind, mod_items.item_id
+        FROM mod_items
+        INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
+        WHERE zipmods.scan_status != 'stale'
+        ORDER BY mod_items.id
+        """
+    ):
+        zipmod_id = int(row["zipmod_id"])
+        kind = str(row["kind"] or "").strip()
+        item_db_id = int(row["id"])
+        for item_key in _normalized_usage_item_keys(row["item_id"]):
+            items_by_kind.setdefault((zipmod_id, kind, item_key), item_db_id)
+            items_by_id.setdefault((zipmod_id, item_key), item_db_id)
+
+    fallback_ids: set[int] = set()
+    for row in conn.execute(
+        """
+        SELECT ccd.zipmod_id, ccd.category_no, ccd.slot, ccd.local_slot
+        FROM character_card_dependencies ccd
+        INNER JOIN character_cards cc ON cc.id = ccd.card_id
+        WHERE cc.parse_status != 'stale'
+          AND ccd.mod_item_id IS NULL
+          AND ccd.zipmod_id IS NOT NULL
+        """
+    ):
+        zipmod_id = int(row["zipmod_id"])
+        kind = str(row["category_no"] or "").strip()
+        candidates = [row["slot"], row["local_slot"]]
+        item_db_id = next(
+            (
+                items_by_kind.get((zipmod_id, kind, item_key))
+                for value in candidates
+                for item_key in _normalized_usage_item_keys(value)
+                if items_by_kind.get((zipmod_id, kind, item_key)) is not None
+            ),
+            None,
+        )
+        if item_db_id is None:
+            item_db_id = next(
+                (
+                    items_by_id.get((zipmod_id, item_key))
+                    for value in candidates
+                    for item_key in _normalized_usage_item_keys(value)
+                    if items_by_id.get((zipmod_id, item_key)) is not None
+                ),
+                None,
+            )
+        if item_db_id is not None:
+            fallback_ids.add(int(item_db_id))
+    return fallback_ids
+
+
 def list_mod_items(
     db_path: Path = DEFAULT_DB_PATH,
     offset: int = 0,
@@ -849,6 +925,17 @@ def list_mod_items(
     conn.row_factory = sqlite3.Row
     try:
         init_db(conn)
+        if usage in {"used", "unused"}:
+            conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS star_manager_usage_fallback (id INTEGER PRIMARY KEY)"
+            )
+            conn.execute("DELETE FROM star_manager_usage_fallback")
+            fallback_ids = _orphaned_usage_item_ids(conn)
+            if fallback_ids:
+                conn.executemany(
+                    "INSERT INTO star_manager_usage_fallback (id) VALUES (?)",
+                    ((item_id,) for item_id in fallback_ids),
+                )
         params: list[int | str] = []
         where_clauses: list[str] = ["zipmods.scan_status != 'stale'"]
         if zipmod_id is not None:
@@ -909,6 +996,7 @@ def list_mod_items(
                     WHERE cc.parse_status != 'stale'
                       AND ccd.mod_item_id = mod_items.id
                 )
+                OR mod_items.id IN (SELECT id FROM star_manager_usage_fallback)
                 """
             )
         elif usage == "unused":
@@ -921,6 +1009,7 @@ def list_mod_items(
                     WHERE cc.parse_status != 'stale'
                       AND ccd.mod_item_id = mod_items.id
                 )
+                AND mod_items.id NOT IN (SELECT id FROM star_manager_usage_fallback)
                 """
             )
         where_clause = "WHERE " + " AND ".join(f"({clause})" for clause in where_clauses) if where_clauses else ""

@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { observeLazyThumbnail, unobserveLazyThumbnail } from "../lazyThumbnailObserver";
 
 const props = defineProps({
   alt: { type: String, default: "" },
@@ -9,12 +10,9 @@ const props = defineProps({
 
 const root = ref(null);
 const visible = ref(props.eager);
-let observer = null;
 
 function stopObserver() {
-  if (!observer) return;
-  observer.disconnect();
-  observer = null;
+  unobserveLazyThumbnail(root.value);
 }
 
 function startObserver() {
@@ -23,20 +21,11 @@ function startObserver() {
     visible.value = props.eager || visible.value;
     return;
   }
-  if (!("IntersectionObserver" in window)) {
+  if (!observeLazyThumbnail(root.value, () => {
     visible.value = true;
-    return;
+  })) {
+    visible.value = true;
   }
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        visible.value = true;
-        stopObserver();
-      }
-    },
-    { root: null, rootMargin: "180px", threshold: 0.01 }
-  );
-  if (root.value) observer.observe(root.value);
 }
 
 onMounted(startObserver);

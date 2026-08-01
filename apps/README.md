@@ -18,7 +18,12 @@ Current app views:
 - Overview: selected-directory status, library health, suggested actions, and recent tasks.
 - Characters: card-folder tree, AIS card previews, card detail, and parsed dependency information.
 - Mods: item browsing, zipmod browsing, filters, detail drawer, diagnostics, and direct/batch maintenance actions.
+- Plugins: read-only BepInEx plugin inventory, metadata, dependencies, process restrictions, and diagnostics.
+- Workbench: Sims 4 Package to LOD0 FBX/PNG extraction, with optional Blender-based A-Pose to HS2-aligned T-Pose baking and final static-mesh cleanup.
 - Logs: task progress and runtime messages.
+- Settings: manager startup behavior, automatic database-change checks, local achievements, export defaults, portable dependency-package preferences, favorite-card themes, and Blender path.
+
+The Start page's `setup.xml` controls are currently a renderer-side placeholder: the launch buttons work, but the displayed setup values are not yet read from or written back to the game's XML file.
 
 ## Structure
 
@@ -31,7 +36,9 @@ apps/
 |-- backend/tests/            # Python backend tests
 |-- backend/runtime/          # Development runtime cache, generated locally
 |-- scripts/                  # Developer and packaging helper scripts
+|-- tools/                    # Isolated C# helper and card metadata plugin
 |-- docs/                     # Project documentation
+|-- build-resources/          # Electron icon/branding and bundled Workbench assets
 |-- dist/                     # Vite build output
 |-- build/                    # Backend packaging output
 |-- release/                  # Electron-builder output
@@ -53,6 +60,7 @@ npm run check:python
 npm run python:dev
 npm run dev
 npm run build
+npm run build:card-plugin
 npm run electron
 npm run build:backend
 npm run package:win
@@ -102,7 +110,10 @@ Examples of direct operations:
 Examples of task operations:
 
 - rebuild the mod/card database;
+- import external zipmods, loose Unity3D files, character cards, and clothes cards;
 - export or organize selected zipmods;
+- organize every zipmod under `mods/` by author;
+- generate one card's portable dependency package;
 - bulk repair Unity3D issues;
 - smart cleanup duplicate zipmods;
 - bulk delete zipmods;
@@ -120,7 +131,13 @@ Examples of task operations:
 - `backend/star_manager/services/mod_database_assets.py`: zipmod scanning, manifest/CSV parsing, thumbnail handling, Unity3D diagnostics, and repair/delete write-back helpers.
 - `backend/star_manager/services/card_library.py`: card folder tree, card listing, normalized preview images, and card detail.
 - `backend/star_manager/services/card_database.py`: character-card indexing and dependency association with zipmods/items.
+- `backend/star_manager/services/plugin_library.py`: read-only BepInEx DLL metadata scan and SQLite cache.
+- `backend/star_manager/services/achievements.py`: local achievement progress, events, preferences, and reset.
+- `backend/star_manager/services/model_preview.py`: on-demand Unity3D mesh/material conversion to runtime GLB and static FBX export.
 - `backend/star_manager/core/card_parser.py`: AIS card PNG payload parsing and dependency extraction.
+- `backend/star_manager/core/card_metadata.py`: registered Star Manager card favorite/rating/tag metadata access.
+- `backend/star_manager/core/character_profile.py`: atomic character profile and cover updates.
+- `backend/star_manager/core/coordinate_card.py`: coordinate block extraction for standalone clothes cards.
 - `backend/star_manager/core/runtime_paths.py`: runtime path helpers.
 - `backend/star_manager/core/zipmod_utils.py`: HS2 directory checks and zipmod helper logic.
 - `backend/star_manager/services/mod_workflow.py`: legacy card search, dependency extraction, and zipmod sorting workflows.
@@ -134,8 +151,10 @@ Core indexed data:
 - `zipmods`: one primary row per manifest GUID, file metadata, scan status, Unity3D summary, and diagnostics.
 - `duplicate_zipmods`: duplicate files for GUIDs already represented by a primary zipmod.
 - `mod_items`: item rows parsed from `abdata/list/**/*.csv`, linked to source zipmods.
-- `character_cards`: indexed card PNG files under `UserData/chara`.
+- `character_cards`: indexed card PNG files under `UserData/chara`, with file-signature-validated browser metadata caches.
 - `character_card_dependencies`: card dependencies parsed from UniversalAutoResolver records and linked to zipmods/items when possible.
+- `bepinex_plugin_cache`: per-game BepInEx plugin scan payload and source fingerprint.
+- `achievement_progress`, `achievement_events`, `achievement_preferences`: local achievement state and preferences.
 
 Database rebuild flow:
 
@@ -169,14 +188,21 @@ Read and file routes:
 - `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=&usage=`
 - `GET /mods/items/filters`
 - `GET /mods/thumbnails?path=`
+- `GET /mods/models/:file.glb`
+- `GET /mods/mannequin/body.fbx`
+- `GET /plugins?game_dir=&search=&category=&offset=&limit=&refresh=`
 - `GET /library/cards/tree?game_dir=`
 - `GET /library/cards?game_dir=&path=`
 - `GET /library/cards/detail?game_dir=&path=`
 - `GET /library/cards/image?game_dir=&path=`
+- `GET /library/cards/tags?game_dir=`
+- `GET /achievements`
 
 Mutation and task routes:
 
 - `POST /tasks`
+- `POST /tools/sims4/package-fbx`
+  - Extracts the highest-vertex LOD0 GEOM mesh per model family, decodes all DXT5 RLE2 swatches to PNG, and assigns one nearby swatch as each FBX's external default texture. When Blender is configured it temporarily restores GEOM weights with the bundled 165-bone TS4 template, bakes the A-pose mesh into an HS2-aligned horizontal-arm T-pose, removes the Armature and all skin data, and exports a pure mesh FBX; otherwise it retains unposed static-FBX compatibility.
 - `POST /mods/zipmods/:id/repair-unity3d`
 - `POST /mods/zipmods/:id/update-author`
 - `POST /mods/zipmods/:id/manifest`
@@ -186,7 +212,20 @@ Mutation and task routes:
 - `POST /mods/zipmods/:id/delete`
 - `POST /mods/items/:id/import-thumbnail`
 - `POST /mods/items/:id/export-thumbnail`
+- `POST /mods/items/:id/model-preview`
+- `POST /mods/items/:id/export-fbx`
 - `POST /mods/items/:id/delete`
+- `POST /library/cards/folders/create`
+- `POST /library/cards/folders/rename`
+- `POST /library/cards/set-navi`
+- `POST /library/cards/set-favorite`
+- `POST /library/cards/set-rating`
+- `POST /library/cards/set-tags`
+- `POST /library/cards/update-profile`
+- `POST /library/cards/replace-cover`
+- `POST /library/cards/export-coordinate`
+- `POST /achievements/preferences`
+- `POST /achievements/reset`
 
 Current task types:
 
@@ -196,10 +235,16 @@ Current task types:
 - `sort_mods`
 - `build_card_database`
 - `build_mod_database`
+- `import_external_zipmods`
+- `export_character_dependency_package`
 - `bulk_export_zipmods`
 - `bulk_organize_zipmods`
+- `organize_all_zipmods_by_author`
 - `bulk_cleanup_duplicate_zipmods`
 - `bulk_delete_zipmods`
+- `bulk_delete_character_cards`
+- `bulk_add_character_card_tags`
+- `bulk_move_character_cards`
 - `bulk_repair_zipmods_unity3d`
 - `bulk_update_zipmod_authors`
 - `bulk_apply_item_thumbnail`
@@ -211,23 +256,30 @@ For exact payloads and response shapes, see `docs/backend-interface.md`.
 
 The preload bridge exposes:
 
-- directory and PNG file pickers;
+- directory, PNG, Sims 4 Package, and Blender executable file pickers;
+- a PNG picker dedicated to cover-crop input;
 - a native text prompt;
 - `showItemInFolder` for file-location actions;
 - game launch helpers for `HoneySelect2.exe`, `StudioNEOV2.exe`, and `HoneySelect2VR.exe`;
-- persisted settings for `gameDir`, `inputDir`, and `outputDir`;
+- a Workbench helper that launches Blender and imports one exported FBX while preserving its external texture working directory;
+- persisted settings for `gameDir`, `inputDir`, `outputDir`, `coordinateExportDir`, `portablePackageDir`, `portablePackageCompress`, `portablePackageTypes`, `startupView`, `favoriteCardTheme`, `checkDatabaseChangesOnStartup`, and `blenderExecutablePath`;
 - `backendRequest` for local HTTP API calls.
 
 Packaged builds can use a PyInstaller backend executable from `build/backend/star_manager_backend.exe`; otherwise Electron starts the Python backend script.
 
 ## Documentation
 
+- [docs/project-introduction.md](docs/project-introduction.md): 面向用户的产品介绍、页面导览、首次使用流程和功能边界。
+- `docs/README.md`: canonical documentation index and task-oriented reading map.
 - `docs/project-overview.md`: product map, runtime architecture, directory responsibilities, data model, workflows, commands, tests, and development rules.
 - `docs/backend-interface.md`: frontend/backend contract, direct routes, task protocol, and mutation boundaries.
 - `docs/frontend-ui/frontend-ui-architecture.md`: UI documentation index and high-level layout assumptions.
+- `docs/frontend-ui/plugins-layout.md`: current BepInEx plugin inventory page and scan/cache boundary.
+- `docs/frontend-ui/settings-layout.md`: manager settings, persistence fields, achievements, export defaults, and Blender integration.
 - `docs/mod_manage/mod_database_design.md`: SQLite schema and mod database build rules.
 - `docs/mod_manage/mod_database_change_detection.md`: incremental rebuild behavior and dependency relinking.
 - `docs/mod_manage/character_card_parsing.md`: AIS card PNG payload and dependency parsing notes.
+- `docs/card-metadata-plugin.md`: companion BepInEx plugin for persistent registered `KKEx` metadata.
 - `docs/packaging-windows.md`: Windows packaging flow and verification commands.
 
 ## Development Notes

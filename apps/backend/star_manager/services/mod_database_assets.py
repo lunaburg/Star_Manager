@@ -16,6 +16,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
+from urllib.parse import quote
 import xml.etree.ElementTree as ET
 
 from star_manager.core.runtime_paths import runtime_root
@@ -2962,6 +2963,7 @@ def import_zipmod_item_thumbnail(
             return {"ok": False, "error": "Zipmod file not found"}
 
         csv_path = normalize_zip_path(item["csv_path"])
+        item_key = str(item["item_id"] or "")
         image_arcname = normalize_zip_path(
             f"abdata/thumbnail/star_manager/{safe_thumbnail_file_name(item['item_id'], source_image)}"
         )
@@ -3007,7 +3009,51 @@ def import_zipmod_item_thumbnail(
                 (candidate.file_size, candidate.modified_at, now, int(zipmod["id"])),
             )
 
-        return {
+        # Re-parsing a zipmod replaces its item rows, so return the newly
+        # indexed row. The renderer can update its current page in place
+        # without rebuilding/reloading the entire database list.
+        updated = conn.execute(
+            """
+            SELECT mod_items.id, mod_items.zipmod_id, mod_items.parse_status,
+                   mod_items.thumbnail_status, mod_items.thumbnail_cache_path,
+                   mod_items.unity3d_status, mod_items.unity3d_error,
+                   mod_items.name, mod_items.kind, mod_items.zipmod_author,
+                   mod_items.zipmod_guid, mod_items.item_id, mod_items.csv_path,
+                   mod_items.main_ab, zipmods.name AS zipmod_name,
+                   zipmods.file_name AS zipmod_file_name
+            FROM mod_items
+            INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
+            WHERE mod_items.zipmod_id = ?
+              AND mod_items.item_id = ?
+            ORDER BY CASE WHEN mod_items.csv_path = ? THEN 0 ELSE 1 END,
+                     mod_items.id
+            LIMIT 1
+            """,
+            (int(zipmod["id"]), item_key, csv_path),
+        ).fetchone()
+        updated_item = None
+        if updated is not None:
+            cache_path = str(updated["thumbnail_cache_path"] or "")
+            updated_item = {
+                "id": updated["id"],
+                "zipmod_id": updated["zipmod_id"],
+                "status": updated["parse_status"],
+                "thumbnail_status": updated["thumbnail_status"],
+                "thumbnail_cache_path": cache_path,
+                "thumbnail_url": f"/mods/thumbnails?path={quote(cache_path)}" if cache_path else "",
+                "unity3d_status": updated["unity3d_status"],
+                "unity3d_error": updated["unity3d_error"],
+                "name": updated["name"],
+                "kind": updated["kind"],
+                "author": updated["zipmod_author"] or "未知作者",
+                "source_mod": updated["zipmod_name"] or updated["zipmod_file_name"],
+                "zipmod_guid": updated["zipmod_guid"],
+                "item_id": updated["item_id"],
+                "csv_path": updated["csv_path"],
+                "main_ab": updated["main_ab"],
+            }
+
+        response = {
             "ok": True,
             "zipmod_id": int(zipmod["id"]),
             "item_id": int(mod_item_id),
@@ -3015,6 +3061,9 @@ def import_zipmod_item_thumbnail(
             "csv_path": csv_path,
             "message": "已导入缩略图并更新 CSV",
         }
+        if updated_item is not None:
+            response["item"] = updated_item
+        return response
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         return {"ok": False, "error": str(exc)}
     finally:

@@ -559,42 +559,81 @@ def replace_mod_items(
     prepared: PreparedZipmodItems,
     now: str,
 ) -> tuple[int, int]:
-    conn.execute("DELETE FROM mod_items WHERE zipmod_id = ?", (zipmod_id,))
+    existing_rows = conn.execute(
+        "SELECT id, zipmod_guid, kind, item_id FROM mod_items WHERE zipmod_id = ?",
+        (zipmod_id,),
+    ).fetchall()
+    existing_by_key = {
+        (str(row["zipmod_guid"] or ""), str(row["kind"] or ""), str(row["item_id"] or "")): int(row["id"])
+        for row in existing_rows
+    }
+    remaining_ids = {int(row["id"]) for row in existing_rows}
+
     for item in prepared.items:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO mod_items (
-                zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind, name,
-                main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
-                thumbnail_cache_path, thumbnail_status, thumbnail_error,
-                unity3d_status, unity3d_error,
-                parse_status, parse_error, created_at, updated_at
+        key = (
+            str(candidate.manifest.guid or ""),
+            str(item.kind or ""),
+            str(item.item_id or ""),
+        )
+        item_id = existing_by_key.get(key)
+        values = (
+            zipmod_id,
+            candidate.manifest.guid,
+            candidate.manifest.author,
+            item.csv_path,
+            item.item_id,
+            item.kind,
+            item.name,
+            item.main_manifest,
+            item.main_ab,
+            item.main_data,
+            item.thumb_ab,
+            item.thumb_tex,
+            item.thumbnail_cache_path,
+            item.thumbnail_status,
+            item.thumbnail_error,
+            item.unity3d_status,
+            item.unity3d_error,
+            item.parse_status,
+            item.parse_error,
+            now,
+        )
+        if item_id is not None:
+            conn.execute(
+                """
+                UPDATE mod_items
+                SET zipmod_id = ?, zipmod_guid = ?, zipmod_author = ?, csv_path = ?,
+                    item_id = ?, kind = ?, name = ?, main_manifest = ?, main_ab = ?,
+                    main_data = ?, thumb_ab = ?, thumb_tex = ?, thumbnail_cache_path = ?,
+                    thumbnail_status = ?, thumbnail_error = ?, unity3d_status = ?,
+                    unity3d_error = ?, parse_status = ?, parse_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (*values, item_id),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                zipmod_id,
-                candidate.manifest.guid,
-                candidate.manifest.author,
-                item.csv_path,
-                item.item_id,
-                item.kind,
-                item.name,
-                item.main_manifest,
-                item.main_ab,
-                item.main_data,
-                item.thumb_ab,
-                item.thumb_tex,
-                item.thumbnail_cache_path,
-                item.thumbnail_status,
-                item.thumbnail_error,
-                item.unity3d_status,
-                item.unity3d_error,
-                item.parse_status,
-                item.parse_error,
-                now,
-                now,
-            ),
+            remaining_ids.discard(item_id)
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO mod_items (
+                    zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind, name,
+                    main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
+                    thumbnail_cache_path, thumbnail_status, thumbnail_error,
+                    unity3d_status, unity3d_error,
+                    parse_status, parse_error, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*values, now),
+            )
+            item_id = int(cursor.lastrowid)
+            existing_by_key[key] = item_id
+
+    if remaining_ids:
+        placeholders = ", ".join("?" for _ in remaining_ids)
+        conn.execute(
+            f"DELETE FROM mod_items WHERE zipmod_id = ? AND id IN ({placeholders})",
+            (zipmod_id, *sorted(remaining_ids)),
         )
 
     conn.execute(
@@ -629,7 +668,7 @@ def build_database(
     thumbnail_dir: Path,
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
-) -> dict[str, int]:
+) -> dict[str, object]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
             progress_callback(value, message)
@@ -661,6 +700,16 @@ def build_database(
         )
         report(SCAN_PROGRESS, "Scanning mods/**/*.zipmod")
         force_full = str(mode or "incremental").lower() == "full"
+        existing_primary_paths = {
+            str(row["guid"]): str(row["file_path"])
+            for row in conn.execute(
+                "SELECT guid, file_path FROM zipmods WHERE scan_status != 'stale'"
+            )
+            if str(row["guid"] or "") and not str(row["guid"]).startswith("__invalid__:")
+        }
+        existing_guids_by_path = {
+            file_path: guid for guid, file_path in existing_primary_paths.items()
+        }
 
         def report_scan_progress(stage: str, current: int, total: int) -> None:
             if stage == "discover":
@@ -698,6 +747,30 @@ def build_database(
         retry_thumbnail_guids = set() if force_full else thumbnail_retry_guids(conn)
         retry_unity3d_guids = set() if force_full else unity3d_retry_guids(conn)
         retry_guids = retry_thumbnail_guids | retry_unity3d_guids
+        primary_changed_guids = {
+            guid
+            for guid, primary in primary_by_guid.items()
+            if guid in existing_primary_paths
+            and existing_primary_paths[guid] != str(primary.path)
+        }
+        replaced_item_guids = {
+            guid
+            for guid, primary in primary_by_guid.items()
+            if force_full
+            or str(primary.path) in changed_paths
+            or guid in retry_guids
+            or guid in primary_changed_guids
+        }
+        current_guids = set(primary_by_guid)
+        removed_guids = set(existing_primary_paths) - current_guids
+        previous_guids_for_changed_paths = {
+            existing_guids_by_path[path]
+            for path in changed_paths
+            if path in existing_guids_by_path
+        }
+        affected_mod_guids = (
+            replaced_item_guids | removed_guids | previous_guids_for_changed_paths
+        )
         worker_count = choose_build_worker_count(len(primary_by_guid))
 
         stats = {
@@ -715,6 +788,9 @@ def build_database(
             "unity3d_retry_zipmods": len(retry_unity3d_guids),
             "thumbnail_profile_log": str(thumbnail_profile_log_path.resolve()),
             "thumbnail_profile_run_id": thumbnail_profile_run_id,
+            "affected_mod_guids": sorted(affected_mod_guids, key=str.casefold),
+            "affected_mod_guid_count": len(affected_mod_guids),
+            "primary_changed_guid_count": len(primary_changed_guids),
         }
         report(
             PREPARE_START_PROGRESS,
@@ -727,9 +803,7 @@ def build_database(
         primary_candidates = [
             primary_by_guid[guid]
             for guid, _group in grouped_items
-            if force_full
-            or str(primary_by_guid[guid].path) in changed_paths
-            or guid in retry_guids
+            if guid in replaced_item_guids
         ]
         total_primary_candidates = len(primary_candidates)
         if worker_count > 1:
@@ -794,9 +868,7 @@ def build_database(
                 )
                 prepared = prepared_by_guid.get(guid)
                 should_replace_items = (
-                    force_full
-                    or str(primary.path) in changed_paths
-                    or guid in retry_guids
+                    guid in replaced_item_guids
                 )
                 if prepared is None and should_replace_items:
                     prepared = prepare_mod_items(game_dir, primary, thumbnail_dir)

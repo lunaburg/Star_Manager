@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 import UnityPy
+from PIL import Image
 from UnityPy.export.MeshExporter import MeshHandler
 
 from star_manager.core.runtime_paths import runtime_root
@@ -171,10 +172,14 @@ def _build_glb(meshes: list[tuple], material_specs: list[dict] | None = None) ->
                 for bone_index, bone_name in enumerate(skin_spec["bone_names"]):
                     if bone_name not in joint_nodes_by_name:
                         joint_nodes_by_name[bone_name] = len(nodes)
-                        nodes.append({
+                        joint_node = {
                             "name": bone_name,
                             "extras": {"fallbackBoneNames": skin_spec["fallback_bone_names"][bone_index]},
-                        })
+                        }
+                        bone_matrices = skin_spec.get("bone_matrices") or []
+                        if bone_index < len(bone_matrices) and bone_matrices[bone_index] is not None:
+                            joint_node["matrix"] = bone_matrices[bone_index]
+                        nodes.append(joint_node)
                     joint_nodes.append(joint_nodes_by_name[bone_name])
                 bind_payload = b"".join(
                     struct.pack("<16f", *matrix)
@@ -441,6 +446,25 @@ def _texture_png(pointer: object, cache: dict[int, bytes]) -> bytes | None:
         return None
 
 
+def _png_has_transparency(data: bytes | None) -> bool:
+    if not data:
+        return False
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.mode in {"RGBA", "LA"}:
+                return image.getchannel("A").getextrema()[0] < 255
+            return "transparency" in image.info
+    except (OSError, ValueError):
+        return False
+
+
+def _normalize_preview_material_color(color: list[float], has_base_texture: bool) -> list[float]:
+    normalized = [max(0.0, min(1.0, float(value))) for value in color]
+    if has_base_texture and normalized[3] <= 0.001:
+        normalized[3] = 1.0
+    return normalized
+
+
 def _renderer_mesh_links(environment: object) -> list[tuple[int, object]]:
     mesh_by_game_object: dict[int, int] = {}
     renderers = []
@@ -542,20 +566,14 @@ def _select_main_data_meshes(
         return None, "all_meshes_main_data_not_found"
 
     descendant_game_objects = _game_object_descendants(environment, root_game_objects)
+    half_roots, _references = _find_half_model_game_objects(environment, descendant_game_objects) if exclude_half_models else (set(), [])
+    half_game_objects = _game_object_descendants(environment, half_roots) if half_roots else set()
     mesh_ids = {
         mesh_id
         for mesh_id, renderer in _renderer_mesh_links(environment)
         if _pointer_id(renderer.m_GameObject) in descendant_game_objects
+        and _pointer_id(renderer.m_GameObject) not in half_game_objects
     }
-    half_roots, _references = _find_half_model_game_objects(environment, descendant_game_objects) if exclude_half_models else (set(), [])
-    if half_roots:
-        half_game_objects = _game_object_descendants(environment, half_roots)
-        half_mesh_ids = {
-            mesh_id
-            for mesh_id, renderer in _renderer_mesh_links(environment)
-            if _pointer_id(renderer.m_GameObject) in half_game_objects
-        }
-        mesh_ids.difference_update(half_mesh_ids)
     return mesh_ids, "main_data" if mesh_ids else "main_data_no_renderable_mesh"
 
 
@@ -638,15 +656,17 @@ def _extract_materials(
         color = [float(getattr(color_value, channel, 1.0)) for channel in ("r", "g", "b", "a")]
         base_texture = next((textures[name].m_Texture for name in ("_MainTex", "_BaseMap", "_BaseColorMap") if name in textures), None)
         normal_texture = next((textures[name].m_Texture for name in ("_BumpMap", "_NormalMap") if name in textures), None)
+        base_color_png = _texture_png(base_texture, texture_cache) if base_texture else None
+        color = _normalize_preview_material_color(color, bool(base_color_png))
         smoothness = floats.get("_Glossiness", floats.get("_Smoothness", 0.32))
         spec = {
             "name": str(getattr(material, "m_Name", "Material")),
             "color": color,
             "metallic": max(0.0, min(1.0, floats.get("_Metallic", 0.0))),
             "roughness": 1.0 - max(0.0, min(1.0, smoothness)),
-            "base_color_png": _texture_png(base_texture, texture_cache) if base_texture else None,
+            "base_color_png": base_color_png,
             "normal_png": _texture_png(normal_texture, texture_cache) if normal_texture else None,
-            "transparent": color[3] < 0.999,
+            "transparent": color[3] < 0.999 or _png_has_transparency(base_color_png),
         }
         material_indices[path_id] = len(specs)
         specs.append(spec)
@@ -755,8 +775,14 @@ def _write_preview_model(
                         for row in range(4)
                     ])
                 fallback_bone_names = []
+                bone_matrices = []
                 for original_index in used_bone_indices:
                     transform_id = _pointer_id(bone_pointers[original_index])
+                    bone_matrices.append(
+                        _gltf_matrix_from_unity(_transform_world_matrix(transform_id, transforms, transform_matrix_cache))
+                        if transform_id in transforms
+                        else None
+                    )
                     ancestors = []
                     visited: set[int] = set()
                     while transform_id in transforms and transform_id not in visited:
@@ -773,6 +799,7 @@ def _write_preview_model(
                         for index in used_bone_indices
                     ],
                     "fallback_bone_names": fallback_bone_names,
+                    "bone_matrices": bone_matrices,
                     "inverse_bind_matrices": inverse_bind_matrices,
                     "indices": compact_indices,
                     "weights": bone_weights,
@@ -810,7 +837,7 @@ def prepare_item_model_preview(mod_item_id: int, db_path: Path = DEFAULT_DB_PATH
             return {"ok": False, "error": "物品不存在"}
         asset_data, source = _read_main_asset(item)
         cache_key = hashlib.sha1(
-            f"main-data-v11-renderer-transform:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
+            f"main-data-v13-material-alpha:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
         ).hexdigest()
         output = DEFAULT_MODEL_PREVIEW_DIR / cache_key[:2] / f"{cache_key}.glb"
         half_output = output.with_name(f"{cache_key}-half.glb")

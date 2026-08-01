@@ -266,6 +266,11 @@ def init_db(conn: sqlite3.Connection) -> None:
             file_name TEXT NOT NULL DEFAULT '',
             card_uid TEXT NOT NULL DEFAULT '',
             chara_name TEXT NOT NULL DEFAULT '',
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            favorite INTEGER NOT NULL DEFAULT 0,
+            rating INTEGER NOT NULL DEFAULT 0,
+            metadata_file_size INTEGER NOT NULL DEFAULT 0,
+            metadata_modified_ns INTEGER NOT NULL DEFAULT 0,
             preview_cache_path TEXT NOT NULL DEFAULT '',
             modified_at TEXT NOT NULL DEFAULT '',
             parse_status TEXT NOT NULL,
@@ -312,6 +317,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "mod_items", "thumbnail_error", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_error", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "character_cards", "tags_json", "TEXT NOT NULL DEFAULT '[]'")
+    ensure_column(conn, "character_cards", "favorite", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "character_cards", "rating", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "character_cards", "metadata_file_size", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "character_cards", "metadata_modified_ns", "INTEGER NOT NULL DEFAULT 0")
     migrate_mod_items_unique_key(conn)
     conn.executescript(
         """

@@ -24,6 +24,8 @@ The root directory is for repository-level files only. Keep application source, 
 
 When gathering project context or learning how the app works, check the project documents under `apps/docs/` first. Useful entry points:
 
+- `apps/docs/README.md`: canonical documentation index, task-oriented reading paths, and documentation maintenance rules. Start here when you do not yet know which document applies.
+- `apps/docs/project-introduction.md`: 面向用户的产品定位、页面导览、首次使用流程、数据边界和当前限制。需要介绍项目或核对页面行为时先查阅。
 - `apps/docs/project-overview.md`: current project map, product scope, runtime architecture, directory responsibilities, backend/frontend modules, data model, main workflows, commands, and development rules. Start here when you need to understand the whole repo.
 - `apps/README.md`: maintained Electron/Vue/Python app overview, commands, backend boundary, and current backend endpoint summary.
 - `apps/docs/backend-interface.md`: frontend/backend interface contract, Electron preload bridge, direct HTTP routes, task protocol, task types, and the single-object-vs-batch mutation rule.
@@ -31,9 +33,13 @@ When gathering project context or learning how the app works, check the project 
 - `apps/docs/frontend-ui/main-layout.md`: application shell, global navigation, top bar, workspace regions, backend context, and global rebuild-database behavior.
 - `apps/docs/frontend-ui/zipmod-library-layout.md`: mod management UI, mod/item list behavior, detail drawer, pagination, thumbnails, Kind mapping, and file-location interactions.
 - `apps/docs/frontend-ui/character-cards-layout.md`: character-card browser layout and expected card-library behavior.
+- `apps/docs/frontend-ui/character-card-favorite-effects.md`: current configurable favorite-card themes, card/title styling, overflowing-name scrolling, and removal of legacy effect settings. Consult when changing character-card favorite visuals.
 - `apps/docs/frontend-ui/overview-layout.md`: overview dashboard structure and suggested actions.
 - `apps/docs/frontend-ui/runtime-log-layout.md`: runtime log page behavior.
 - `apps/docs/frontend-ui/start-layout.md`: start page and setup/game-launch workflows.
+- `apps/docs/frontend-ui/workbench-layout.md`: mod-making workbench layout, Sims 4 Package-to-FBX workflow, LOD0 selection, output behavior, and current static-mesh limitations. Consult when changing workbench tools or Sims 4 extraction UI.
+- `apps/docs/frontend-ui/plugins-layout.md`: BepInEx plugin scan scope, metadata display, cache behavior, and current read-only boundary. Consult when changing plugin inventory or plugin diagnostics.
+- `apps/docs/frontend-ui/settings-layout.md`: manager settings, persistence fields, achievement preferences, export directories, and Blender integration. Consult when changing settings or startup behavior.
 - `apps/docs/frontend-ui/ui-style.md`: visual style and interaction rules.
 - `apps/docs/packaging-windows.md`: Windows Electron/Python packaging flow, output paths, verification commands, and packaging warnings. Consult when building or troubleshooting distributable exe output.
 - `apps/docs/mod_manage/character_card_parsing.md`: AIS character-card PNG payload layout, MessagePack block table, UniversalAutoResolver dependency records, and item-level mapping notes. Consult when updating card parsing, dependency extraction, or card detail diagnostics.
@@ -41,6 +47,8 @@ When gathering project context or learning how the app works, check the project 
 - `apps/docs/mod_manage/mod_database_change_detection.md`: current implemented database change detection, incremental rebuild behavior, added/removed/modified zipmod handling, duplicate GUID handling, and character-card dependency relinking. Consult when updating rebuild detection, database association logic, or automatic startup rebuild behavior.
 - `apps/docs/mod_manage/mod_exception_catalog.md`: current mod exception types, trigger conditions, UI titles, and repair actions. Consult when updating diagnostics or adding new repair flows.
 - `apps/docs/assetstudio-helper.md`: C# AssetStudio helper location, JSON process boundary, initial commands, and integration rules. Consult when changing Unity resource browsing/export or helper packaging.
+- `apps/docs/card-metadata-plugin.md`: companion HS2 BepInEx/HS2API plugin, registered ExtendedSave data contract, build/install steps, and character-card metadata persistence rules. Consult when changing favorites or other persistent card metadata.
+- `apps/docs/unity3d-decryption-notes.md`: UnityFS/Sakuraba resource repair findings, BepInEx second-layer protection characteristics, validation checklist, batch output rules, and isolation requirements. Consult when diagnosing or restoring encrypted Unity3D assets.
 
 When adding a new project document, update this `Project Documentation` section in the same change. Add the document path, a short content summary, and when an agent should consult it.
 

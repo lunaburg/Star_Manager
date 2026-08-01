@@ -212,10 +212,15 @@ def analyze_card_structure(card_data: bytes) -> dict[str, Any]:
     if not isinstance(info_offset, int):
         return {"header": header, "error": "Missing card info offset."}
     try:
-        info, consumed_offset = unpack_first(card_data, info_offset)
+        info, table_end = unpack_first(card_data, info_offset)
     except Exception as exc:  # noqa: BLE001
         return {"header": header, "error": f"Failed to unpack block table: {exc}"}
-    block_base = consumed_offset
+    if table_end + 8 > len(card_data):
+        return {"header": header, "error": "Missing character-card block-data size."}
+    block_data_size = int.from_bytes(card_data[table_end : table_end + 8], "little")
+    block_base = table_end + 8
+    if block_base + block_data_size > len(card_data):
+        return {"header": header, "error": "Character-card block data is truncated."}
     block_infos = info.get("lstInfo", []) if isinstance(info, dict) else []
     blocks = []
     for block_info in block_infos:
@@ -240,6 +245,7 @@ def analyze_card_structure(card_data: bytes) -> dict[str, Any]:
     return {
         "header": header,
         "block_base": block_base,
+        "block_data_size": block_data_size,
         "table": info,
         "blocks": blocks,
     }
@@ -251,16 +257,24 @@ def get_card_block(card_data: bytes, block_name: str) -> tuple[dict[str, Any], b
     if not isinstance(info_offset, int):
         return None
     try:
-        info, block_base = unpack_first(card_data, info_offset)
+        info, table_end = unpack_first(card_data, info_offset)
     except Exception:
         return None
     if not isinstance(info, dict):
+        return None
+    if table_end + 8 > len(card_data):
+        return None
+    block_data_size = int.from_bytes(card_data[table_end : table_end + 8], "little")
+    block_base = table_end + 8
+    if block_base + block_data_size > len(card_data):
         return None
     for block_info in info.get("lstInfo", []):
         if not isinstance(block_info, dict) or block_info.get("name") != block_name:
             continue
         pos = int(block_info.get("pos", 0))
         size = int(block_info.get("size", 0))
+        if pos < 0 or size < 0 or pos + size > block_data_size:
+            return None
         return block_info, card_data[block_base + pos : block_base + pos + size]
     return None
 

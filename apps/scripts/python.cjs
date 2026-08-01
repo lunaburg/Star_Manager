@@ -40,7 +40,14 @@ function getCondaBinaryArgs() {
 }
 
 const pythonArgsByMode = {
-  check: ["-m", "py_compile", "backend/app/server.py", "backend/app/bridge.py"],
+  check: [
+    "-m",
+    "py_compile",
+    "backend/app/server.py",
+    "backend/app/bridge.py",
+    "backend/star_manager/services/sims4_workbench.py",
+    "scripts/extract_ts4_package_fbx.py"
+  ],
   dev: ["backend/app/server.py"],
   "check-package-deps": ["scripts/check_package_deps.py"],
   pyinstaller: [
@@ -61,12 +68,18 @@ const pythonArgsByMode = {
     "backend",
     "--paths",
     "backend/app",
+    "--paths",
+    "scripts",
     "--hidden-import",
     "pyexpat",
     "--hidden-import",
     "xml.parsers.expat",
+    "--hidden-import",
+    "extract_ts4_package_fbx",
     "--add-data",
     `${path.join(root, "backend", "star_manager", "data", "plugin_descriptions.json")}${path.delimiter}star_manager/data`,
+    "--add-data",
+    `${path.join(root, "resources", "sims4")}${path.delimiter}sims4`,
     "--collect-all",
     "PIL",
     "--collect-all",

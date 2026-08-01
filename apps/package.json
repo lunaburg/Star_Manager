@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && set ELECTRON_RUN_AS_NODE=&& set ELECTRON_RENDERER_URL=http://127.0.0.1:5173&& electron .\"",
     "build": "vite build",
+    "test:card-plugin": "set DOTNET_CLI_HOME=%CD%\\.dotnet-home&& set DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1&& set DOTNET_CLI_TELEMETRY_OPTOUT=1&& dotnet run --project tools/star-manager-card-metadata-plugin/validation/StarManager.CardMetadata.Validation.csproj --configuration Release",
+    "build:card-plugin": "npm run test:card-plugin && set DOTNET_CLI_HOME=%CD%\\.dotnet-home&& set DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1&& set DOTNET_CLI_TELEMETRY_OPTOUT=1&& dotnet build tools/star-manager-card-metadata-plugin/StarManager.CardMetadata.csproj --configuration Release",
     "build:backend": "node scripts/python.cjs pyinstaller",
     "package:win": "npm run build && npm run build:backend && electron-builder --win dir --config.electronDist=node_modules/electron/dist",
     "preview": "vite preview --host 127.0.0.1",

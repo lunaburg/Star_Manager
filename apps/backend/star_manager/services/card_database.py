@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from star_manager.core.card_parser import (
     extract_auto_resolver_records_from_card,
@@ -11,6 +13,7 @@ from star_manager.core.card_parser import (
     read_card_header,
     read_card_marker,
 )
+from star_manager.core.card_metadata import read_card_metadata
 from star_manager.services.card_library import (
     DEFAULT_CARD_PREVIEW_DIR,
     IGNORED_ROOT_CARD_DIRS,
@@ -22,6 +25,7 @@ from star_manager.services.card_library import (
 from star_manager.services.mod_database_core import (
     DEFAULT_DB_PATH,
     init_db,
+    get_database_metadata,
     set_database_metadata,
     timestamp_to_utc,
     utc_now,
@@ -34,6 +38,7 @@ def build_card_database(
     preview_dir: Path = DEFAULT_CARD_PREVIEW_DIR,
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
+    affected_mod_guids: Iterable[str] | None = None,
 ) -> dict[str, int]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
@@ -63,18 +68,41 @@ def build_card_database(
         "stale_cards": 0,
         "reused_cards": 0,
         "changed_cards": 0,
+        "relinked_cards": 0,
+        "untouched_cards": 0,
     }
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         init_db(conn)
+        resolver = DependencyResolver.load(conn)
+        tag_cache_key = str(root.resolve())
+        refresh_tag_cache = force_full or get_database_metadata(
+            conn, "character_card_tags_cache_root"
+        ) != tag_cache_key
+        affected_card_ids = find_affected_card_ids(conn, affected_mod_guids)
         with conn:
             for index, card_path in enumerate(card_paths, start=1):
-                prepared = prepare_card_record(card_path, root, preview_dir, conn, now, force_full)
+                prepared = prepare_card_record(
+                    card_path,
+                    root,
+                    preview_dir,
+                    conn,
+                    now,
+                    force_full,
+                    resolver,
+                    affected_card_ids,
+                    refresh_tag_cache,
+                )
                 seen_paths.add(prepared["file_path"])
                 card_id = upsert_character_card(conn, prepared)
-                replace_card_dependencies(conn, card_id, prepared["dependencies"])
+                if prepared["replace_dependencies"]:
+                    replace_card_dependencies(conn, card_id, prepared["dependencies"])
+                    if prepared["reused"]:
+                        stats["relinked_cards"] += 1
+                elif prepared["reused"]:
+                    stats["untouched_cards"] += 1
                 stats["cards"] += 1
                 if prepared["reused"]:
                     stats["reused_cards"] += 1
@@ -92,6 +120,7 @@ def build_card_database(
 
             stats["stale_cards"] = mark_stale_cards(conn, seen_paths, now)
             set_database_metadata(conn, "last_card_built_at", now)
+            set_database_metadata(conn, "character_card_tags_cache_root", tag_cache_key)
         report(100, "Character card database rebuild completed")
         return stats
     finally:
@@ -120,10 +149,18 @@ def prepare_card_record(
     conn: sqlite3.Connection,
     now: str,
     force_full: bool,
+    resolver: "DependencyResolver | None" = None,
+    affected_card_ids: set[int] | None = None,
+    refresh_tag_cache: bool = False,
 ) -> dict:
     stat = card_path.stat()
     card_uid = ""
     chara_name = card_path.stem
+    tags_json = "[]"
+    favorite = False
+    rating = 0
+    metadata_file_size = stat.st_size
+    metadata_modified_ns = stat.st_mtime_ns
     preview_cache_path = ""
     dependency_count = 0
     missing_count = 0
@@ -132,24 +169,48 @@ def prepare_card_record(
     modified_at = timestamp_to_utc(stat.st_mtime)
     cached = None if force_full else load_cached_card(conn, card_path, modified_at)
     if cached is not None:
-        raw_dependencies = load_cached_card_dependencies(conn, int(cached["id"]))
-        dependencies = resolve_cached_dependencies(conn, raw_dependencies)
+        if refresh_tag_cache:
+            metadata = read_card_metadata(card_path)
+            tags_json = json.dumps(metadata["tags"], ensure_ascii=False)
+            favorite = bool(metadata["favorite"])
+            rating = int(metadata["rating"])
+        else:
+            tags_json = str(cached["tags_json"] or "[]")
+            favorite = bool(cached["favorite"])
+            rating = int(cached["rating"] or 0)
+            metadata_file_size = int(cached["metadata_file_size"] or 0)
+            metadata_modified_ns = int(cached["metadata_modified_ns"] or 0)
+        should_relink = affected_card_ids is None or int(cached["id"]) in affected_card_ids
+        if should_relink:
+            raw_dependencies = load_cached_card_dependencies(conn, int(cached["id"]))
+            dependencies = resolve_cached_dependencies(conn, raw_dependencies, resolver)
+            dependency_count = len(dependencies)
+            missing_count = sum(
+                1 for item in dependencies if item["resolve_status"] != "resolved"
+            )
+        else:
+            dependency_count = int(cached["dependency_count"] or 0)
+            missing_count = int(cached["missing_count"] or 0)
         return {
             "file_path": str(card_path.resolve()),
             "relative_path": normalize_relative(card_path, root),
             "file_name": card_path.name,
             "card_uid": str(cached["card_uid"] or ""),
             "chara_name": str(cached["chara_name"] or card_path.stem),
+            "tags_json": tags_json,
+            "favorite": favorite,
+            "rating": rating,
+            "metadata_file_size": metadata_file_size,
+            "metadata_modified_ns": metadata_modified_ns,
             "preview_cache_path": str(cached["preview_cache_path"] or ""),
             "modified_at": modified_at,
             "parse_status": str(cached["parse_status"] or "ok"),
-            "dependency_count": len(dependencies),
-            "missing_count": sum(
-                1 for item in dependencies if item["resolve_status"] != "resolved"
-            ),
+            "dependency_count": dependency_count,
+            "missing_count": missing_count,
             "last_scanned_at": now,
             "dependencies": dependencies,
             "reused": True,
+            "replace_dependencies": should_relink,
         }
 
     try:
@@ -162,8 +223,12 @@ def prepare_card_record(
             card_uid = str(header.get("card_id") or "")
             profile = extract_character_profile_from_card(str(card_path))
             chara_name = str(profile.get("fullname") or "").strip() or card_path.stem
+            metadata = read_card_metadata(card_path)
+            tags_json = json.dumps(metadata["tags"], ensure_ascii=False)
+            favorite = bool(metadata["favorite"])
+            rating = int(metadata["rating"])
             records = extract_auto_resolver_records_from_card(str(card_path))
-            dependencies = resolve_dependency_records(conn, records)
+            dependencies = resolve_dependency_records(conn, records, resolver)
             dependency_count = len(dependencies)
             missing_count = sum(
                 1 for item in dependencies if item["resolve_status"] != "resolved"
@@ -179,6 +244,11 @@ def prepare_card_record(
         "file_name": card_path.name,
         "card_uid": card_uid,
         "chara_name": chara_name,
+        "tags_json": tags_json,
+        "favorite": favorite,
+        "rating": rating,
+        "metadata_file_size": metadata_file_size,
+        "metadata_modified_ns": metadata_modified_ns,
         "preview_cache_path": preview_cache_path,
         "modified_at": modified_at,
         "parse_status": parse_status,
@@ -187,6 +257,33 @@ def prepare_card_record(
         "last_scanned_at": now,
         "dependencies": dependencies,
         "reused": False,
+        "replace_dependencies": True,
+    }
+
+
+def normalize_dependency_guid(value: object) -> str:
+    return str(value or "").strip().casefold()
+
+
+def find_affected_card_ids(
+    conn: sqlite3.Connection,
+    affected_mod_guids: Iterable[str] | None,
+) -> set[int] | None:
+    if affected_mod_guids is None:
+        return None
+    affected = {
+        normalized
+        for value in affected_mod_guids
+        if (normalized := normalize_dependency_guid(value))
+    }
+    if not affected:
+        return set()
+    return {
+        int(row["card_id"])
+        for row in conn.execute(
+            "SELECT card_id, mod_id FROM character_card_dependencies"
+        )
+        if normalize_dependency_guid(row["mod_id"]) in affected
     }
 
 
@@ -230,24 +327,105 @@ def load_cached_card_dependencies(
     ]
 
 
-def resolve_cached_dependencies(
-    conn: sqlite3.Connection,
-    dependencies: list[dict[str, str]],
-) -> list[dict[str, str | int | None]]:
-    resolved: list[dict[str, str | int | None]] = []
-    for dependency in dependencies:
-        mod_id = dependency["mod_id"]
-        category_no = dependency["category_no"]
-        slot = dependency["slot"]
-        local_slot = dependency["local_slot"]
-        zipmod_id = find_zipmod_id(conn, mod_id)
-        mod_item_id = find_mod_item_id(conn, mod_id, category_no, slot, local_slot)
+def normalized_item_keys(value: object) -> tuple[str, ...]:
+    raw = str(value or "").strip()
+    if not raw:
+        return ()
+    if raw.isdigit():
+        numeric = str(int(raw))
+        if numeric != raw:
+            return raw, numeric
+    return (raw,)
+
+
+@dataclass(frozen=True)
+class DependencyResolver:
+    zipmod_ids: dict[str, int]
+    items_by_kind: dict[tuple[str, str, str], int]
+    items_by_id: dict[tuple[str, str], int]
+
+    @classmethod
+    def load(cls, conn: sqlite3.Connection) -> "DependencyResolver":
+        zipmod_ids: dict[str, int] = {}
+        for row in conn.execute(
+            "SELECT id, guid FROM zipmods WHERE scan_status != 'stale' ORDER BY id"
+        ):
+            guid = normalize_dependency_guid(row["guid"])
+            if guid:
+                zipmod_ids.setdefault(guid, int(row["id"]))
+
+        items_by_kind: dict[tuple[str, str, str], int] = {}
+        items_by_id: dict[tuple[str, str], int] = {}
+        for row in conn.execute(
+            """
+            SELECT mod_items.id, mod_items.zipmod_guid, mod_items.kind, mod_items.item_id
+            FROM mod_items
+            INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
+            WHERE zipmods.scan_status != 'stale'
+            ORDER BY mod_items.id
+            """
+        ):
+            guid = normalize_dependency_guid(row["zipmod_guid"])
+            kind = str(row["kind"] or "").strip()
+            for item_key in normalized_item_keys(row["item_id"]):
+                item_id = int(row["id"])
+                items_by_kind.setdefault((guid, kind, item_key), item_id)
+                items_by_id.setdefault((guid, item_key), item_id)
+        return cls(zipmod_ids, items_by_kind, items_by_id)
+
+    def resolve(
+        self,
+        mod_id: str,
+        category_no: str,
+        slot: str,
+        local_slot: str,
+    ) -> tuple[int | None, int | None, str]:
+        guid = normalize_dependency_guid(mod_id)
+        zipmod_id = self.zipmod_ids.get(guid)
+        candidates = (slot, local_slot)
+        mod_item_id = next(
+            (
+                self.items_by_kind[(guid, category_no, item_key)]
+                for value in candidates
+                for item_key in normalized_item_keys(value)
+                if (guid, category_no, item_key) in self.items_by_kind
+            ),
+            None,
+        )
+        if mod_item_id is None:
+            mod_item_id = next(
+                (
+                    self.items_by_id[(guid, item_key)]
+                    for value in candidates
+                    for item_key in normalized_item_keys(value)
+                    if (guid, item_key) in self.items_by_id
+                ),
+                None,
+            )
         if mod_item_id is not None:
             resolve_status = "resolved"
         elif zipmod_id is not None:
             resolve_status = "missing_item"
         else:
             resolve_status = "missing_zipmod"
+        return zipmod_id, mod_item_id, resolve_status
+
+
+def resolve_cached_dependencies(
+    conn: sqlite3.Connection,
+    dependencies: list[dict[str, str]],
+    resolver: DependencyResolver | None = None,
+) -> list[dict[str, str | int | None]]:
+    resolver = resolver or DependencyResolver.load(conn)
+    resolved: list[dict[str, str | int | None]] = []
+    for dependency in dependencies:
+        mod_id = dependency["mod_id"]
+        category_no = dependency["category_no"]
+        slot = dependency["slot"]
+        local_slot = dependency["local_slot"]
+        zipmod_id, mod_item_id, resolve_status = resolver.resolve(
+            mod_id, category_no, slot, local_slot
+        )
         resolved.append(
             {
                 "mod_id": mod_id,
@@ -267,15 +445,21 @@ def upsert_character_card(conn: sqlite3.Connection, record: dict) -> int:
         """
         INSERT INTO character_cards (
             file_path, relative_path, file_name, card_uid, chara_name,
+            tags_json, favorite, rating, metadata_file_size, metadata_modified_ns,
             preview_cache_path, modified_at, parse_status, dependency_count,
             missing_count, last_scanned_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(file_path) DO UPDATE SET
             relative_path = excluded.relative_path,
             file_name = excluded.file_name,
             card_uid = excluded.card_uid,
             chara_name = excluded.chara_name,
+            tags_json = excluded.tags_json,
+            favorite = excluded.favorite,
+            rating = excluded.rating,
+            metadata_file_size = excluded.metadata_file_size,
+            metadata_modified_ns = excluded.metadata_modified_ns,
             preview_cache_path = excluded.preview_cache_path,
             modified_at = excluded.modified_at,
             parse_status = excluded.parse_status,
@@ -289,6 +473,11 @@ def upsert_character_card(conn: sqlite3.Connection, record: dict) -> int:
             record["file_name"],
             record["card_uid"],
             record["chara_name"],
+            record["tags_json"],
+            int(bool(record["favorite"])),
+            int(record["rating"]),
+            int(record["metadata_file_size"]),
+            int(record["metadata_modified_ns"]),
             record["preview_cache_path"],
             record["modified_at"],
             record["parse_status"],
@@ -309,7 +498,9 @@ def upsert_character_card(conn: sqlite3.Connection, record: dict) -> int:
 def resolve_dependency_records(
     conn: sqlite3.Connection,
     records: list[dict],
+    resolver: DependencyResolver | None = None,
 ) -> list[dict[str, str | int | None]]:
+    resolver = resolver or DependencyResolver.load(conn)
     dependencies: list[dict[str, str | int | None]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for record in records:
@@ -324,14 +515,9 @@ def resolve_dependency_records(
             continue
         seen.add(key)
 
-        zipmod_id = find_zipmod_id(conn, mod_id)
-        mod_item_id = find_mod_item_id(conn, mod_id, category_no, slot, local_slot)
-        if mod_item_id is not None:
-            resolve_status = "resolved"
-        elif zipmod_id is not None:
-            resolve_status = "missing_item"
-        else:
-            resolve_status = "missing_zipmod"
+        zipmod_id, mod_item_id, resolve_status = resolver.resolve(
+            mod_id, category_no, slot, local_slot
+        )
 
         dependencies.append(
             {

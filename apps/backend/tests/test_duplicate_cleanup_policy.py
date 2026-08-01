@@ -279,8 +279,10 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
             source_dir.mkdir()
             external_zipmod = source_dir / "sample.zipmod"
             card_png = source_dir / "card.png"
+            clothes_png = source_dir / "clothes.png"
             plain_png = source_dir / "plain.png"
             card_png.write_bytes(b"fake card png")
+            clothes_png.write_bytes(b"fake clothes card png")
             plain_png.write_bytes(b"plain png")
             external_unity3d = source_dir / "nested" / "abdata" / "chara" / "sample" / "main.unity3d"
             external_unity3d.parent.mkdir(parents=True)
@@ -328,8 +330,15 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
 
             with patch.object(bridge, "build_database", side_effect=fake_build_database), patch.object(
                 bridge,
-                "is_ais_card",
-                side_effect=lambda value: Path(value).name == "card.png",
+                "extract_png_extra_data",
+                side_effect=lambda value: Path(value).name.encode("utf-8"),
+            ), patch.object(
+                bridge,
+                "read_card_marker",
+                side_effect=lambda value: {
+                    b"card.png": "【AIS_Chara】",
+                    b"clothes.png": "【AIS_Clothes】",
+                }.get(value),
             ):
                 result = bridge._import_external_zipmods(
                     task,
@@ -344,16 +353,20 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
 
             self.assertTrue(result["ok"], result)
             self.assertEqual(result["scanned_count"], 1)
-            self.assertEqual(result["png_scanned_count"], 2)
+            self.assertEqual(result["png_scanned_count"], 3)
             self.assertEqual(result["copied_count"], 1)
             self.assertEqual(result["unity3d_repaired_count"], 1)
             self.assertEqual(result["card_imported_count"], 1)
+            self.assertEqual(result["coordinate_imported_count"], 1)
             self.assertEqual(result["non_card_png_count"], 1)
             self.assertTrue((game_dir / "mods" / "Imported" / "sample.zipmod").is_file())
             with zipfile.ZipFile(game_dir / "mods" / "Imported" / "sample.zipmod") as zf:
                 self.assertEqual(zf.read("abdata/chara/sample/main.unity3d"), b"external-bundle")
             self.assertFalse(external_unity3d.exists())
             self.assertTrue((game_dir / "UserData" / "chara" / "female" / "card.png").is_file())
+            self.assertTrue(
+                (game_dir / "UserData" / "coordinate" / "female" / "imoprted" / "clothes.png").is_file()
+            )
             self.assertFalse((game_dir / "UserData" / "chara" / "female" / "plain.png").exists())
 
 

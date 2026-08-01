@@ -14,7 +14,10 @@ The app is built with Electron, Vue, and a local Python backend. It never treats
 - Links card dependencies back to indexed zipmods and mod items when possible.
 - Diagnoses missing or external `.unity3d` files, thumbnail issues, manifest errors, read failures, stale records, and duplicate GUIDs.
 - Repairs selected zipmod Unity3D issues, edits manifest metadata, imports/exports item thumbnails, and removes selected broken items or packages.
-- Runs batch workflows for database rebuilds, zipmod export/organization, duplicate cleanup, author updates, shared thumbnail application, and filtered error-item deletion.
+- Generates on-demand item GLB/static FBX previews, including a reusable mannequin and Three.js viewer.
+- Manages character-card profiles, covers, favorites, ratings, tags, navi slots, coordinate-card exports, and portable dependency packages.
+- Scans BepInEx plugin metadata without executing DLLs and caches results by file fingerprint.
+- Runs batch workflows for database rebuilds, external resource import, zipmod export/organization, duplicate cleanup, author updates, shared thumbnail application, and filtered error-item deletion.
 - Launches `HoneySelect2.exe`, `StudioNEOV2.exe`, and `HoneySelect2VR.exe` from the desktop shell.
 
 ## Main Screens
@@ -23,7 +26,10 @@ The app is built with Electron, Vue, and a local Python backend. It never treats
 - **Overview**: check library health, database status, suggested actions, and recent tasks.
 - **Characters**: browse `UserData/chara`, preview AIS cards, and inspect parsed dependency status.
 - **Mods**: switch between item browsing and zipmod browsing, filter large libraries, review details, and run repairs.
+- **Plugins**: inspect BepInEx plugin identity, version, dependencies, process restrictions, and diagnostics.
+- **Workbench**: extract Sims 4 Package LOD0 meshes and RLE2 textures, optionally bake an HS2-aligned T-Pose with Blender.
 - **Logs**: follow task progress and backend messages.
+- **Settings**: configure startup checks, local achievements, export defaults, favorite-card themes, and Blender.
 
 ## How It Works
 
@@ -85,6 +91,7 @@ apps/
 |-- backend/tests/            # Backend tests
 |-- scripts/                  # Developer and packaging helpers
 |-- docs/                     # Project documentation
+|-- tools/                    # Isolated C# helper and card metadata plugin
 |-- package.json
 `-- vite.config.js
 ```
@@ -93,11 +100,16 @@ The former `apps/pyside6` app has been removed. Current development should stay 
 
 ## Documentation
 
+- [apps/docs/project-introduction.md](apps/docs/project-introduction.md): 面向用户的产品定位、页面导览、首次使用流程和当前功能边界。
+- [apps/docs/README.md](apps/docs/README.md): canonical documentation index and task-oriented reading map.
 - [apps/README.md](apps/README.md): application-level developer notes.
 - [apps/docs/project-overview.md](apps/docs/project-overview.md): full project map, runtime architecture, data model, workflows, tests, and development rules.
 - [apps/docs/backend-interface.md](apps/docs/backend-interface.md): frontend/backend API contract and task protocol.
 - [apps/docs/mod_manage/mod_database_design.md](apps/docs/mod_manage/mod_database_design.md): mod database schema and scanning rules.
 - [apps/docs/mod_manage/character_card_parsing.md](apps/docs/mod_manage/character_card_parsing.md): AIS card payload and dependency parsing notes.
+- [apps/docs/card-metadata-plugin.md](apps/docs/card-metadata-plugin.md): persistent card metadata plugin contract and build/install flow.
+- [apps/docs/frontend-ui/plugins-layout.md](apps/docs/frontend-ui/plugins-layout.md): BepInEx plugin inventory behavior.
+- [apps/docs/frontend-ui/workbench-layout.md](apps/docs/frontend-ui/workbench-layout.md): Sims 4 Package to FBX workflow and current limits.
 - [apps/docs/packaging-windows.md](apps/docs/packaging-windows.md): Windows packaging flow.
 
 ## Development Notes
@@ -107,4 +119,3 @@ The former `apps/pyside6` app has been removed. Current development should stay 
 - Treat `Copy` as the safe default for extraction and export workflows.
 - Move/delete operations modify the game directory and should be handled deliberately.
 - Runtime caches and build outputs are disposable.
-

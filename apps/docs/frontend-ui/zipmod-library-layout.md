@@ -24,7 +24,7 @@ Zipmod 库通过本地索引浏览、诊断和整理所选 HS2 游戏目录中�
 - `item_count`：该 zipmod 中解析出的物品总数。
 - `scan_status`：`ok`、`missing_manifest`、`invalid_manifest`、`read_error`、`stale`。
 - `scan_error`：扫描错误原因。
-- `unity3d_status`：`in_mod`、`in_game`、`missing` 或空值。
+- `unity3d_status`：`in_mod`、`in_game`、`missing`、`error` 或空值。
 - `unity3d_in_mod_count`、`unity3d_in_game_count`、`unity3d_missing_count`：资源状态汇总。
 - `duplicate_zipmod_count`：同 GUID 重复文件数量。
 - `file_name`：zipmod 文件名。
@@ -44,7 +44,7 @@ Zipmod 库通过本地索引浏览、诊断和整理所选 HS2 游戏目录中�
 - `csv_path`：来源 CSV。
 - `thumbnail_cache_path`：缩略图缓存路径。
 - `thumbnail_status`：`ready`、`missing`、`error`。
-- `unity3d_status`：物品引用的 `.unity3d` 是否在 zipmod 内、游戏目录中或缺失。
+- `unity3d_status`：物品引用的 `.unity3d` 是否在 zipmod 内、游戏目录中、缺失或不可用。
 - `parse_status`：`ok`、`missing_header`、`short_row`、`parse_error`。
 
 ## 浏览模式
@@ -126,7 +126,7 @@ Zipmod 库通过本地索引浏览、诊断和整理所选 HS2 游戏目录中�
 
 - Kind：按 `mod_items.kind` 映射后的类别筛选。
 - 作者：按 `mod_items.zipmod_author` 或来源 `zipmods.author` 筛选。
-- 状态：当前支持 `ready`、`parse`、`thumb`，分别对应可展示、CSV 解析失败、缩略图缺失或错误。
+- 状态：当前支持 `ready`、`error`、`thumb`，分别对应可展示、解析/主资源异常、主资源可用但缩略图缺失或错误。
 - 搜索物品名字：按 `mod_items.name`、`item_id` 或 `zipmod_guid` 搜索。
 
 物品浏览工具栏应使用稳定网格布局：搜索框占较大宽度，Kind、作者、状态三个下拉控件使用较窄且一致的宽度。所有控件必须设置 `min-width: 0` 或等效约束，避免下拉控件撑出父容器。
@@ -136,7 +136,7 @@ Zipmod 库通过本地索引浏览、诊断和整理所选 HS2 游戏目录中�
 模组浏览只显示两类检索入口：
 
 - 作者：按 `zipmods.author` 筛选。
-- 状态：当前支持 `normal` 和 `abnormal`。`abnormal` 包含非 `ok` 扫描状态、`.unity3d` 缺失或只存在于游戏目录、以及重复 GUID。
+- 状态：当前支持 `normal`、`abnormal`、`warning`、`error`、`read_error`、`manifest_author`、`unity3d_missing`、`unity3d_in_game`、`unity3d_error`、`duplicate_zipmod` 和 `thumbnail`。`abnormal` 包含非 `ok` 扫描状态、Unity3D 异常、重复 GUID 或缩略图问题。
 
 ### 通用操作
 
@@ -235,6 +235,8 @@ GET /mods/items?offset=0&limit=500&search=&kind=&author=&status=&usage=
 GET /mods/items?zipmod_id=<zipmod_id>&offset=0&limit=1000
 GET /mods/items/filters
 GET /mods/thumbnails?path=<encoded_thumbnail_cache_path>
+GET /mods/models/<file.glb>
+GET /mods/mannequin/body.fbx
 ```
 
 加载规则：
@@ -269,8 +271,21 @@ GET /mods/thumbnails?path=<encoded_thumbnail_cache_path>
 
 分组展示：
 
+> 实机操作路径：进入“模组管理”→“物品浏览”，选中物品后打开右侧“工具”页签。当前文档只保留经过代码和实机界面核对的文字说明，不使用示意图冒充当前版本截图；补充实机截图后应放在本段上方，并标注截图版本与本地数据边界。
+
+物品浏览右侧详情栏的工具速查：
+
+| 工具 | 使用方式 | 结果与边界 |
+| --- | --- | --- |
+| 3D 模型预览 | 在“工具”页签加载模型，拖动旋转、缩放或平移，并选择背景/灯光 | 服饰类物品可自动加载；其他类别按需加载；当前视角可作为缩略图来源 |
+| 定位来源模组 | 点击“来源模组”的“定位”，或双击物品行 | 切换到模组浏览并选中来源 zipmod，不直接改动文件 |
+| 导出 FBX 模型 | 选择目标目录后导出 | 输出静态网格、材质与贴图，不包含骨骼和动画，并在完成后定位输出文件 |
+| 重建缩略图 | 选择外部 PNG 或使用已加载的 3D 预览截图 | 将新缩略图写回当前物品；3D 截图需要模型已加载 |
+| 批量缩略图工具 | 以当前物品作为来源，导出缩略图或勾选缺失缩略图目标 | 导入到多个目标使用批量任务，目标来自当前已加载列表 |
+| 删除物品 | 在危险区点击删除并完成确认 | 会写回资源和数据库，属于高风险单对象操作 |
+
 - 标题区：大缩略图、物品名、Kind、作者、状态 badge。
-- 工具 tab：在其他物品工具之前提供按需加载的 3D 模型预览。首次点击时按 CSV `MainData` 定位 `MainAB` 中对应的 GameObject，只将该对象及其子节点 Renderer 转成带基础材质与贴图的缓存 GLB；`MainData` 为空或无法匹配时才回退到整个 MainAB。预览支持旋转、缩放和平移；白色/黑色背景和柔光/轮廓光切换控件放在画布下方，不能覆盖或拦截模型浏览区域。当前背景、灯光和相机视角也用于 3D 缩略图截图。游戏专用 Shader 使用标准 PBR 降级显示，失败时保留明确提示，不影响其他详情和缩略图。
+- 工具 tab：在其他物品工具之前提供 3D 模型预览。服饰类物品进入工具 tab 时自动加载，其他类别保持按需加载；首次加载时按 CSV `MainData` 定位 `MainAB` 中对应的 GameObject，只将该对象及其子节点 Renderer 转成带基础材质与贴图的缓存 GLB；`MainData` 为空或无法匹配时才回退到整个 MainAB。服饰模特在渲染进程内只下载并解析一次，切换物品或模型状态时复用缓存模板并克隆独立骨骼实例。预览支持旋转、缩放和平移；白色/黑色背景和柔光、棚拍、暖光、冷光、轮廓、戏剧灯光预设切换控件放在画布下方，不能覆盖或拦截模型浏览区域。切换物品时保留当前背景与灯光设置，并在控件重新挂载后同步滚动选择器的显示位置。当前背景、灯光和相机视角也用于 3D 缩略图截图。游戏专用 Shader 使用标准 PBR 降级显示，失败时保留明确提示，不影响其他详情和缩略图。
 - 来源模组：mod 名称、完整 GUID、来源 CSV，以及物品 `MainAB` 引用的 Unity3D 文件名；完整引用路径通过悬停提示查看。
 - 同模组物品：展示少量关联物品，方便横向浏览。
 - 工具 tab：当前放置定位来源模组、导出当前物品 FBX、导入/重建缩略图、删除物品等操作。FBX 导出要求选择目标目录，按当前物品 CSV `MainData` 导出静态网格、材质和贴图，不包含骨骼与动画；完成后在资源管理器中定位生成的 `.fbx`。点击重建缩略图时弹出来源选择：可以选择外部 PNG，也可以在 3D 模型已加载后截取当前旋转、缩放视角并作为缩略图写回。
@@ -371,6 +386,8 @@ GET  /mods/database
 GET  /mods/zipmods?offset=&limit=&author=&status=&usage=
 GET  /mods/zipmods/authors
 GET  /mods/zipmods/:id/diagnostics
+GET  /mods/zipmods/:id/duplicate-analysis
+GET  /mods/zipmods/:id/manifest
 GET  /mods/items?offset=&limit=&search=&kind=&author=&status=&usage=
 GET  /mods/items/filters
 GET  /mods/items?zipmod_id=&offset=&limit=
@@ -383,6 +400,9 @@ POST /mods/zipmods/:id/manifest
 POST /mods/zipmods/:id/cleanup-duplicates
 POST /mods/zipmods/:id/delete
 POST /mods/items/:id/import-thumbnail
+POST /mods/items/:id/export-thumbnail
+POST /mods/items/:id/model-preview
+POST /mods/items/:id/export-fbx
 POST /mods/items/:id/delete
 ```
 

@@ -6,6 +6,7 @@ from star_manager.services.model_preview import (
     _build_fbx_ascii,
     _build_glb,
     _find_half_model_game_objects,
+    _normalize_preview_material_color,
     _select_half_model_meshes,
     _select_main_data_meshes,
     prepare_item_model_preview,
@@ -67,6 +68,11 @@ def test_build_glb_embeds_material_textures():
     assert document["images"][0]["mimeType"] == "image/png"
 
 
+def test_textured_material_does_not_become_fully_transparent_from_zero_shader_color_alpha():
+    assert _normalize_preview_material_color([1.1, 1.1, 1.145, 0], True) == [1.0, 1.0, 1.0, 1.0]
+    assert _normalize_preview_material_color([1, 1, 1, 0], False) == [1.0, 1.0, 1.0, 0.0]
+
+
 def test_build_glb_preserves_skin_weights_and_bind_poses():
     skin = {
         "bone_names": ["cf_N_height"],
@@ -84,6 +90,25 @@ def test_build_glb_preserves_skin_weights_and_bind_poses():
     assert document["nodes"][0]["skin"] == 0
     assert document["nodes"][1]["name"] == "cf_N_height"
     assert document["skins"][0]["joints"] == [1]
+
+
+def test_build_glb_preserves_joint_transform_matrix():
+    joint_matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 3, 4, 1]
+    skin = {
+        "bone_names": ["cf_J_Legsk_01_00"],
+        "fallback_bone_names": [["cf_J_Kosi01_s"]],
+        "bone_matrices": [joint_matrix],
+        "inverse_bind_matrices": [[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]],
+        "indices": [(0, 0, 0, 0)] * 3,
+        "weights": [(1, 0, 0, 0)] * 3,
+    }
+    payload = _build_glb([("Skirt", FakeMesh(), [0], skin)])
+    json_length = struct.unpack_from("<I", payload, 12)[0]
+    document = json.loads(payload[20 : 20 + json_length])
+    joint_node = document["nodes"][document["skins"][0]["joints"][0]]
+
+    assert joint_node["name"] == "cf_J_Legsk_01_00"
+    assert joint_node["matrix"] == joint_matrix
 
 
 def test_build_glb_reuses_joint_nodes_between_skinned_meshes():
@@ -187,6 +212,28 @@ def test_half_model_references_are_found_and_excluded_from_main_data_meshes():
     half_mesh_ids, half_references = _select_half_model_meshes(environment, "n_top")
     assert half_mesh_ids == {200}
     assert half_references == references
+
+
+def test_normal_renderer_is_kept_when_half_variant_reuses_the_same_mesh():
+    environment = SimpleNamespace(objects=[
+        FakeObject(1, "GameObject", SimpleNamespace(m_Name="clothmesh")),
+        FakeObject(2, "GameObject", SimpleNamespace(m_Name="top_a")),
+        FakeObject(3, "GameObject", SimpleNamespace(m_Name="top_b")),
+        FakeObject(10, "Transform", SimpleNamespace(m_GameObject=pointer(1), m_Children=[pointer(20), pointer(30)])),
+        FakeObject(20, "Transform", SimpleNamespace(m_GameObject=pointer(2), m_Children=[])),
+        FakeObject(30, "Transform", SimpleNamespace(m_GameObject=pointer(3), m_Children=[])),
+        FakeObject(40, "SkinnedMeshRenderer", SimpleNamespace(m_GameObject=pointer(2), m_Mesh=pointer(100))),
+        FakeObject(50, "SkinnedMeshRenderer", SimpleNamespace(m_GameObject=pointer(3), m_Mesh=pointer(100))),
+        FakeObject(60, "MonoBehaviour", {
+            "m_GameObject": {"m_PathID": 1},
+            "objTopHalf": {"m_PathID": 3},
+        }),
+    ])
+
+    mesh_ids, mode = _select_main_data_meshes(environment, "clothmesh", exclude_half_models=True)
+
+    assert mode == "main_data"
+    assert mesh_ids == {100}
 
 
 def test_half_model_fields_on_another_item_are_ignored():

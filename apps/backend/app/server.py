@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from bridge import SUPPORTED_TASK_TYPES, create_health_payload, task_store
+from star_manager.core.coordinate_card import find_png_end
 from star_manager.services.achievements import (
     achievement_status,
     record_achievement_event,
@@ -25,12 +26,21 @@ from star_manager.services.card_database import card_database_status
 from star_manager.services.card_library import (
     DEFAULT_CARD_PREVIEW_DIR,
     build_character_card_tree,
+    create_character_card_directory,
+    export_character_card_coordinate,
     get_character_card_detail,
     get_card_root,
     list_character_cards,
+    list_character_card_tags,
     normalize_card_preview,
+    replace_character_card_cover,
+    rename_character_card_directory,
     resolve_card_file,
     set_character_card_as_navi,
+    set_character_card_favorite,
+    set_character_card_rating,
+    set_character_card_tags,
+    update_character_card_profile,
 )
 from star_manager.services.mod_database import (
     DEFAULT_THUMBNAIL_DIR,
@@ -60,6 +70,7 @@ from star_manager.services.mod_database import (
     zipmod_unity3d_diagnostics,
 )
 from star_manager.services.plugin_library import scan_bepinex_plugins
+from star_manager.services.sims4_workbench import export_sims4_package_lod0_fbx
 
 
 def is_process_alive(pid: int) -> bool:
@@ -167,9 +178,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             author = query.get("author", [""])[0]
             status = query.get("status", [""])[0]
             usage = query.get("usage", [""])[0]
+            zipmod_id = self.parse_int_query(query, "zipmod_id", 0)
             self.send_json({
                 "ok": True,
-                "data": list_zipmods(offset=offset, limit=limit, author=author, status=status, usage=usage),
+                "data": list_zipmods(
+                    offset=offset,
+                    limit=limit,
+                    author=author,
+                    status=status,
+                    usage=usage,
+                    zipmod_id=zipmod_id,
+                ),
             })
             return
 
@@ -253,10 +272,26 @@ class RequestHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
             relative_path = unquote((query.get("path") or [""])[0])
+            scope = unquote((query.get("scope") or ["directory"])[0])
+            tag = unquote((query.get("tag") or [""])[0])
             try:
-                self.send_json(list_character_cards(game_dir, relative_path))
+                self.send_json(
+                    list_character_cards(
+                        game_dir,
+                        relative_path,
+                        recursive=scope == "library" and bool(tag.strip()),
+                        tag=tag,
+                    )
+                )
             except ValueError as error:
                 self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/library/cards/tags":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            result = list_character_card_tags(game_dir)
+            self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
         if route == "/library/cards/detail":
@@ -274,9 +309,21 @@ class RequestHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
             relative_path = unquote((query.get("path") or [""])[0])
+            original_cover = (query.get("original") or [""])[0] == "1"
             root = get_card_root(game_dir)
             try:
                 card_path = resolve_card_file(root, relative_path)
+                if original_cover:
+                    stat = card_path.stat()
+                    card_data = card_path.read_bytes()
+                    png_end = find_png_end(card_data)
+                    self.send_bytes(
+                        card_data[:png_end],
+                        "image/png",
+                        etag=f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}-cover-{png_end:x}"',
+                        modified_at=stat.st_mtime,
+                    )
+                    return
                 preview_path = normalize_card_preview(card_path)
                 allowed_root = DEFAULT_CARD_PREVIEW_DIR if preview_path != card_path else root
                 self.send_file(str(preview_path), allowed_root)
@@ -303,11 +350,94 @@ class RequestHandler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         body = self.read_json_body()
 
+        if route == "/tools/sims4/package-fbx":
+            result = export_sims4_package_lod0_fbx(
+                str(body.get("package_path") or ""),
+                str(body.get("target_dir") or ""),
+                str(body.get("blender_executable_path") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/library/cards/set-navi":
             result = set_character_card_as_navi(
                 str(body.get("game_dir") or ""),
                 str(body.get("path") or ""),
                 str(body.get("slot") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/folders/create":
+            result = create_character_card_directory(
+                str(body.get("game_dir") or ""),
+                str(body.get("parent_path") or ""),
+                str(body.get("name") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/folders/rename":
+            result = rename_character_card_directory(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                str(body.get("name") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/set-favorite":
+            result = set_character_card_favorite(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                bool(body.get("favorite")),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/set-rating":
+            result = set_character_card_rating(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                body.get("rating"),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/set-tags":
+            result = set_character_card_tags(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                body.get("tags"),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/export-coordinate":
+            result = export_character_card_coordinate(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                str(body.get("name") or ""),
+                str(body.get("output_dir") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/update-profile":
+            result = update_character_card_profile(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                body.get("profile") or {},
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/replace-cover":
+            result = replace_character_card_cover(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                str(body.get("image_path") or ""),
+                body.get("crop"),
             )
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
@@ -529,11 +659,39 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_bytes(
+        self,
+        body: bytes,
+        content_type: str,
+        *,
+        etag: str = "",
+        modified_at: float | None = None,
+    ) -> None:
+        if etag and self.headers.get("if-none-match") == etag:
+            self.send_response(304)
+            self.send_header("etag", etag)
+            self.send_header("access-control-allow-origin", "*")
+            self.send_header("cache-control", "public, max-age=604800, immutable")
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("content-type", content_type)
+        self.send_header("content-length", str(len(body)))
+        self.send_header("access-control-allow-origin", "*")
+        self.send_header("cache-control", "public, max-age=604800, immutable")
+        if etag:
+            self.send_header("etag", etag)
+        if modified_at is not None:
+            self.send_header("last-modified", email.utils.formatdate(modified_at, usegmt=True))
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_file(self, file_path: str, allowed_root: Path) -> None:
         try:
             resolved = Path(file_path).resolve()
             root = allowed_root.resolve()
-            if root not in resolved.parents or not resolved.is_file():
+            if (resolved != root and root not in resolved.parents) or not resolved.is_file():
                 self.send_json({"ok": False, "error": "File not found"}, status=404)
                 return
 

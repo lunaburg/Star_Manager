@@ -6,11 +6,14 @@ const path = require("node:path");
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL || "";
 const isDev = Boolean(rendererUrl);
-const expectedBackendRevision = "external-zipmod-import-v1";
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
-app.commandLine.appendSwitch("disable-gpu-compositing");
-app.commandLine.appendSwitch("disable-d3d11");
+const expectedBackendRevision = "sims4-workbench-tpose-mesh-v2";
+const disableGpu = process.env.STAR_MANAGER_DISABLE_GPU === "1";
+if (disableGpu) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("disable-d3d11");
+}
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 let backendPort = process.env.STAR_MANAGER_BACKEND_PORT || "8765";
 let backendProcess = null;
@@ -39,10 +42,26 @@ function settingsPath() {
 }
 
 function normalizeSettings(settings = {}) {
+  const allowedStartupViews = new Set(["start", "overview", "characters", "mods", "workbench", "plugins", "logs", "settings"]);
+  const allowedFavoriteCardThemes = new Set(["gold", "neon", "sakura", "obsidian"]);
+  const allowedPortablePackageTypes = ["face", "hair", "body", "clothes", "accessory"];
+  const startupView = String(settings.startupView || "start");
+  const favoriteCardTheme = String(settings.favoriteCardTheme || settings.favoriteCardFrameTheme || "gold");
+  const portablePackageTypes = Array.isArray(settings.portablePackageTypes)
+    ? allowedPortablePackageTypes.filter((type) => settings.portablePackageTypes.includes(type))
+    : [...allowedPortablePackageTypes];
   return {
     gameDir: String(settings.gameDir || ""),
     inputDir: String(settings.inputDir || ""),
-    outputDir: String(settings.outputDir || "")
+    outputDir: String(settings.outputDir || ""),
+    coordinateExportDir: String(settings.coordinateExportDir || ""),
+    portablePackageDir: String(settings.portablePackageDir || ""),
+    blenderExecutablePath: String(settings.blenderExecutablePath || ""),
+    portablePackageCompress: settings.portablePackageCompress !== false,
+    portablePackageTypes,
+    startupView: allowedStartupViews.has(startupView) ? startupView : "start",
+    favoriteCardTheme: allowedFavoriteCardThemes.has(favoriteCardTheme) ? favoriteCardTheme : "gold",
+    checkDatabaseChangesOnStartup: settings.checkDatabaseChangesOnStartup !== false
   };
 }
 
@@ -436,12 +455,70 @@ ipcMain.handle("dialog:selectDirectory", async (_event, title) => {
   return result.canceled ? "" : result.filePaths[0];
 });
 
+ipcMain.handle("dialog:selectPackageFile", async (_event, title) => {
+  const result = await dialog.showOpenDialog({
+    title,
+    properties: ["openFile"],
+    filters: [
+      { name: "The Sims 4 Package", extensions: ["package"] }
+    ]
+  });
+  return result.canceled ? "" : result.filePaths[0];
+});
+
 ipcMain.handle("dialog:selectImageFile", async (_event, title) => {
   const result = await dialog.showOpenDialog({
     title,
     properties: ["openFile"],
     filters: [
       { name: "PNG Images", extensions: ["png"] }
+    ]
+  });
+  return result.canceled ? "" : result.filePaths[0];
+});
+
+ipcMain.handle("dialog:selectImageForCrop", async (_event, title) => {
+  const result = await dialog.showOpenDialog({
+    title,
+    properties: ["openFile"],
+    filters: [
+      { name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }
+    ]
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+
+  const filePath = result.filePaths[0];
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return { ok: false, error: "所选路径不是图片文件。" };
+    if (stat.size > 50 * 1024 * 1024) return { ok: false, error: "封面图片不能超过 50 MB。" };
+    const extension = path.extname(filePath).toLowerCase();
+    const mimeTypes = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp"
+    };
+    const mimeType = mimeTypes[extension];
+    if (!mimeType) return { ok: false, error: "请选择 PNG、JPG 或 WebP 图片。" };
+    const data = await fs.promises.readFile(filePath);
+    return {
+      ok: true,
+      path: filePath,
+      name: path.basename(filePath),
+      dataUrl: `data:${mimeType};base64,${data.toString("base64")}`
+    };
+  } catch (error) {
+    return { ok: false, error: `图片读取失败：${error.message}` };
+  }
+});
+
+ipcMain.handle("dialog:selectBlenderExecutable", async (_event, title) => {
+  const result = await dialog.showOpenDialog({
+    title,
+    properties: ["openFile"],
+    filters: [
+      { name: "Blender Executable", extensions: ["exe"] }
     ]
   });
   return result.canceled ? "" : result.filePaths[0];
@@ -538,6 +615,86 @@ app.on("before-quit", () => {
   app.isQuitting = true;
   shutdownBackend("app is quitting");
   clearModelPreviewCache();
+});
+
+ipcMain.handle("blender:openFbx", async (_event, blenderPath, fbxPath) => {
+  const normalizedBlenderPath = path.resolve(String(blenderPath || ""));
+  const normalizedFbxPath = path.resolve(String(fbxPath || ""));
+  const blenderName = path.basename(normalizedBlenderPath).toLowerCase();
+
+  if (
+    !fs.existsSync(normalizedBlenderPath)
+    || !fs.statSync(normalizedBlenderPath).isFile()
+    || !blenderName.startsWith("blender")
+    || path.extname(normalizedBlenderPath).toLowerCase() !== ".exe"
+  ) {
+    return { ok: false, error: "Blender executable not found" };
+  }
+  if (
+    !fs.existsSync(normalizedFbxPath)
+    || !fs.statSync(normalizedFbxPath).isFile()
+    || path.extname(normalizedFbxPath).toLowerCase() !== ".fbx"
+  ) {
+    return { ok: false, error: "FBX file not found" };
+  }
+
+  const pythonFbxPath = normalizedFbxPath.replace(/\\/g, "/");
+  const blenderSetupScript = [
+    "import bpy",
+    "bpy.ops.object.select_all(action='SELECT')",
+    "bpy.ops.object.delete(use_global=False)",
+    "view_preferences=bpy.context.preferences.view",
+    "view_preferences.language='zh_HANS'",
+    "view_preferences.use_translate_interface=True",
+    "view_preferences.use_translate_tooltips=True",
+    `bpy.ops.import_scene.fbx(filepath=${JSON.stringify(pythonFbxPath)})`,
+    "mesh_objects=[obj for obj in bpy.context.scene.objects if obj.type=='MESH']",
+    "if mesh_objects:",
+    "    active_object=mesh_objects[0]",
+    "    bpy.ops.object.select_all(action='DESELECT')",
+    "    active_object.select_set(True)",
+    "    bpy.context.view_layer.objects.active=active_object",
+    "    if active_object.data.uv_layers:",
+    "        active_object.data.uv_layers.active_index=0",
+    "    active_material=active_object.active_material",
+    "    diffuse_node=None",
+    "    if active_material and active_material.node_tree:",
+    "        for link in active_material.node_tree.links:",
+    "            if link.to_socket.name=='Base Color' and link.from_node.type=='TEX_IMAGE':",
+    "                diffuse_node=link.from_node",
+    "                break",
+    "        if diffuse_node and diffuse_node.image:",
+    "            for node in active_material.node_tree.nodes:",
+    "                node.select=False",
+    "            diffuse_node.select=True",
+    "            active_material.node_tree.nodes.active=diffuse_node",
+    "            for screen in bpy.data.screens:",
+    "                for area in screen.areas:",
+    "                    if area.type=='IMAGE_EDITOR':",
+    "                        area.spaces.active.image=diffuse_node.image"
+  ].join("\n");
+  const pythonExpression = `exec(${JSON.stringify(blenderSetupScript)})`;
+
+  try {
+    const child = spawn(
+      normalizedBlenderPath,
+      ["--python-expr", pythonExpression],
+      {
+        cwd: path.dirname(normalizedFbxPath),
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false
+      }
+    );
+    child.unref();
+    return {
+      ok: true,
+      executable: normalizedBlenderPath,
+      fbx: normalizedFbxPath
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 });
 
 ipcMain.handle("shell:openDirectory", async (_event, directoryPath) => {

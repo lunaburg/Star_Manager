@@ -7,7 +7,7 @@
 用户的主要目标：
 
 - 选择 HS2 游戏目录。
-- 在开始页读取和修改 `UserData/setup.xml`。
+- 在开始页查看当前游戏启动入口；`UserData/setup.xml` 编辑区目前仍是前端占位。
 - 启动游戏、打开工作室或打开常用游戏目录。
 - 扫描并浏览资源。
 - 查看角色卡、zipmod、模组物品、诊断和任务结果。
@@ -27,7 +27,10 @@
 | - 总览               | | 浏览器 / 模块内容                      | 目录/详情区    | |
 | - 角色管理           | | 工具栏 / 卡片 / 表格 / 日志             | 元数据         | |
 | - 模组管理           | +----------------------------------------+----------------+ |
+| - 插件管理           |                                                             |
+| - 工作台             |                                                             |
 | - 运行日志           |                                                             |
+| - 设置（底部）       |                                                             |
 |                      |                                                             |
 |                      |                                                             |
 |                      |                                                             |
@@ -45,15 +48,18 @@
 - 角色管理
 - 模组管理
 - 插件管理
+- 工作台
 - 运行日志
+- 设置（固定在侧栏底部）
 
 左侧栏行为：
 
 - 当前预览宽度为 250 px，实际实现可在 240-280 px 内微调。
 - 开始页固定为第一项，用于配置游戏和启动游戏。
 - 当前模块使用柔和粉色到浅蓝的高亮背景、黑色描边和短投影。
-- 每个导航项使用两字母图标加短文字：`ST`、`OV`、`CH`、`MD`、`LG`。
+- 每个导航项使用图标加短文字；工作台使用工具箱图标，其他模块继续使用当前业务图标。
 - 左侧栏不固定显示安全上下文，也不放“导出诊断信息”入口。
+- 设置入口固定在导航底部，与资源管理模块分隔；管理器自身的启动行为、本地记录和默认导出位置在此集中修改。
 
 ## 顶部全局栏
 
@@ -86,13 +92,15 @@
 
 当前模块工作区：
 
-- 开始游戏：启动操作条、游戏配置、启动器视觉卡、目录入口、底部外链占位。
-- 总览：资源摘要、游戏目录状态、建议操作、最近任务，两列卡片布局。
+- 开始游戏：启动操作条、当前仍为占位的游戏配置区、启动器视觉卡和目录入口。
+- 总览：人物卡/模组/物品资源摘要、本地成就、建议操作和最近任务，两列卡片布局；目录有效状态由顶部全局栏展示。
 - 角色管理：人物卡浏览器和右侧卡片目录双栏。
 - 模组管理：zipmod 表格和右侧详情抽屉双栏。
 - 插件管理：进入页面后读取当前游戏目录的 BepInEx 插件，提供程序集汇总、名称/GUID 搜索、core/patcher/plugin 分类筛选，以及包含版本、文件、依赖、进程限制和解析诊断的右侧详情栏。
-  - 页面实例在导航切换时保持挂载，避免每次返回都重新解析 DLL；仅首次加载、游戏目录变化或用户点击“重新扫描”时请求扫描。
+- 工作台：模组制作工具目录与当前工序双栏；首个工具用于将 Sims 4 Package 中每组顶点数最多的 LOD0 GEOM 导出为 FBX。
+- 插件页面实例在导航切换时保持挂载，避免每次返回都重新解析 DLL；仅首次加载或游戏目录变化时请求扫描，强制刷新参数目前只由后端支持。
 - 运行日志：日志标题、轻量工具栏和深色终端区域。
+- 设置：启动页与启动检查、本地成就偏好、默认导出目录、便携依赖包压缩偏好和 Blender 可执行文件路径；设置通过 Electron 本地设置文件持久化。
 
 ## 共享后端上下文
 
@@ -103,30 +111,28 @@
 - `GET /tasks/:id`
 - `POST /tasks`
 
-当前 `POST /tasks` 支持：
+当前 `POST /tasks` 支持数据库、卡片、zipmod 导入/导出/整理、角色卡批量维护和缩略图批量维护等任务。完整 task type、payload 和结果字段以[前后端接口](../backend-interface.md)为唯一契约；主布局只记录页面会触发的几个关键任务：
 
-- `check_game_dir`
-- `search_cards`
-- `extract_mods`
-- `sort_mods`
-- `build_mod_database`
+- `check_game_dir`：选择目录后校验 HS2 结构。
+- `build_mod_database`：顶部全局进度条专用，增量建模组库后继续更新角色卡库。
+- `import_external_zipmods`：总览页导入外部 zipmod、松散 Unity3D、角色卡和服装卡。
+- `organize_all_zipmods_by_author`：总览页一键按作者整理 `mods/`。
+- `export_character_dependency_package`：角色卡详情生成便携依赖包。
+- 角色卡/模组批量删除、标签、移动、修复和导出任务：在对应页面提交并由最近任务/日志反馈。
 
 当前模组资源库浏览接口：
 
 - `GET /mods/database`：检查本地模组数据库是否存在，并返回 zipmod 与物品计数。
-- `GET /mods/zipmods?offset=&limit=&author=&status=`：分页读取 zipmod 列表，当前前端首批 200 条。
+- `GET /mods/zipmods?offset=&limit=&author=&status=&usage=`：分页读取 zipmod 列表，当前前端首批 200 条。
 - `GET /mods/zipmods/authors`：读取模组作者筛选项。
 - `GET /mods/zipmods/:id/diagnostics`：读取当前 zipmod 的 manifest、Unity3D、缩略图和重复文件诊断。
-- `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=`：分页读取物品列表，当前前端首批 500 条；带 `zipmod_id` 时用于模组详情的物品 tab。
+- `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=&usage=`：分页读取物品列表，当前前端首批 500 条；带 `zipmod_id` 时用于模组详情的物品 tab。
 - `GET /mods/items/filters`：读取物品作者和 Kind 筛选项。
 - `GET /mods/thumbnails?path=`：读取运行时缩略图缓存，仅允许访问缩略图目录。
-- `POST /tasks` with `build_mod_database`：重建模组数据库，后端会拒绝无效 HS2 游戏目录。
-- `POST /mods/zipmods/:id/repair-unity3d`：将游戏目录中存在的 `.unity3d` 补入 zipmod。
-- `POST /mods/zipmods/:id/update-author`：补写 `manifest.xml` 作者。
-- `POST /mods/zipmods/:id/cleanup-duplicates`：删除重复 GUID 文件记录和对应重复文件。
-- `POST /mods/zipmods/:id/delete`：删除满足条件的 zipmod 文件和数据库记录。
-- `POST /mods/items/:id/import-thumbnail`：导入 PNG 缩略图并回写 CSV。
-- `POST /mods/items/:id/delete`：从 zipmod 中移除物品 CSV 行和相关资源。
+- `GET /plugins?game_dir=&search=&category=&offset=&limit=`：读取 BepInEx 插件库。
+- `GET /achievements`：读取总览成就和设置页本地成就偏好。
+- `POST /tasks` with `build_mod_database`：重建模组和角色卡数据库，后端会拒绝无效 HS2 游戏目录。
+- 单项模组、物品和角色卡修改走直接 HTTP；批量操作统一走 `/tasks`。完整接口见[前后端接口](../backend-interface.md)。
 
 当前角色卡库接口：
 
@@ -134,21 +140,21 @@
 - `GET /library/cards?game_dir=&path=`：读取当前目录直属 AIS 人物卡，不递归子目录。
 - `GET /library/cards/image?game_dir=&path=`：读取人物卡图像或标准化预览缓存。
 
-仍待补齐或深化的接口组：
+当前实现边界：
 
-- 游戏 `UserData/setup.xml` 读取、校验、保存和备份。
-- 游戏、工作室、VR 模式启动。
-- 角色卡详情和依赖结果。
-- 运行日志读取、筛选、复制和清空。
+- 游戏、工作室、VR 启动已通过 Electron IPC 接通；开始页的 `setup.xml` 读取、校验、保存和备份仍未接入。
+- 角色卡详情、依赖、收藏、评分、标签、封面、坐标卡和便携依赖包已接通。
+- 运行日志目前是前端内存数组；筛选、复制和导出控件仍有占位行为，没有独立日志 HTTP API。
 
 ## Electron IPC 边界
 
 前端通过 `window.desktopApi` 访问桌面能力：
 
-- `selectDirectory`、`selectImageFile`：选择目录和 PNG 缩略图。
+- `selectDirectory`、`selectImageFile`、`selectImageForCrop`、`selectBlenderExecutable`：选择目录、PNG 缩略图、封面裁剪输入和 Blender 可执行文件。
 - `showItemInFolder`：在资源管理器中定位选中文件。
 - `launchGameExecutable`：启动游戏、工作室或 VR 可执行文件。
-- `loadSettings`、`saveSettings`：保存 `gameDir`、`inputDir`、`outputDir`。
+- `openFbxInBlender`：启动用户配置的 Blender，并在空场景中导入工作台生成的 FBX。
+- `loadSettings`、`saveSettings`：保存游戏目录、导出目录、便携包偏好、启动页、收藏主题、自动检查和 `blenderExecutablePath` 等本地偏好。
 - `backendRequest`：访问本地 Python HTTP API。
 
 ## 高风险规则

@@ -17,11 +17,18 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from star_manager.core.card_parser import is_ais_card
+from star_manager.core.card_parser import extract_png_extra_data, read_card_marker
 from star_manager.core.zipmod_utils import is_hs2_game_dir
 from star_manager.services.achievements import record_achievement_event
 from star_manager.services.card_database import build_card_database
-from star_manager.services.card_library import DEFAULT_CARD_PREVIEW_DIR, get_card_root
+from star_manager.services.card_library import (
+    DEFAULT_CARD_PREVIEW_DIR,
+    add_character_card_tags,
+    delete_character_card,
+    export_character_dependency_package,
+    get_card_root,
+    move_character_card,
+)
 from star_manager.services.mod_database import (
     DEFAULT_DB_PATH,
     DEFAULT_THUMBNAIL_DIR,
@@ -111,11 +118,15 @@ SUPPORTED_TASK_TYPES = {
     "build_card_database",
     "build_mod_database",
     "import_external_zipmods",
+    "export_character_dependency_package",
     "bulk_export_zipmods",
     "bulk_organize_zipmods",
     "organize_all_zipmods_by_author",
     "bulk_cleanup_duplicate_zipmods",
     "bulk_delete_zipmods",
+    "bulk_delete_character_cards",
+    "bulk_add_character_card_tags",
+    "bulk_move_character_cards",
     "bulk_repair_zipmods_unity3d",
     "bulk_update_zipmod_authors",
     "bulk_apply_item_thumbnail",
@@ -126,9 +137,20 @@ SUPPORTED_API_ROUTES = {
     "/library/cards",
     "/library/cards/detail",
     "/library/cards/image",
+    "/library/cards/replace-cover",
+    "/library/cards/export-coordinate",
+    "/library/cards/set-navi",
+    "/library/cards/set-favorite",
+    "/library/cards/set-rating",
+    "/library/cards/set-tags",
+    "/library/cards/tags",
+    "/library/cards/update-profile",
     "/library/cards/tree",
+    "/library/cards/folders/create",
+    "/library/cards/folders/rename",
     "/cards/database",
     "/plugins",
+    "/tools/sims4/package-fbx",
     "/mods/database",
     "/mods/items",
     "/mods/items/filters",
@@ -147,7 +169,7 @@ SUPPORTED_API_ROUTES = {
     "/mods/zipmods",
 }
 
-BACKEND_REVISION = "external-zipmod-import-v1"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2"
 
 
 def _safe_author_directory(author: str) -> str:
@@ -512,6 +534,13 @@ def _unique_import_target(import_dir: Path, source_path: Path, used_targets: set
     return target
 
 
+def _ais_card_marker(source_path: Path) -> str | None:
+    try:
+        return read_card_marker(extract_png_extra_data(source_path))
+    except Exception:
+        return None
+
+
 def _duplicate_ids_for_guid(guid: str, db_path: Path) -> list[int]:
     resolved = db_path.resolve()
     conn = sqlite3.connect(resolved)
@@ -648,13 +677,17 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
     reporter.message(f"Scanning external folder: {source_dir}")
     card_import_dir = get_card_root(str(game_dir)) / "female"
     card_import_dir.mkdir(parents=True, exist_ok=True)
+    coordinate_import_dir = game_dir / "UserData" / "coordinate" / "female" / "imoprted"
+    coordinate_import_dir.mkdir(parents=True, exist_ok=True)
     import_dir = game_dir / "mods" / "Imported"
     import_dir.mkdir(parents=True, exist_ok=True)
     used_targets: set[Path] = set()
     used_card_targets: set[Path] = set()
+    used_coordinate_targets: set[Path] = set()
     copied: list[dict] = []
     unity3d_repaired: list[dict] = []
     imported_cards: list[dict] = []
+    imported_coordinates: list[dict] = []
     non_card_pngs: list[str] = []
     invalid: list[dict] = []
     failures: list[dict] = []
@@ -662,18 +695,26 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
     card_total = max(len(png_paths), 1)
     for index, source_path in enumerate(png_paths, start=1):
         try:
-            if not is_ais_card(str(source_path)):
+            marker = _ais_card_marker(source_path)
+            if marker == "【AIS_Clothes】":
+                target_path = _unique_import_target(coordinate_import_dir, source_path, used_coordinate_targets)
+                shutil.copy2(source_path, target_path)
+                imported_coordinates.append({"source_path": str(source_path), "target_path": str(target_path)})
+            elif marker == "【AIS_Chara】":
+                target_path = _unique_import_target(card_import_dir, source_path, used_card_targets)
+                shutil.copy2(source_path, target_path)
+                imported_cards.append({"source_path": str(source_path), "target_path": str(target_path)})
+            else:
                 non_card_pngs.append(str(source_path))
                 set_step_progress(task, index, card_total, start=2, end=14)
                 continue
-            target_path = _unique_import_target(card_import_dir, source_path, used_card_targets)
-            shutil.copy2(source_path, target_path)
-            imported_cards.append({"source_path": str(source_path), "target_path": str(target_path)})
         except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
             failures.append({"source_path": str(source_path), "error": str(exc)})
         set_step_progress(task, index, card_total, start=2, end=14)
         if should_report_step(index, card_total):
-            reporter.message(f"Imported {len(imported_cards)}/{len(png_paths)} AIS card PNG files")
+            reporter.message(
+                f"Imported {len(imported_cards)} character and {len(imported_coordinates)} clothes card PNG files"
+            )
 
     total = max(len(zipmod_paths), 1)
     for index, source_path in enumerate(zipmod_paths, start=1):
@@ -817,11 +858,13 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         "source_dir": str(source_dir),
         "target_dir": str(import_dir),
         "card_target_dir": str(card_import_dir),
+        "coordinate_target_dir": str(coordinate_import_dir),
         "scanned_count": len(zipmod_paths),
         "png_scanned_count": len(png_paths),
         "copied_count": len(copied),
         "unity3d_repaired_count": sum(int(item.get("repaired_count") or 0) for item in unity3d_repaired),
         "card_imported_count": len(imported_cards),
+        "coordinate_imported_count": len(imported_coordinates),
         "non_card_png_count": len(non_card_pngs),
         "invalid_count": len(invalid),
         "imported_count": len(imported),
@@ -832,6 +875,7 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         "invalid": invalid,
         "unity3d_repaired": unity3d_repaired,
         "imported_cards": imported_cards,
+        "imported_coordinates": imported_coordinates,
         "non_card_pngs": non_card_pngs,
         "imported": imported,
         "promoted": promoted,
@@ -841,7 +885,8 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         "message": (
             f"Imported {len(imported)} zipmod GUID(s), promoted {len(promoted)} better duplicate(s), "
             f"repaired {sum(int(item.get('repaired_count') or 0) for item in unity3d_repaired)} unity3d file(s), "
-            f"copied {len(imported_cards)} card(s), skipped {len(skipped)}, invalid {len(invalid)}, failed {len(failures)}"
+            f"copied {len(imported_cards)} character card(s) and {len(imported_coordinates)} clothes card(s), "
+            f"skipped {len(skipped)}, invalid {len(invalid)}, failed {len(failures)}"
         ),
     }
 
@@ -922,6 +967,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 preview_dir,
                 report_card_database_progress,
                 mode=mode,
+                affected_mod_guids=stats.get("affected_mod_guids"),
             )
             task.data = {
                 "database_path": str(db_path.resolve()),
@@ -971,6 +1017,25 @@ def run_task(task: TaskState, payload: dict) -> None:
             reporter.message(str(task.data.get("message") or "External zipmod import completed"))
             if not task.data.get("ok"):
                 raise ValueError("External zipmod import failed")
+        elif task.task_type == "export_character_dependency_package":
+            task.title = "生成角色卡便携依赖包"
+            reporter.message("正在解析人物卡依赖")
+
+            def report_package_progress(value: int, message: str) -> None:
+                reporter.progress(value, 100)
+                reporter.message(message)
+
+            task.data = export_character_dependency_package(
+                str(payload.get("game_dir") or ""),
+                str(payload.get("path") or ""),
+                str(payload.get("target_dir") or ""),
+                bool(payload.get("compress", True)),
+                payload.get("dependency_types") if "dependency_types" in payload else None,
+                progress_callback=report_package_progress,
+            )
+            if not task.data.get("ok"):
+                raise ValueError(str(task.data.get("error") or "便携依赖包生成失败"))
+            reporter.message("便携依赖包已生成")
         elif task.task_type == "bulk_export_zipmods":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             mode = str(payload.get("mode") or "copy")
@@ -1167,6 +1232,142 @@ def run_task(task: TaskState, payload: dict) -> None:
             }
             if not task.data["ok"]:
                 raise ValueError("Bulk delete failed")
+        elif task.task_type == "bulk_delete_character_cards":
+            game_dir = str(payload.get("game_dir") or "")
+            db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+            preview_dir = Path(str(payload.get("preview_dir") or DEFAULT_CARD_PREVIEW_DIR))
+            card_paths = list(dict.fromkeys(
+                str(path or "").strip()
+                for path in (payload.get("card_paths") or [])
+                if str(path or "").strip()
+            ))
+            if not card_paths:
+                raise ValueError("请先选择要删除的人物卡。")
+
+            task.title = "批量删除人物卡"
+            reporter.message(f"正在删除 {len(card_paths)} 张人物卡")
+            deleted: list[dict] = []
+            failures: list[dict] = []
+            total = len(card_paths)
+            for index, relative_path in enumerate(card_paths, start=1):
+                result = delete_character_card(game_dir, relative_path, db_path, preview_dir)
+                if result.get("ok"):
+                    deleted.append(result)
+                else:
+                    failures.append({
+                        "id": relative_path,
+                        "path": relative_path,
+                        "error": str(result.get("error") or "人物卡删除失败"),
+                    })
+                set_step_progress(task, index, total)
+                if should_report_step(index, total):
+                    reporter.message(f"已处理 {index}/{total} 张人物卡；失败 {len(failures)} 张")
+            task.data = {
+                "ok": len(deleted) > 0 or len(failures) == 0,
+                "selected_count": len(card_paths),
+                "deleted_count": len(deleted),
+                "failure_count": len(failures),
+                "deleted": deleted,
+                "failures": failures,
+                "message": f"已删除 {len(deleted)} 张人物卡，失败 {len(failures)} 张",
+            }
+            if not task.data["ok"]:
+                raise ValueError("批量删除人物卡失败")
+        elif task.task_type == "bulk_add_character_card_tags":
+            game_dir = str(payload.get("game_dir") or "")
+            db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+            preview_dir = Path(str(payload.get("preview_dir") or DEFAULT_CARD_PREVIEW_DIR))
+            card_paths = list(dict.fromkeys(
+                str(path or "").strip()
+                for path in (payload.get("card_paths") or [])
+                if str(path or "").strip()
+            ))
+            tags = payload.get("tags") or []
+            if not card_paths:
+                raise ValueError("请先选择要添加标签的人物卡。")
+            if not tags:
+                raise ValueError("请至少选择一个要添加的标签。")
+
+            task.title = "批量添加人物卡标签"
+            reporter.message(f"正在为 {len(card_paths)} 张人物卡添加标签")
+            updated: list[dict] = []
+            failures: list[dict] = []
+            total = len(card_paths)
+            for index, relative_path in enumerate(card_paths, start=1):
+                result = add_character_card_tags(
+                    game_dir,
+                    relative_path,
+                    tags,
+                    db_path=db_path,
+                    preview_dir=preview_dir,
+                )
+                if result.get("ok"):
+                    updated.append(result)
+                else:
+                    failures.append({
+                        "id": relative_path,
+                        "path": relative_path,
+                        "error": str(result.get("error") or "人物卡标签添加失败"),
+                    })
+                set_step_progress(task, index, total)
+                if should_report_step(index, total):
+                    reporter.message(f"已处理 {index}/{total} 张人物卡；失败 {len(failures)} 张")
+            task.data = {
+                "ok": len(updated) > 0 or len(failures) == 0,
+                "selected_count": len(card_paths),
+                "updated_count": len(updated),
+                "failure_count": len(failures),
+                "tags": list(tags),
+                "updated": updated,
+                "failures": failures,
+                "message": f"已为 {len(updated)} 张人物卡添加标签，失败 {len(failures)} 张",
+            }
+            if not task.data["ok"]:
+                raise ValueError("批量添加人物卡标签失败")
+        elif task.task_type == "bulk_move_character_cards":
+            game_dir = str(payload.get("game_dir") or "")
+            db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+            target_directory = str(payload.get("target_directory") or "").strip()
+            card_paths = list(dict.fromkeys(
+                str(path or "").strip()
+                for path in (payload.get("card_paths") or [])
+                if str(path or "").strip()
+            ))
+            if not card_paths:
+                raise ValueError("请先选择要移动的人物卡。")
+            if not target_directory:
+                raise ValueError("请选择目标目录。")
+
+            task.title = "批量移动人物卡"
+            reporter.message(f"正在移动 {len(card_paths)} 张人物卡")
+            moved: list[dict] = []
+            failures: list[dict] = []
+            total = len(card_paths)
+            for index, relative_path in enumerate(card_paths, start=1):
+                result = move_character_card(game_dir, relative_path, target_directory, db_path)
+                if result.get("ok"):
+                    moved.append(result)
+                else:
+                    failures.append({
+                        "id": relative_path,
+                        "path": relative_path,
+                        "error": str(result.get("error") or "人物卡移动失败"),
+                    })
+                set_step_progress(task, index, total)
+                if should_report_step(index, total):
+                    reporter.message(f"已处理 {index}/{total} 张人物卡；失败 {len(failures)} 张")
+            task.data = {
+                "ok": len(moved) > 0 or len(failures) == 0,
+                "selected_count": len(card_paths),
+                "moved_count": len(moved),
+                "failure_count": len(failures),
+                "target_directory": target_directory,
+                "moved": moved,
+                "failures": failures,
+                "message": f"已移动 {len(moved)} 张人物卡，失败 {len(failures)} 张",
+            }
+            if not task.data["ok"]:
+                raise ValueError("批量移动人物卡失败")
         elif task.task_type == "bulk_update_zipmod_authors":
             zipmod_ids = parse_zipmod_ids(payload.get("zipmod_ids") or [])
             author = str(payload.get("author") or "")

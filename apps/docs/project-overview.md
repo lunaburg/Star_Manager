@@ -1,5 +1,7 @@
 # Project Overview
 
+面向新用户的产品定位和页面使用流程见[项目介绍](project-introduction.md)；本文保留开发者需要的架构、数据模型、接口和维护规则。
+
 本文档用于快速梳理 Star_Manager 当前项目内容。新成员或自动化代理在动手改代码前，应先读本文，再按具体任务进入对应专题文档。
 
 ## 当前产品
@@ -25,6 +27,7 @@ apps/
 |-- backend/tests/            # Python backend tests
 |-- backend/runtime/          # Development runtime cache, generated locally
 |-- scripts/                  # Developer and packaging helper scripts
+|-- tools/                    # Isolated C# helpers and companion game plugins
 |-- docs/                     # Project documentation
 |-- dist/                     # Vite build output
 |-- build/                    # Backend packaging output
@@ -60,20 +63,29 @@ Electron starts the backend with this priority:
 
 The backend uses `STAR_MANAGER_RUNTIME_DIR` for runtime cache location. Development defaults to `apps/backend/runtime`; packaged builds use a `runtime` folder beside `Star_Manager.exe`.
 
+Electron hardware acceleration is enabled by default so the Three.js model preview remains responsive at large sizes. Set `STAR_MANAGER_DISABLE_GPU=1` only as a compatibility fallback for systems where GPU acceleration prevents the app from starting or rendering correctly.
+
 ## Frontend Shape
 
-The renderer is a Vue app with a persistent shell and five main views:
+The renderer is a Vue app with a persistent shell and eight main views:
 
 - Start: game launch, path setup, setup/configuration surfaces.
 - Overview: game directory summary, health cards, suggested actions, recent tasks.
 - Characters: `UserData/chara` directory tree, card grid, card detail, dependency views.
 - Mods: item/zipmod browsing modes, filters, detail drawer, diagnostics, direct and batch maintenance actions.
+- Plugins: BepInEx plugin inventory, metadata, dependencies, and diagnostics.
+- Workbench: standalone mod-making helpers, currently including Sims 4 Package to HS2-aligned T-pose LOD0 FBX pure meshes with no final skeleton/skinning, plus RLE2 PNG texture extraction.
 - Logs: task and runtime message review.
+- Settings: manager startup behavior, local achievement preferences, persistent default export locations, and Blender executable integration for Workbench FBX imports.
+
+The Start page's `setup.xml` panel is currently a renderer-side placeholder. The three Electron launch helpers and directory shortcuts are connected, but setup values are not yet read from or written back to the game's XML file.
 
 Important frontend files:
 
 - `apps/src/App.vue`: main shell, shared state, task polling, API calls, filters and bulk actions.
 - `apps/src/components/views/*.vue`: view-level presentation components.
+- `apps/src/components/ModelPreview.vue`: Three.js GLB viewer, mannequin overlay, camera/light/background controls, and screenshot capture.
+- `apps/src/components/CardCoverCropper.vue`: native-resolution `63:88` cover crop UI.
 - `apps/src/components/LazyThumbnail.vue`: thumbnail display helper.
 - `apps/src/styles.css`: global visual system and layout styles.
 
@@ -89,13 +101,20 @@ Business modules:
 - `star_manager/core/card_parser.py`: AIS card PNG payload parsing and dependency extraction.
 - `star_manager/core/runtime_paths.py`: runtime path helpers.
 - `star_manager/core/zipmod_utils.py`: HS2 directory checks and zipmod helper logic.
-- `star_manager/services/card_library.py`: card folder tree, card listing, normalized preview images, card detail.
+- `star_manager/services/card_library.py`: card folder tree, card listing, normalized preview images, card detail, coordinate export, and portable dependency package generation.
 - `star_manager/services/card_database.py`: character-card indexing and dependency association with zipmods/items.
+- `star_manager/services/plugin_library.py`: read-only BepInEx plugin metadata scan and cache.
+- `star_manager/services/achievements.py`: local achievement milestones, event deduplication, preferences, and reset.
 - `star_manager/services/mod_database.py`: compatibility facade plus database build orchestration.
 - `star_manager/services/mod_database_core.py`: dataclasses, SQLite schema, migrations, metadata.
 - `star_manager/services/mod_database_queries.py`: database status, lists, filters, exports, duplicate analysis queries.
 - `star_manager/services/mod_database_assets.py`: zipmod scanning, manifest/CSV parsing, thumbnails, Unity3D diagnostics, write-back repair/delete operations.
+- `star_manager/services/model_preview.py`: selected item MainAB mesh/material conversion to runtime GLB or static FBX.
 - `star_manager/services/mod_workflow.py`: legacy card search, dependency extraction, zipmod sorting workflows.
+- `star_manager/services/sims4_workbench.py`: validates one Sims 4 Package export request and invokes collision-safe LOD0 FBX plus RLE2 PNG texture extraction.
+- `star_manager/core/card_metadata.py`: read/write of registered Star Manager favorite, rating, and tag metadata.
+- `star_manager/core/character_profile.py`: atomic character parameter and cover replacement logic.
+- `star_manager/core/coordinate_card.py`: coordinate block extraction and coordinate-scoped plugin conversion.
 - `star_manager/tools/mod_sorter.py`: mod sorting helper.
 - `star_manager/utils/binary_reader.py`: binary parsing utility.
 
@@ -108,9 +127,11 @@ Core tables:
 - `zipmods`: one primary row per manifest GUID, plus file metadata, scan status, item count, Unity3D summary and diagnostics.
 - `duplicate_zipmods`: duplicate files for GUIDs whose primary zipmod is already represented in `zipmods`.
 - `mod_items`: item rows parsed from `abdata/list/**/*.csv`, linked to `zipmods`.
-- `character_cards`: indexed character cards under `UserData/chara`.
+- `character_cards`: indexed character cards under `UserData/chara`, including signature-validated browser caches for name, favorite, rating, and tags.
 - `character_card_dependencies`: dependencies parsed from cards and linked to `zipmods` / `mod_items` when possible.
 - `database_metadata`: build metadata such as last build time.
+- `bepinex_plugin_cache`: per-game-directory plugin scan payload and source fingerprint.
+- `achievement_progress`, `achievement_events`, `achievement_preferences`: local achievement state; these tables do not replace resource indexes.
 
 Important design rule: the file system, zipmod archive contents, `manifest.xml`, CSV rows, and card PNG payloads are the source of truth. SQLite is a local index and cache that can be rebuilt.
 
@@ -124,12 +145,17 @@ Examples of direct mutations:
 - update one zipmod manifest author or editable manifest fields;
 - cleanup, promote, merge, or delete one duplicate/zipmod target;
 - import/export one item thumbnail;
+- generate one item model preview or static FBX;
+- update one character-card profile, cover, favorite, rating, tags, navi slot, or coordinate card;
 - delete one item.
 
 Examples of task mutations:
 
 - rebuild mod/card database;
+- import external zipmods and related loose cards/resources;
 - export or organize selected zipmods;
+- organize all zipmods by author;
+- generate one card's portable dependency package, including its resolved files;
 - bulk repair Unity3D issues;
 - smart cleanup duplicate zipmods;
 - bulk delete zipmods;
@@ -174,6 +200,25 @@ Read AIS PNG payload
 -> expose card detail and dependency status in UI
 ```
 
+Plugin inventory flow:
+
+```text
+Scan BepInEx Plugins/patchers/core DLL metadata without executing DLLs
+-> correlate assembly/config/translation descriptions
+-> cache by file fingerprint in SQLite
+-> display read-only plugin, dependency, process, and diagnostic data
+```
+
+Workbench flow:
+
+```text
+Select one Sims 4 Package
+-> select highest-vertex LOD0 GEOM per model family
+-> decode RLE2 textures and remove fully transparent triangles
+-> optionally use Blender plus the bundled 165-bone TS4 template to bake HS2-aligned T-Pose
+-> remove skeleton/weights and export collision-safe static FBX + textures
+```
+
 ## Commands
 
 Run from `apps/` unless noted otherwise:
@@ -183,6 +228,7 @@ npm run check:python
 npm run python:dev
 npm run dev
 npm run build
+npm run build:card-plugin
 npm run electron
 npm run build:backend
 npm run package:win
@@ -200,6 +246,8 @@ Backend tests live under `apps/backend/tests/`. Current coverage focuses on:
 - duplicate cleanup policy and bridge task behavior;
 - item thumbnail batch task behavior;
 - character-card database behavior.
+- character-card folders, metadata, profile updates, cover replacement, coordinate extraction, dependency packages, and deletion.
+- model preview, Sims 4 workbench extraction, plugin cache, and metadata plugin validation.
 
 Use the existing tests as the first safety net when changing backend database, parser, or task behavior. Frontend changes should still run `npm run build` before completion.
 
@@ -214,9 +262,14 @@ Use the existing tests as the first safety net when changing backend database, p
 
 ## Where To Read Next
 
+- Documentation index and task-oriented map: `apps/docs/README.md`.
 - Frontend/backend contract: `apps/docs/backend-interface.md`.
 - Frontend layout and visual rules: `apps/docs/frontend-ui/frontend-ui-architecture.md`.
+- Plugin inventory page: `apps/docs/frontend-ui/plugins-layout.md`.
+- Manager settings and persistence: `apps/docs/frontend-ui/settings-layout.md`.
 - Mod database schema and scanning: `apps/docs/mod_manage/mod_database_design.md`.
 - Incremental rebuild and dependency relinking: `apps/docs/mod_manage/mod_database_change_detection.md`.
 - Card parsing details: `apps/docs/mod_manage/character_card_parsing.md`.
+- Persistent card metadata plugin: `apps/docs/card-metadata-plugin.md`.
+- Unity3D resource recovery notes: `apps/docs/unity3d-decryption-notes.md`.
 - Packaging: `apps/docs/packaging-windows.md`.

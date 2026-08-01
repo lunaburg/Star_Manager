@@ -143,6 +143,10 @@ def extract_mod_guids_from_card(file_path):
 
 def extract_character_profile_from_card(file_path: str) -> dict[str, Any]:
     card_data = extract_png_extra_data(file_path)
+    return extract_character_profile_from_card_data(card_data)
+
+
+def extract_character_profile_from_card_data(card_data: bytes) -> dict[str, Any]:
     if read_card_marker(card_data) not in AIS_CARD_MARKERS:
         return {}
 
@@ -363,8 +367,18 @@ def get_card_block(card_data: bytes, block_name: str) -> tuple[dict[str, Any], b
     unpacked = try_unpack_msgpack(card_data, info_offset)
     if not unpacked:
         return None
-    info, block_base = unpacked
+    info, table_end = unpacked
     if not isinstance(info, dict):
+        return None
+
+    # AIS character cards store the total block-data size as a little-endian
+    # UInt64 between the MessagePack block table and the first block.  Block
+    # positions are relative to the bytes after that size field.
+    if table_end + 8 > len(card_data):
+        return None
+    block_data_size = int.from_bytes(card_data[table_end : table_end + 8], "little")
+    block_base = table_end + 8
+    if block_base + block_data_size > len(card_data):
         return None
 
     for block_info in info.get("lstInfo", []):
@@ -372,6 +386,8 @@ def get_card_block(card_data: bytes, block_name: str) -> tuple[dict[str, Any], b
             continue
         pos = int(block_info.get("pos", 0))
         size = int(block_info.get("size", 0))
+        if pos < 0 or size < 0 or pos + size > block_data_size:
+            return None
         return block_info, card_data[block_base + pos : block_base + pos + size]
     return None
 

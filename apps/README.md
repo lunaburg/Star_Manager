@@ -47,8 +47,6 @@ apps/
 `-- vite.config.js
 ```
 
-The former `apps/pyside6` app has been removed. This app should remain self-contained in `apps/`.
-
 The repository-level `test/hs2` directory is the local HS2 test environment. In the expected HS2 layout, `mods` stores `zipmod` files, `abdata` stores `.unity3d` files, and `UserData/chara` stores character-card PNG files.
 
 ## Commands

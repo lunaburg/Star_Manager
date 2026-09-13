@@ -1,7 +1,11 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import ModelPreview from "../ModelPreview.vue";
 import LazyThumbnail from "../LazyThumbnail.vue";
+import LoadingAnimation from "../LoadingAnimation.vue";
+import VirtualItemGrid from "../VirtualItemGrid.vue";
+import VirtualItemTable from "../VirtualItemTable.vue";
+import assemblyDisconnectedLoadingAnimation from "../../assets/assembly-disconnected-loading.json";
 
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
@@ -12,38 +16,52 @@ const modelPreviewReady = ref(false);
 const thumbnailChoiceOpen = ref(false);
 const thumbnailChoiceBusy = ref(false);
 const thumbnailChoiceError = ref("");
-const kindFilterOpen = ref(false);
+const expandedAssemblyGroup = ref("clothes");
+const selectedAssemblySlotKey = ref("");
 
-const selectedKindOption = computed(() => (
-  ctx.itemKindOptions.find((option) => option.value === ctx.itemFilters.kind)
-  || ctx.itemKindOptions[0]
-));
+watch(() => ctx.assemblyMode, (enabled) => {
+  if (!enabled) selectedAssemblySlotKey.value = "";
+});
+
+watch(() => [
+  ctx.assemblyContext?.scene,
+  ctx.assemblyContext?.available,
+  ctx.currentGameState?.available
+], () => {
+  if (!ctx.currentGameState?.available) selectedAssemblySlotKey.value = "";
+});
+
+function toggleAssemblyGroup(groupKey) {
+  if (!ctx.gameCurrentGroups?.some((group) => group.key === groupKey)) return;
+  expandedAssemblyGroup.value = expandedAssemblyGroup.value === groupKey ? "" : groupKey;
+}
+
+function assemblySlotKey(group, item) {
+  return `${group.key}:${item.partIndex}:${item.categoryNo}`;
+}
+
+async function selectAssemblySlot(group, item) {
+  const key = assemblySlotKey(group, item);
+  const selected = await ctx.selectAssemblySlot(item, group.key);
+  if (selected) selectedAssemblySlotKey.value = key;
+}
+
+async function handleItemClick(row) {
+  if (ctx.assemblyMode) {
+    await ctx.applyAssemblyItem(row);
+    return;
+  }
+  ctx.selectItem(row);
+}
+
+function handleItemDoubleClick(row) {
+  if (ctx.assemblyMode) return;
+  ctx.locateSourceMod(row);
+}
+
 const selectedItemIsClothing = computed(() => (
   String(ctx.selectedItem?.kind || "").includes("\u670d\u9970")
 ));
-
-function kindOptionParts(option) {
-  if (!option?.value) return { category: "all", gender: "", text: option?.label || "\u5168\u90e8 Kind" };
-  const segments = String(option.label || "").split("/");
-  const hasGender = segments[0] === "\u2642" || segments[0] === "\u2640";
-  const category = hasGender ? segments[1] : segments[0];
-  const textSegments = hasGender ? segments.slice(2) : segments.slice(1);
-  return {
-    category: ["\u9762\u90e8", "\u8eab\u4f53", "\u670d\u9970", "\u5934\u53d1", "\u9970\u54c1"].includes(category) ? category : "other",
-    gender: hasGender ? segments[0] : "",
-    text: textSegments.length ? textSegments.join("/") : String(option.label || "")
-  };
-}
-
-function selectKindOption(option) {
-  ctx.itemFilters.kind = option.value;
-  kindFilterOpen.value = false;
-  ctx.applyItemFilters();
-}
-
-function closeKindFilterSoon() {
-  window.setTimeout(() => { kindFilterOpen.value = false; }, 100);
-}
 
 function openThumbnailChoice() {
   thumbnailChoiceError.value = "";
@@ -77,6 +95,7 @@ const MOD_STATUS_TONES = {
   warning: "warn",
   manifest_author: "warn",
   unity3d_in_game: "warn",
+  unity3d_not_in_mod: "warn",
   thumbnail: "warn",
   duplicate_zipmod: "warn",
   error: "danger",
@@ -93,11 +112,11 @@ function modStatusTone(status) {
 <template>
   <section class="view">
     <div class="mod-layout mod-management-layout">
-      <section class="panel browser-panel mod-page">
-        <div class="module-head mod-head">
+      <section class="panel browser-panel mod-page glass-surface--compact">
+        <div class="module-head mod-head glass-surface--compact">
           <h1>模组管理</h1>
           <div class="library-summary mod-summary">
-            <span class="badge ok">{{ ctx.formatStat(ctx.stats.zipmods) }} zipmod</span>
+            <span class="badge ok">{{ ctx.formatStat(ctx.modDatabase.total) }} zipmod</span>
             <span class="badge">{{ ctx.formatStat(ctx.stats.modItems) }} items</span>
             <span class="badge warn">{{ ctx.formatStat(ctx.stats.zipmodWarnings) }} warnings</span>
             <span class="badge danger">{{ ctx.formatStat(ctx.stats.zipmodErrors) }} errors</span>
@@ -105,10 +124,22 @@ function modStatusTone(status) {
           </div>
         </div>
 
-        <div class="mod-strip">
+        <div class="mod-strip glass-surface--compact">
           <div class="mode-strip mod-tabs">
             <button :class="{ active: ctx.libraryMode === 'mods' }" type="button" @click="ctx.setLibraryMode('mods')">模组浏览</button>
             <button :class="{ active: ctx.libraryMode === 'items' }" type="button" @click="ctx.setLibraryMode('items')">物品浏览</button>
+          </div>
+          <div v-if="ctx.libraryMode === 'items'" class="assembly-mode-control">
+            <button
+              class="assembly-mode-toggle"
+              :class="{ active: ctx.assemblyMode }"
+              type="button"
+              :aria-pressed="ctx.assemblyMode"
+              title="切换右侧为游戏角色编辑器的实际装配信息"
+              @click="ctx.setAssemblyMode(!ctx.assemblyMode)"
+            >
+              <span>{{ ctx.assemblyMode ? '退出装配模式' : '装配模式' }}</span>
+            </button>
           </div>
           <div class="dependency-usage-filter" aria-label="角色卡依赖筛选">
             <button
@@ -123,7 +154,7 @@ function modStatusTone(status) {
           </div>
         </div>
 
-        <div class="toolbar library-toolbar">
+        <div class="toolbar library-toolbar glass-surface--compact">
           <div v-if="ctx.libraryMode === 'items'" class="toolbar-left filter-grid items">
             <input
               v-model="ctx.itemFilters.search"
@@ -132,54 +163,49 @@ function modStatusTone(status) {
               placeholder="搜索物品名字 / 模组 GUID"
               @input="ctx.scheduleItemSearch"
             >
-            <div class="kind-filter-select" @focusout="closeKindFilterSoon" @keydown.esc="kindFilterOpen = false">
-              <button
-                type="button"
-                class="kind-filter-trigger"
-                :class="`kind-option-${selectedKindOption.gender}`"
-                aria-label="Kind 筛选"
+            <div class="author-combobox" @keydown.esc="ctx.itemAuthorFilterOpen = false">
+              <input
+                v-model="ctx.itemFilters.author"
+                type="text"
+                aria-label="作者筛选"
                 aria-haspopup="listbox"
-                :aria-expanded="kindFilterOpen"
-                @click="kindFilterOpen = !kindFilterOpen"
+                :aria-expanded="ctx.itemAuthorFilterOpen"
+                placeholder="输入作者关键字"
+                autocomplete="off"
+                spellcheck="false"
+                @focus="ctx.itemAuthorFilterOpen = true"
+                @blur="ctx.closeItemAuthorFilterSoon"
+                @input="ctx.itemAuthorFilterOpen = true; ctx.scheduleItemSearch()"
+                @keydown.enter.prevent="ctx.applyItemFilters"
               >
-                <span class="kind-option-content">
-                  <span v-if="kindOptionParts(selectedKindOption).gender" class="kind-gender">{{ kindOptionParts(selectedKindOption).gender }}</span>
-                  <svg v-if="kindOptionParts(selectedKindOption).category === '面部'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9 10h.01M15 10h.01M9 15c1.8 1.3 4.2 1.3 6 0"></path></svg>
-                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '身体'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"></circle><path d="M8.5 21 10 14 7 10l2-2h6l2 2-3 4 1.5 7M10 14h4"></path></svg>
-                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '服饰'" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-5 4 3 4 2-1v8h8v-8l2 1 3-4-5-4c-.8 1.2-2.1 2-4 2s-3.2-.8-4-2Z"></path></svg>
-                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '头发'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c1-3 1-6 1-9a6 6 0 0 1 12 0c0 3 0 6 1 9M8 20c1-4 1-8 1-12M12 20V7M16 20c-1-4-1-8-1-12"></path></svg>
-                  <svg v-else-if="kindOptionParts(selectedKindOption).category === '饰品'" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.1 5.2L20 9l-4.4 3.8L17 19l-5-3.2L7 19l1.4-6.2L4 9l5.9-.8L12 3Z"></path><circle cx="12" cy="12" r="2.2"></circle></svg>
-                  <span>{{ kindOptionParts(selectedKindOption).text }}</span>
-                </span>
-                <span class="kind-filter-chevron" aria-hidden="true">▾</span>
+              <button
+                class="author-combobox-toggle"
+                type="button"
+                aria-label="显示作者列表"
+                @mousedown.prevent
+                @click="ctx.itemAuthorFilterOpen = !ctx.itemAuthorFilterOpen"
+              >
+                ▼
               </button>
-              <div v-if="kindFilterOpen" class="kind-option-list" role="listbox" aria-label="Kind 筛选选项">
+              <div v-if="ctx.itemAuthorFilterOpen" class="author-option-list" role="listbox" aria-label="作者筛选选项">
                 <button
-                  v-for="kind in ctx.itemKindOptions"
-                  :key="kind.value || 'all'"
+                  v-for="author in ctx.filteredItemAuthorOptions"
+                  :key="author || 'all'"
                   type="button"
+                  :class="{ active: ctx.itemFilters.author === author }"
                   role="option"
-                  :aria-selected="ctx.itemFilters.kind === kind.value"
-                  :class="[`kind-option-${kind.gender}`, { active: ctx.itemFilters.kind === kind.value }]"
-                  @mousedown.prevent="selectKindOption(kind)"
+                  :aria-selected="ctx.itemFilters.author === author"
+                  @mousedown.prevent="ctx.selectItemAuthorFilter(author)"
                 >
-                  <span class="kind-option-content">
-                    <span v-if="kindOptionParts(kind).gender" class="kind-gender">{{ kindOptionParts(kind).gender }}</span>
-                    <svg v-if="kindOptionParts(kind).category === '面部'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9 10h.01M15 10h.01M9 15c1.8 1.3 4.2 1.3 6 0"></path></svg>
-                    <svg v-else-if="kindOptionParts(kind).category === '身体'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"></circle><path d="M8.5 21 10 14 7 10l2-2h6l2 2-3 4 1.5 7M10 14h4"></path></svg>
-                    <svg v-else-if="kindOptionParts(kind).category === '服饰'" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-5 4 3 4 2-1v8h8v-8l2 1 3-4-5-4c-.8 1.2-2.1 2-4 2s-3.2-.8-4-2Z"></path></svg>
-                    <svg v-else-if="kindOptionParts(kind).category === '头发'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c1-3 1-6 1-9a6 6 0 0 1 12 0c0 3 0 6 1 9M8 20c1-4 1-8 1-12M12 20V7M16 20c-1-4-1-8-1-12"></path></svg>
-                    <svg v-else-if="kindOptionParts(kind).category === '饰品'" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.1 5.2L20 9l-4.4 3.8L17 19l-5-3.2L7 19l1.4-6.2L4 9l5.9-.8L12 3Z"></path><circle cx="12" cy="12" r="2.2"></circle></svg>
-                    <span>{{ kindOptionParts(kind).text }}</span>
-                  </span>
-                  <span v-if="ctx.itemFilters.kind === kind.value" class="kind-option-check" aria-hidden="true">✓</span>
+                  {{ author || "全部作者" }}
                 </button>
+                <div v-if="ctx.filteredItemAuthorOptions.length === 0" class="author-option-empty">没有匹配作者</div>
               </div>
             </div>
-            <select v-model="ctx.itemFilters.author" aria-label="作者筛选" @change="ctx.applyItemFilters">
-              <option v-for="author in ctx.itemAuthorOptions" :key="author || 'all'" :value="author">
-                {{ author || "全部作者" }}
-              </option>
+            <select v-model="ctx.itemFilters.source" aria-label="物品来源筛选" title="筛选模组物品或游戏本体物品" @change="ctx.applyItemFilters">
+              <option value="">全部来源</option>
+              <option value="mod">模组物品</option>
+              <option value="builtin">游戏本体</option>
             </select>
             <select v-model="ctx.itemFilters.status" aria-label="状态筛选" @change="ctx.applyItemFilters">
               <option value="">全部状态</option>
@@ -189,18 +215,11 @@ function modStatusTone(status) {
             </select>
           </div>
 
-          <button
-            v-if="ctx.libraryMode === 'items'"
-            class="bulk-delete-error-items-button danger-action"
-            type="button"
-            title="批量删除当前筛选列表下的所有错误物品"
-            aria-label="批量删除当前筛选列表下的所有错误物品"
-            :aria-busy="ctx.bulkActionBusy === 'items-delete'"
-            :disabled="!ctx.itemDatabase.exists || Boolean(ctx.bulkActionBusy)"
-            @click="ctx.openBulkDeleteErrorItemsPrompt"
-          >
-            删除错误物品
-          </button>
+          <div v-if="ctx.libraryMode === 'items'" class="item-toolbar-actions">
+            <button class="bulk-delete-error-items-button danger-action" type="button" title="批量删除当前筛选列表下的所有错误模组物品" aria-label="批量删除当前筛选列表下的所有错误模组物品" :aria-busy="ctx.bulkActionBusy === 'items-delete'" :disabled="!ctx.itemDatabase.exists || ctx.itemFilters.source === 'builtin' || Boolean(ctx.bulkActionBusy)" @click="ctx.openBulkDeleteErrorItemsPrompt">
+              删除错误物品
+            </button>
+          </div>
 
           <div v-else class="toolbar-left filter-grid mods">
             <button
@@ -222,7 +241,7 @@ function modStatusTone(status) {
                 v-model="ctx.modFilters.author"
                 type="text"
                 aria-label="作者筛选"
-                placeholder="全部作者"
+                placeholder="输入作者关键字"
                 autocomplete="off"
                 @focus="ctx.modAuthorFilterOpen = true"
                 @blur="ctx.closeModAuthorFilterSoon"
@@ -265,7 +284,7 @@ function modStatusTone(status) {
               <option class="status-option-ok" value="normal">正常</option>
               <option class="status-option-warn" value="warning">警告</option>
               <option class="status-option-warn" value="manifest_author">　缺少模组作者</option>
-              <option class="status-option-warn" value="unity3d_in_game">　Unity3D 仅在游戏目录</option>
+              <option class="status-option-warn" value="unity3d_not_in_mod">　unity3d未在模组内</option>
               <option class="status-option-warn" value="thumbnail">　缩略图缺失</option>
               <option class="status-option-warn" value="duplicate_zipmod">　存在重复模组</option>
               <option class="status-option-danger" value="error">错误</option>
@@ -277,7 +296,7 @@ function modStatusTone(status) {
 
           <div v-if="ctx.libraryMode === 'mods' && ctx.modBulkMode" class="bulk-action-bar" aria-label="批量操作">
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-export-action"
               type="button"
               title="导出已选模组"
               aria-label="导出已选模组"
@@ -292,7 +311,7 @@ function modStatusTone(status) {
               </svg>
             </button>
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-organize-action"
               type="button"
               title="按作者整理已选模组"
               aria-label="按作者整理已选模组"
@@ -307,7 +326,7 @@ function modStatusTone(status) {
               </svg>
             </button>
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-unity3d-action"
               type="button"
               title="批量剪切补入 unity3d"
               aria-label="批量剪切补入 unity3d"
@@ -323,7 +342,7 @@ function modStatusTone(status) {
               </svg>
             </button>
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-duplicate-action"
               type="button"
               title="智能清理重复模组"
               aria-label="智能清理重复模组"
@@ -341,7 +360,7 @@ function modStatusTone(status) {
               </svg>
             </button>
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-delete-action"
               type="button"
               title="批量删除已选模组"
               aria-label="批量删除已选模组"
@@ -358,7 +377,7 @@ function modStatusTone(status) {
               </svg>
             </button>
             <button
-              class="bulk-icon-button"
+              class="bulk-icon-button bulk-author-action"
               type="button"
               title="批量修改作者"
               aria-label="批量修改作者"
@@ -398,26 +417,26 @@ function modStatusTone(status) {
               <span>{{ ctx.itemDatabase.error }}</span>
               <button type="button" @click="ctx.refreshModDatabaseList">重试</button>
             </div>
-            <table v-else>
-              <thead>
-                <tr><th>状态</th><th>缩略图</th><th>物品名</th><th>Kind</th><th>作者</th><th>来源模组</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in ctx.itemRows" :key="row.id" :class="{ 'selected-row': ctx.selectedItem?.id === row.id }" @click="ctx.selectItem(row)" @dblclick="ctx.locateSourceMod(row)">
-                  <td><span class="badge" :class="ctx.badgeClass(row.status)">{{ row.status }}</span></td>
-                  <td>
-                    <span class="item-thumb" :class="ctx.badgeClass(row.status)">
-                      <LazyThumbnail v-if="row.thumbnailUrl && row.status === 'ready'" :src="row.thumbnailUrl" :alt="row.name + ' preview'" />
-                      <span v-else>{{ row.status === 'ready' ? 'PNG' : 'MISS' }}</span>
-                    </span>
-                  </td>
-                  <td><span class="truncate">{{ row.name }}</span></td>
-                  <td>{{ row.kind }}</td>
-                  <td>{{ row.author }}</td>
-                  <td>{{ row.sourceMod }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <VirtualItemGrid
+              v-else-if="ctx.itemViewMode === 'compact'"
+              :rows="ctx.itemRows"
+              :selected-id="ctx.selectedItem?.id"
+              :badge-class="ctx.badgeClass"
+              :is-map-scene-item="ctx.isMapSceneItem"
+              @item-click="handleItemClick"
+              @item-dblclick="handleItemDoubleClick"
+              @item-contextmenu="(row, event) => ctx.openItemContextMenu(row, event)"
+            />
+            <VirtualItemTable
+              v-else
+              :rows="ctx.itemRows"
+              :selected-id="ctx.selectedItem?.id"
+              :badge-class="ctx.badgeClass"
+              :is-map-scene-item="ctx.isMapSceneItem"
+              @item-click="handleItemClick"
+              @item-dblclick="handleItemDoubleClick"
+              @item-contextmenu="(row, event) => ctx.openItemContextMenu(row, event)"
+            />
             <div v-if="ctx.itemDatabase.exists" class="table-load-more">
               <span v-if="ctx.itemDatabase.loadingMore">继续加载中...</span>
               <span v-else-if="ctx.itemDatabase.hasMore">已加载 {{ ctx.itemRows.length.toLocaleString() }} / {{ ctx.itemDatabase.total.toLocaleString() }}</span>
@@ -485,11 +504,11 @@ function modStatusTone(status) {
                   >
                 </td>
                 <td><span class="badge" :class="ctx.badgeClass(row.status)">{{ row.status }}</span></td>
-                <td><span class="truncate">{{ row.name }}</span></td>
+                <td><span class="text-ellipsis">{{ row.name }}</span></td>
                 <td>{{ row.author }}</td>
                 <td>{{ row.version }}</td>
                 <td>{{ row.itemCount }}</td>
-                <td><span class="truncate mono">{{ row.guid }}</span></td>
+                <td><span class="text-ellipsis mono">{{ row.guid }}</span></td>
               </tr>
             </tbody>
           </table>
@@ -503,12 +522,88 @@ function modStatusTone(status) {
 
       <aside class="panel side-panel mod-detail-panel">
         <div class="panel-head mod-detail-head">
-          <h2>详细信息</h2>
-          <span v-if="ctx.libraryMode === 'items' && ctx.selectedItem" class="badge" :class="ctx.badgeClass(ctx.selectedItem.status)">{{ ctx.selectedItem.status }}</span>
+          <h2>{{ ctx.libraryMode === 'items' && ctx.assemblyMode ? '当前角色装配' : '详细信息' }}</h2>
+          <span
+            v-if="ctx.libraryMode === 'items' && ctx.assemblyMode && ctx.assemblyTargetSlot.active"
+            class="assembly-selected-slot"
+            :title="ctx.assemblyTargetSlot.label"
+          >
+            {{ ctx.assemblyTargetSlot.label }}
+          </span>
+          <span v-if="ctx.libraryMode === 'items' && ctx.assemblyMode" class="badge ok">实时同步</span>
+          <span v-else-if="ctx.libraryMode === 'items' && ctx.selectedItem" class="badge" :class="ctx.badgeClass(ctx.selectedItem.status)">{{ ctx.selectedItem.status }}</span>
           <span v-else-if="ctx.libraryMode === 'mods' && ctx.selectedMod" class="badge" :class="ctx.badgeClass(ctx.selectedMod.status)">{{ ctx.selectedMod.status }}</span>
         </div>
         <div class="drawer-body mod-detail-body">
-          <div v-if="(ctx.libraryMode === 'items' && !ctx.selectedItem) || (ctx.libraryMode === 'mods' && !ctx.selectedMod)" class="detail-empty">
+          <div v-if="ctx.libraryMode === 'items' && ctx.assemblyMode" class="assembly-detail-view" :class="{ 'is-disconnected': !ctx.currentGameState.available }">
+            <template v-if="ctx.currentGameState.available">
+              <div class="assembly-groups">
+                <section v-for="group in ctx.gameCurrentGroups" :key="group.key" class="assembly-group" :class="{ 'is-expanded': expandedAssemblyGroup === group.key }">
+                  <button
+                    class="assembly-group-head"
+                    type="button"
+                    :aria-expanded="expandedAssemblyGroup === group.key"
+                    :aria-controls="`assembly-group-content-${group.key}`"
+                    :aria-label="`${expandedAssemblyGroup === group.key ? '收起' : '展开'}${group.label}`"
+                    @click="toggleAssemblyGroup(group.key)"
+                  >
+                    <span class="assembly-group-head-copy">
+                      <span class="assembly-group-label">{{ group.label }}</span>
+                    </span>
+                    <span class="assembly-group-head-actions">
+                      <strong class="assembly-group-count">{{ (ctx.currentGameState[group.key] || []).length }}</strong>
+                      <span class="assembly-group-chevron" :class="{ open: expandedAssemblyGroup === group.key }" aria-hidden="true">⌄</span>
+                    </span>
+                  </button>
+                  <div v-if="expandedAssemblyGroup === group.key" :id="`assembly-group-content-${group.key}`" class="assembly-group-content">
+                    <div v-if="(ctx.currentGameState[group.key] || []).length" class="assembly-slot-list">
+                      <article
+                        v-for="item in (ctx.currentGameState[group.key] || [])"
+                        :key="`${group.key}-${item.partIndex}-${item.categoryNo}`"
+                        class="assembly-slot-row"
+                        :class="{ empty: Number(item.localSlot || 0) === 0, selected: selectedAssemblySlotKey === assemblySlotKey(group, item) }"
+                        role="button"
+                        tabindex="0"
+                        :aria-pressed="selectedAssemblySlotKey === assemblySlotKey(group, item)"
+                        :title="`点击以筛选可装配到${ctx.gameCurrentSlotLabel(item)}的物品`"
+                          @click="selectAssemblySlot(group, item)"
+                          @keydown.enter.prevent="selectAssemblySlot(group, item)"
+                          @keydown.space.prevent="selectAssemblySlot(group, item)"
+                      >
+                        <span
+                          class="assembly-slot-thumb"
+                          :class="{ empty: Number(item.localSlot || 0) === 0, placeholder: !item.thumbnailUrl }"
+                          aria-hidden="true"
+                        >
+                          <LazyThumbnail
+                            v-if="item.thumbnailUrl"
+                            :src="item.thumbnailUrl"
+                            :alt="`${ctx.gameCurrentItemName(item)}缩略图`"
+                          />
+                          <span v-else class="assembly-slot-thumb-placeholder">{{ Number(item.localSlot || 0) === 0 ? '—' : 'IMG' }}</span>
+                        </span>
+                        <div class="assembly-slot-copy">
+                          <strong>
+                            {{ ctx.gameCurrentSlotLabel(item) }}
+                            <em v-if="item.partLabel"> · {{ item.partLabel }}</em>
+                          </strong>
+                          <span class="assembly-item-name">{{ ctx.gameCurrentItemName(item) }}</span>
+                        </div>
+                      </article>
+                    </div>
+                    <div v-else class="assembly-group-empty">游戏未返回该组栏位。</div>
+                  </div>
+                </section>
+              </div>
+            </template>
+            <div v-else class="assembly-disconnected-state" role="status" aria-label="等待游戏连接">
+              <LoadingAnimation
+                class="assembly-disconnected-animation"
+                :animation-data="assemblyDisconnectedLoadingAnimation"
+              />
+            </div>
+          </div>
+          <div v-else-if="(ctx.libraryMode === 'items' && !ctx.selectedItem) || (ctx.libraryMode === 'mods' && !ctx.selectedMod)" class="detail-empty">
             <strong>请选择一个对象</strong>
           </div>
 
@@ -526,21 +621,77 @@ function modStatusTone(status) {
                 </div>
               </div>
             </div>
-            <div class="tabs mod-detail-tabs item-detail-tabs" aria-label="物品详情视图">
+            <div v-if="ctx.itemGameNotice?.message" class="item-game-notice" :class="ctx.itemGameNotice.type" role="status" aria-live="polite">
+              <span>{{ ctx.itemGameNotice.message }}</span>
+              <button type="button" aria-label="关闭换装提示" @click="ctx.itemGameNotice.message = ''">×</button>
+            </div>
+            <div v-if="!ctx.selectedItem.isBuiltin" class="tabs mod-detail-tabs item-detail-tabs" aria-label="物品详情视图">
               <button :class="{ active: ctx.itemTab === '详情' }" type="button" @click="ctx.itemTab = '详情'">详情</button>
               <button :class="{ active: ctx.itemTab === '工具' }" type="button" @click="ctx.itemTab = '工具'">工具</button>
             </div>
-            <div v-if="ctx.itemTab === '详情'" class="drawer-tab-panel active">
+            <div v-if="ctx.selectedItem.isBuiltin" class="drawer-tab-panel active">
+              <div class="drawer-section mod-detail-section builtin-item-detail">
+                <span class="drawer-section-title">游戏本体物品</span>
+                <div class="kv mod-kv"><span>来源</span><strong>游戏本体</strong></div>
+                <div class="kv mod-kv"><span>物品 ID</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.dbId || '-' }}</strong></div>
+                <div class="kv mod-kv"><span>分类</span><strong>{{ ctx.selectedItem.kind }}</strong></div>
+                <div class="kv mod-kv"><span>原版列表</span><strong class="mono" :title="ctx.selectedItem.raw.source_path || '-'">{{ ctx.selectedItem.raw.source_path || '-' }}</strong></div>
+                <div class="kv mod-kv"><span>模型资源</span><strong class="mono" :title="ctx.selectedItem.raw.main_ab || '-'">{{ ctx.itemUnity3dFileName(ctx.selectedItem) }}</strong></div>
+                <div class="kv mod-kv"><span>资源状态</span><strong>{{ ctx.selectedItem.raw.resource_status || '未知' }}</strong></div>
+              </div>
+            </div>
+            <div v-else-if="ctx.itemTab === '详情'" class="drawer-tab-panel active">
               <div class="drawer-section mod-detail-section">
                 <span class="drawer-section-title">来源模组</span>
-                <div class="kv mod-kv"><span>模组名称</span><strong>{{ ctx.selectedItem.sourceMod }}</strong></div>
+                <div class="kv mod-kv"><span>模组名称</span><button type="button" class="source-mod-link" :title="`定位来源模组：${ctx.selectedItem.sourceMod}`" :aria-label="`定位来源模组：${ctx.selectedItem.sourceMod}`" @click="ctx.locateSourceMod()"><span>{{ ctx.selectedItem.sourceMod }}</span><span class="source-mod-link-icon" aria-hidden="true">↗</span></button></div>
                 <div class="kv mod-kv"><span>包标识</span><strong>{{ ctx.selectedItem.raw.zipmod_guid || "-" }}</strong></div>
-                <div class="kv mod-kv"><span>物品 ID</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.id }}</strong></div>
-                <div class="kv mod-kv"><span>分类表</span><strong>{{ ctx.selectedItem.raw.csv_path || ctx.selectedItem.kind }}</strong></div>
-                <div class="kv mod-kv"><span>依赖 Unity3D</span><strong class="mono" :title="ctx.selectedItem.raw.main_ab || '-'">{{ ctx.itemUnity3dFileName(ctx.selectedItem) }}</strong></div>
+                <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '地图编号' : '物品 ID' }}</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.id }}</strong></div>
+                <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '地图注册表' : '分类表' }}</span><strong>{{ ctx.selectedItem.raw.csv_path || ctx.selectedItem.kind }}</strong></div>
+                <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '场景资源' : '依赖 Unity3D' }}</span><button type="button" class="unity3d-export-link mono" :disabled="ctx.exportingUnity3dItemId === ctx.selectedItem.id || !ctx.selectedItem.raw?.main_ab" :title="`点击复制导出 Unity3D：${ctx.itemUnity3dFileName(ctx.selectedItem)}`" :aria-label="`点击复制导出 Unity3D：${ctx.itemUnity3dFileName(ctx.selectedItem)}`" @click="ctx.exportItemUnity3d(ctx.selectedItem)"><span>{{ ctx.exportingUnity3dItemId === ctx.selectedItem.id ? '导出中...' : ctx.itemUnity3dFileName(ctx.selectedItem) }}</span><span class="unity3d-export-icon" aria-hidden="true">⇩</span></button></div>
               </div>
             </div>
             <div v-else class="drawer-tab-panel active">
+              <div v-if="ctx.workbenchTemplateSelection?.active" class="drawer-section mod-detail-section workbench-template-selection">
+                <div class="item-tools-heading">
+                  <div>
+                    <span class="drawer-section-title">临时工具</span>
+                    <small>选择完成或取消后自动消失</small>
+                  </div>
+                  <span class="item-tools-count">一次性</span>
+                </div>
+                <div class="item-tool-card workbench-template-tool-card">
+                  <span class="item-tool-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
+                      <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8"></path>
+                      <path d="M16 15h5M18.5 12.5v5"></path>
+                    </svg>
+                  </span>
+                  <div class="item-tool-copy">
+                    <strong>作为模板</strong>
+                  </div>
+                  <button
+                    type="button"
+                    :disabled="ctx.workbenchTemplateSelection.busy || !ctx.selectedItem.raw?.main_ab || ctx.selectedItem.status === 'error' || ctx.isMapSceneItem(ctx.selectedItem)"
+                    @click="ctx.selectWorkbenchTemplateFromItem(ctx.selectedItem)"
+                  >
+                    {{ ctx.workbenchTemplateSelection.busy ? "读取中..." : "选择" }}
+                  </button>
+                  <button type="button" :disabled="ctx.workbenchTemplateSelection.busy" @click="ctx.cancelWorkbenchTemplateSelection">取消</button>
+                </div>
+                <div v-if="ctx.workbenchTemplateSelection.error" class="setup-error" role="alert">
+                  <span>!</span>{{ ctx.workbenchTemplateSelection.error }}
+                </div>
+              </div>
+              <div v-if="ctx.isMapSceneItem(ctx.selectedItem)" class="drawer-section mod-detail-section">
+                <span class="drawer-section-title">地图场景</span>
+                <ModelPreview
+                  ref="modelPreview"
+                  :item-id="ctx.selectedItem.id"
+                  @ready-change="modelPreviewReady = $event"
+                />
+              </div>
+              <template v-else>
               <ModelPreview
                 ref="modelPreview"
                 :item-id="ctx.selectedItem.id"
@@ -552,61 +703,25 @@ function modStatusTone(status) {
                   <div>
                     <span class="drawer-section-title">物品工具</span>
                   </div>
-                  <span class="item-tools-count">4 项</span>
+                  <span class="item-tools-count">3 项</span>
                 </div>
                 <div class="item-tools-list">
                   <div class="item-tool-card">
-                    <span class="item-tool-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false">
-                        <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
-                        <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8"></path>
-                      </svg>
-                    </span>
                     <div class="item-tool-copy">
-                      <strong>来源模组</strong>
-                      <small :title="ctx.selectedItem.sourceMod">{{ ctx.selectedItem.sourceMod }}</small>
+                      <strong>使用 SB3Utility 打开</strong>
                     </div>
-                    <button type="button" @click="ctx.locateSourceMod()">定位</button>
+                    <button type="button" :disabled="ctx.openingUnity3dItemId === ctx.selectedItem.id" @click="ctx.openItemUnity3d(ctx.selectedItem)">{{ ctx.openingUnity3dItemId === ctx.selectedItem.id ? "打开中..." : "打开" }}</button>
                   </div>
                   <div class="item-tool-card">
-                    <span class="item-tool-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false">
-                        <path d="m4 7 7-3 7 3-7 3-7-3ZM4 7v8l7 3 3-1.3M11 10v8"></path>
-                        <path d="M16 12v8M13.5 17.5 16 20l2.5-2.5M14 20h6"></path>
-                      </svg>
-                    </span>
-                    <div class="item-tool-copy">
-                      <strong>导出 FBX 模型</strong>
-                      <small>静态网格、材质与贴图</small>
-                    </div>
-                    <button type="button" :disabled="ctx.exportingFbxItemId === ctx.selectedItem.id" @click="ctx.exportItemFbx(ctx.selectedItem)">{{ ctx.exportingFbxItemId === ctx.selectedItem.id ? "导出中..." : "导出" }}</button>
-                  </div>
-                  <div class="item-tool-card">
-                    <span class="item-tool-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false">
-                        <rect x="3" y="5" width="16" height="14" rx="2"></rect>
-                        <circle cx="8" cy="10" r="1.5"></circle>
-                        <path d="m5 17 4-4 3 3 2-2 3 3M20 3v4M18 5h4"></path>
-                      </svg>
-                    </span>
                     <div class="item-tool-copy">
                       <strong>重建缩略图</strong>
-                      <small>从图片或当前 3D 视角生成</small>
                     </div>
                     <span class="item-tool-status" :class="{ ready: ctx.selectedItem.raw.thumbnail_status === 'ready' }">{{ ctx.selectedItem.raw.thumbnail_status || "未知" }}</span>
                     <button type="button" :disabled="ctx.repairingThumbnailItemId === ctx.selectedItem.id" @click="openThumbnailChoice">{{ ctx.repairingThumbnailItemId === ctx.selectedItem.id ? "导入中..." : "重建" }}</button>
                   </div>
                   <div class="item-tool-card">
-                    <span class="item-tool-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false">
-                        <rect x="7" y="4" width="13" height="11" rx="2"></rect>
-                        <path d="M17 18H6a2 2 0 0 1-2-2V7M9 13l3-3 2.5 2.5L17 10l3 3"></path>
-                        <circle cx="11" cy="8" r="1"></circle>
-                      </svg>
-                    </span>
                     <div class="item-tool-copy">
                       <strong>批量缩略图工具</strong>
-                      <small>处理当前筛选列表</small>
                     </div>
                     <button type="button" :disabled="Boolean(ctx.bulkActionBusy)" @click="ctx.openThumbnailToolsPrompt">打开</button>
                   </div>
@@ -619,6 +734,7 @@ function modStatusTone(status) {
                   <button type="button" :disabled="ctx.deletingItemId === ctx.selectedItem.id" @click="ctx.deleteModItemRow(ctx.selectedItem)">{{ ctx.deletingItemId === ctx.selectedItem.id ? "删除中..." : "删除" }}</button>
                 </div>
               </div>
+              </template>
             </div>
           </template>
 
@@ -645,9 +761,15 @@ function modStatusTone(status) {
               </div>
               <div class="drawer-section mod-detail-section">
                 <span class="drawer-section-title">文件位置</span>
-                <div class="kv mod-kv"><span>文件名</span><strong>{{ ctx.selectedMod.raw.file_name || "-" }}</strong></div>
-                <button class="kv mod-kv folder-kv" type="button" @click="ctx.openSelectedModInFolder">
-                  <span>所在文件夹</span>
+                <button
+                  class="kv mod-kv folder-kv"
+                  type="button"
+                  :title="`在资源管理器中定位：${ctx.selectedMod.raw.file_name || '当前模组'}`"
+                  :aria-label="`在资源管理器中定位：${ctx.selectedMod.raw.file_name || '当前模组'}`"
+                  @click="ctx.openSelectedModInFolder"
+                >
+                  <span>文件名</span>
+                  <strong>{{ ctx.selectedMod.raw.file_name || "-" }}</strong>
                 </button>
               </div>
               <div class="drawer-section mod-detail-section">
@@ -668,7 +790,7 @@ function modStatusTone(status) {
                   <button v-for="item in ctx.selectedModItems" :key="item.id" type="button" class="related-item" @click="ctx.openModItemInItemBrowser(item)">
                     <span class="related-thumb" :class="ctx.badgeClass(item.status)">
                       <LazyThumbnail v-if="item.thumbnailUrl && item.status === 'ready'" :src="item.thumbnailUrl" :alt="item.name + ' preview'" />
-                      <span v-else>{{ item.status === "ready" ? "PNG" : "MISS" }}</span>
+                      <span v-else>{{ item.status === "ready" ? (ctx.isMapSceneItem(item) ? "MAP" : "PNG") : "MISS" }}</span>
                     </span>
                     <div class="related-item-main">
                       <strong>{{ item.name }}</strong>
@@ -698,6 +820,15 @@ function modStatusTone(status) {
                     </div>
                     <div v-if="issue.type === 'unity3d' && issue.status === 'missing'" class="kv mod-kv unity3d-file-kv">
                       <span>Unity3D 文件</span><strong class="mono">{{ ctx.unity3dIssueFileName(issue) }}</strong>
+                    </div>
+                    <div v-if="issue.type === 'unity3d' && ['in_game', 'not_in_mod'].includes(issue.status) && issue.game_path" class="kv mod-kv unity3d-file-kv">
+                      <span>当前所在位置</span><strong class="mono" :title="issue.game_path || '-'">{{ issue.game_path || "-" }}</strong>
+                    </div>
+                    <div v-if="issue.type === 'unity3d' && ['in_game', 'not_in_mod'].includes(issue.status)" class="kv mod-kv unity3d-file-kv">
+                      <span>资源来源</span><strong>{{ issue.source === 'other_zipmod' ? '其它 zipmod' : '游戏目录' }}</strong>
+                    </div>
+                    <div v-if="issue.type === 'unity3d' && issue.other_zipmods?.length" class="affected-items">
+                      <span v-for="provider in issue.other_zipmods" :key="provider.path" class="badge neutral" :title="provider.path">提供：{{ provider.path.split(/[\\/]/).filter(Boolean).pop() || provider.path }}</span>
                     </div>
                     <div v-if="issue.type !== 'thumbnail'" class="affected-items">
                       <span v-for="item in issue.affected_items" :key="item.id" class="badge neutral">{{ item.name || item.item_id }}</span>
@@ -764,6 +895,115 @@ function modStatusTone(status) {
     </div>
   </section>
   <Teleport to="body">
+    <div
+      v-if="ctx.itemContextMenu?.open"
+      class="item-context-backdrop"
+      @mousedown.self="ctx.closeItemContextMenu"
+      @contextmenu.prevent
+    >
+      <div class="item-context-menu" :style="{ left: `${ctx.itemContextMenu.x}px`, top: `${ctx.itemContextMenu.y}px` }" role="menu" @mousedown.stop>
+        <div class="item-context-heading">物品操作</div>
+        <div class="item-context-name" :title="ctx.itemContextMenu.item?.name">{{ ctx.itemContextMenu.item?.name }}</div>
+        <button
+          type="button"
+          class="item-context-action primary-context-action"
+          role="menuitem"
+          :disabled="ctx.itemGameApply?.busy || !ctx.itemGameApplySpec(ctx.itemContextMenu.item).supported"
+          @click="ctx.requestItemGameApply"
+        >
+          {{ ctx.itemGameApplyLabel(ctx.itemContextMenu.item) }}
+        </button>
+        <div v-if="!ctx.itemGameApplySpec(ctx.itemContextMenu.item).supported" class="item-context-boundary">
+          {{ ctx.itemGameApplySpec(ctx.itemContextMenu.item).reason }}
+        </div>
+        <button v-if="!ctx.itemContextMenu.item?.isBuiltin" type="button" class="item-context-action" role="menuitem" @click="ctx.locateSourceMod(ctx.itemContextMenu.item); ctx.closeItemContextMenu()">定位来源模组</button>
+      </div>
+    </div>
+    <div v-if="ctx.itemAccessoryPrompt?.open" class="prompt-backdrop" @click.self="ctx.closeItemAccessoryPrompt">
+      <div class="prompt-panel game-item-slot-panel" role="dialog" aria-modal="true" aria-labelledby="game-item-slot-title">
+        <strong id="game-item-slot-title">应用饰品到游戏角色</strong>
+        <p>请选择角色制作器中的配饰槽。这个操作只改变当前角色，不会写入物品库或角色卡；请确认正在运行的 HS2 就是当前选择的游戏目录。</p>
+        <div class="game-item-target" :title="ctx.itemAccessoryPrompt.item?.name">
+          <span>目标物品</span>
+          <strong>{{ ctx.itemAccessoryPrompt.item?.name }}</strong>
+        </div>
+        <label class="game-item-slot-field">
+          <span>角色配饰槽</span>
+          <select v-model.number="ctx.itemAccessoryPrompt.slotNo">
+            <option v-for="option in ctx.gameAccessorySlotOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <div class="game-item-boundary-note">
+          {{ ctx.itemGameApplySpec(ctx.itemAccessoryPrompt.item).isBuiltin
+            ? '原版物品会使用 CategoryNo + 原版 ID 直接校验游戏列表；不会按名称猜测。'
+            : '插件会用模组 GUID + 类别 + CSV slot 严格解析游戏运行时 ID；映射不唯一时会拒绝执行。' }}
+        </div>
+        <div v-if="ctx.itemAccessoryPrompt.error" class="prompt-error">{{ ctx.itemAccessoryPrompt.error }}</div>
+        <div class="prompt-actions">
+          <button type="button" :disabled="ctx.itemAccessoryPrompt.busy" @click="ctx.closeItemAccessoryPrompt">取消</button>
+          <button class="primary" type="button" :disabled="ctx.itemAccessoryPrompt.busy || ctx.itemGameApply?.busy" @click="ctx.confirmItemAccessoryApply">
+            {{ ctx.itemAccessoryPrompt.busy ? "正在换装…" : "应用到当前角色" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-if="ctx.itemFacePrompt?.open" class="prompt-backdrop" @click.self="ctx.closeItemFacePrompt">
+      <div class="prompt-panel game-item-slot-panel" role="dialog" aria-modal="true" aria-labelledby="game-item-face-title">
+        <strong id="game-item-face-title">应用面部物品到游戏角色</strong>
+        <p>请选择左眼或右眼。这个操作只改变当前角色，不会写入物品库或角色卡；请确认正在运行的 HS2 就是当前选择的游戏目录。</p>
+        <div class="game-item-target" :title="ctx.itemFacePrompt.item?.name">
+          <span>目标物品</span>
+          <strong>{{ ctx.itemFacePrompt.item?.name }}</strong>
+        </div>
+        <label class="game-item-slot-field">
+          <span>眼别</span>
+          <select v-model.number="ctx.itemFacePrompt.facePartNo">
+            <option :value="0">左眼</option>
+            <option :value="1">右眼</option>
+          </select>
+        </label>
+        <div class="game-item-boundary-note">
+          {{ ctx.itemGameApplySpec(ctx.itemFacePrompt.item).isBuiltin
+            ? '原版物品会使用 CategoryNo + 原版 ID 直接校验游戏列表；不会按名称猜测。'
+            : '插件会用模组 GUID + 类别 + CSV slot 严格解析游戏运行时 ID；映射不唯一时会拒绝执行。' }}
+        </div>
+        <div v-if="ctx.itemFacePrompt.error" class="prompt-error">{{ ctx.itemFacePrompt.error }}</div>
+        <div class="prompt-actions">
+          <button type="button" :disabled="ctx.itemFacePrompt.busy" @click="ctx.closeItemFacePrompt">取消</button>
+          <button class="primary" type="button" :disabled="ctx.itemFacePrompt.busy || ctx.itemGameApply?.busy" @click="ctx.confirmItemFaceApply">
+            {{ ctx.itemFacePrompt.busy ? "正在换装…" : "应用到当前角色" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-if="ctx.itemBodyPrompt?.open" class="prompt-backdrop" @click.self="ctx.closeItemBodyPrompt">
+      <div class="prompt-panel game-item-slot-panel" role="dialog" aria-modal="true" aria-labelledby="game-item-body-title">
+        <strong id="game-item-body-title">应用身体物品到游戏角色</strong>
+        <p>普通身体物品会直接应用；身体彩绘请选择目标彩绘层。这个操作只改变当前角色，不会写入物品库或角色卡。</p>
+        <div class="game-item-target" :title="ctx.itemBodyPrompt.item?.name">
+          <span>目标物品</span>
+          <strong>{{ ctx.itemBodyPrompt.item?.name }}</strong>
+        </div>
+        <label v-if="ctx.itemGameApplySpec(ctx.itemBodyPrompt.item).type === 'body' && ['8', '313'].includes(String(ctx.itemGameApplySpec(ctx.itemBodyPrompt.item).categoryNo))" class="game-item-slot-field">
+          <span>彩绘层</span>
+          <select v-model.number="ctx.itemBodyPrompt.bodyPartNo">
+            <option v-for="option in ctx.GAME_BODY_PAINT_SLOT_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <div class="game-item-boundary-note">
+          {{ ctx.itemGameApplySpec(ctx.itemBodyPrompt.item).isBuiltin
+            ? '原版物品会使用 CategoryNo + 原版 ID 直接校验游戏列表；不会按名称猜测。'
+            : '插件会用模组 GUID + 类别 + CSV slot 严格解析游戏运行时 ID；映射不唯一时会拒绝执行。' }}
+        </div>
+        <div v-if="ctx.itemBodyPrompt.error" class="prompt-error">{{ ctx.itemBodyPrompt.error }}</div>
+        <div class="prompt-actions">
+          <button type="button" :disabled="ctx.itemBodyPrompt.busy" @click="ctx.closeItemBodyPrompt">取消</button>
+          <button class="primary" type="button" :disabled="ctx.itemBodyPrompt.busy || ctx.itemGameApply?.busy" @click="ctx.confirmItemBodyApply">
+            {{ ctx.itemBodyPrompt.busy ? "正在换装…" : "应用到当前角色" }}
+          </button>
+        </div>
+      </div>
+    </div>
     <div v-if="thumbnailChoiceOpen" class="prompt-backdrop" @click.self="thumbnailChoiceOpen = false">
       <div class="prompt-panel thumbnail-rebuild-panel" role="dialog" aria-modal="true" aria-labelledby="thumbnail-rebuild-title">
         <strong id="thumbnail-rebuild-title">重建物品缩略图</strong>

@@ -363,11 +363,76 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
             with zipfile.ZipFile(game_dir / "mods" / "Imported" / "sample.zipmod") as zf:
                 self.assertEqual(zf.read("abdata/chara/sample/main.unity3d"), b"external-bundle")
             self.assertFalse(external_unity3d.exists())
-            self.assertTrue((game_dir / "UserData" / "chara" / "female" / "card.png").is_file())
+            self.assertTrue(
+                (game_dir / "UserData" / "chara" / "female" / "imported" / "card.png").is_file()
+            )
             self.assertTrue(
                 (game_dir / "UserData" / "coordinate" / "female" / "imoprted" / "clothes.png").is_file()
             )
             self.assertFalse((game_dir / "UserData" / "chara" / "female" / "plain.png").exists())
+
+    def test_import_external_zip_recognizes_standard_layout_and_normalizes_target_suffix(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            (game_dir / "mods").mkdir(parents=True)
+            (game_dir / "abdata").mkdir()
+            (game_dir / "UserData" / "chara").mkdir(parents=True)
+            (game_dir / "HoneySelect2.exe").write_bytes(b"")
+            source_dir = root / "external"
+            source_dir.mkdir()
+
+            valid_zip = source_dir / "downloaded-mod.zip"
+            with zipfile.ZipFile(valid_zip, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>downloaded.guid</guid><name>Downloaded</name>"
+                    "<version>1.0</version><author>Tester</author></manifest>",
+                )
+                zf.writestr("abdata/list/characustom/sample.csv", b"placeholder")
+
+            invalid_zip = source_dir / "ordinary-archive.zip"
+            with zipfile.ZipFile(invalid_zip, "w") as zf:
+                zf.writestr("readme.txt", b"not a zipmod")
+
+            db_path = root / "star_manager.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+            finally:
+                conn.close()
+
+            task = bridge.TaskState(id="test", task_type="import_external_zipmods")
+            reporter = bridge.build_reporter(task)
+
+            def fake_build_database(game, db, thumbs, progress_callback=None, mode="incremental"):
+                target = game / "mods" / "Imported" / "downloaded-mod.zipmod"
+                self.assertTrue(target.is_file())
+                self.assertFalse((game / "mods" / "Imported" / "downloaded-mod.zip").exists())
+                return {"primary_zipmods": 1, "mod_items": 0}
+
+            with patch.object(bridge, "build_database", side_effect=fake_build_database):
+                result = bridge._import_external_zipmods(
+                    task,
+                    {
+                        "game_dir": str(game_dir),
+                        "source_dir": str(source_dir),
+                        "db_path": str(db_path),
+                    },
+                    reporter,
+                )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["scanned_count"], 1)
+            self.assertEqual(result["zipmod_scanned_count"], 0)
+            self.assertEqual(result["zip_scanned_count"], 2)
+            self.assertEqual(result["zip_recognized_count"], 1)
+            self.assertEqual(result["zip_renamed_count"], 1)
+            self.assertEqual(result["copied_count"], 1)
+            self.assertEqual(result["invalid_count"], 1)
+            self.assertEqual(result["invalid"][0]["status"], "invalid_zipmod_structure")
+            self.assertTrue(valid_zip.exists())
 
 
 if __name__ == "__main__":

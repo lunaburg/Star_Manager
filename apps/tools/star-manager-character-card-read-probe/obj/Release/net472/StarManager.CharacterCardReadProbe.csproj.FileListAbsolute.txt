@@ -1,0 +1,10 @@
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.csproj.AssemblyReference.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.GeneratedMSBuildEditorConfig.editorconfig
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.AssemblyInfoInputs.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.AssemblyInfo.cs
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.csproj.CoreCompileInputs.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.sourcelink.json
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\bin\Release\net472\StarManager.CharacterCardReadProbe.dll
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\bin\Release\net472\StarManager.CharacterCardReadProbe.pdb
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.dll
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-character-card-read-probe\obj\Release\net472\StarManager.CharacterCardReadProbe.pdb

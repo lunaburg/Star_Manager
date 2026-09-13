@@ -1,0 +1,12 @@
+{
+  "ThemeMode": "System",
+  "KeepBackup": true,
+  "MaxRamGb": 4,
+  "TargetZipCodec": true,
+  "TargetTextures": true,
+  "FilterAll": true,
+  "FilterUnoptimized": false,
+  "FilterUnoptimizedZip": false,
+  "FilterUnoptimizedTextures": false,
+  "FilterOptimized": false
+}

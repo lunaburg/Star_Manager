@@ -6,6 +6,7 @@ import binascii
 import json
 import mimetypes
 import os
+import sqlite3
 import subprocess
 import threading
 import time
@@ -25,17 +26,24 @@ from star_manager.services.achievements import (
 from star_manager.services.card_database import card_database_status
 from star_manager.services.card_library import (
     DEFAULT_CARD_PREVIEW_DIR,
+    assess_character_card_folder_changes,
+    build_clothes_card_tree,
     build_character_card_tree,
     create_character_card_directory,
+    delete_character_card,
     export_character_card_coordinate,
     get_character_card_detail,
+    get_clothes_card_detail,
     get_card_root,
+    list_clothes_cards,
     list_character_cards,
     list_character_card_tags,
     normalize_card_preview,
     replace_character_card_cover,
     rename_character_card_directory,
     resolve_card_file,
+    resolve_coordinate_file,
+    validate_coordinate_root,
     set_character_card_as_navi,
     set_character_card_favorite,
     set_character_card_rating,
@@ -47,21 +55,25 @@ from star_manager.services.mod_database import (
     analyze_duplicate_zipmods,
     assess_database_changes,
     database_status,
-    export_item_fbx,
+    ensure_mod_item_thumbnail,
     export_zipmod_item_thumbnail,
     import_zipmod_item_thumbnail,
+    index_single_zipmod,
     cleanup_duplicate_zipmods,
     delete_mod_item,
     delete_primary_and_promote_duplicate,
     delete_zipmod,
+    export_item_unity3d_file,
     get_zipmod_manifest,
     list_mod_item_filters,
     list_mod_items,
+    list_workbench_template_items,
     list_zipmod_authors,
     list_zipmods,
     merge_duplicate_zipmod,
     repair_zipmod_unity3d_from_game,
     resolve_thumbnail_cache_path,
+    prepare_item_unity3d_file,
     prepare_item_model_preview,
     resolve_mannequin_model_file,
     resolve_model_preview_file,
@@ -69,8 +81,30 @@ from star_manager.services.mod_database import (
     update_zipmod_manifest_author,
     zipmod_unity3d_diagnostics,
 )
-from star_manager.services.plugin_library import scan_bepinex_plugins
+from star_manager.services.mod_database_queries import (
+    find_zipmod_paths_by_guid,
+    hydrate_current_game_state_thumbnails,
+)
+from star_manager.services.remote_mod_completion import inspect_card_missing_mods
+from star_manager.services.model_preview import (
+    import_texture2d_into_unity3d,
+    list_unity3d_main_data_candidates,
+    preprocess_unity3d_asset,
+    prepare_workbench_model_preview,
+    prepare_workbench_thumbnail_preview,
+)
+from star_manager.services.plugin_library import scan_bepinex_plugins, set_bepinex_plugin_enabled
 from star_manager.services.sims4_workbench import export_sims4_package_lod0_fbx
+from star_manager.services.game_item_probe import (
+    load_character_card_to_game,
+    proxy_game_item_probe,
+)
+from star_manager.services.trash import (
+    empty_trash,
+    list_trash,
+    permanently_delete_trash_entry,
+    restore_trash_entry,
+)
 
 
 def is_process_alive(pid: int) -> bool:
@@ -115,6 +149,48 @@ def start_parent_watchdog(server: ThreadingHTTPServer) -> None:
     threading.Thread(target=watch_parent, name="parent-watchdog", daemon=True).start()
 
 
+def hydrate_game_context_thumbnails(
+    context: dict | None,
+    game_dir: str = "",
+) -> dict:
+    """Attach the same library thumbnails used by /game-item-probe/current."""
+
+    if not isinstance(context, dict):
+        return {}
+
+    hydrated = dict(context)
+    editor = context.get("editor")
+    if isinstance(editor, dict):
+        hydrated["editor"] = dict(editor)
+        hydrated["editor"]["current"] = hydrate_current_game_state_thumbnails(
+            editor.get("current"),
+            game_dir=game_dir or None,
+        )
+
+    hscene = context.get("hscene")
+    if isinstance(hscene, dict):
+        hydrated_hscene = dict(hscene)
+        for group_name in ("females", "males"):
+            roles = hscene.get(group_name)
+            if not isinstance(roles, list):
+                continue
+            hydrated_roles = []
+            for role in roles:
+                if not isinstance(role, dict):
+                    hydrated_roles.append(role)
+                    continue
+                hydrated_role = dict(role)
+                hydrated_role["current"] = hydrate_current_game_state_thumbnails(
+                    role.get("current"),
+                    game_dir=game_dir or None,
+                )
+                hydrated_roles.append(hydrated_role)
+            hydrated_hscene[group_name] = hydrated_roles
+        hydrated["hscene"] = hydrated_hscene
+
+    return hydrated
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
@@ -123,8 +199,53 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(create_health_payload())
             return
 
+        if route == "/trash":
+            self.send_json(list_trash())
+            return
+
+        if route == "/game-item-probe/status":
+            result = proxy_game_item_probe("/api/status")
+            self.send_json(result, status=200 if result.get("ok") else 503)
+            return
+
+        if route == "/game-item-probe/current":
+            result = proxy_game_item_probe("/api/current")
+            if result.get("ok"):
+                query = parse_qs(parsed_url.query)
+                game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+                result["data"] = hydrate_current_game_state_thumbnails(
+                    result.get("data"),
+                    game_dir=game_dir or None,
+                )
+            self.send_json(result, status=200 if result.get("ok") else 503)
+            return
+
+        if route == "/game-item-probe/context":
+            result = proxy_game_item_probe("/api/context")
+            if result.get("ok"):
+                query = parse_qs(parsed_url.query)
+                game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+                result["data"] = hydrate_game_context_thumbnails(
+                    result.get("data"),
+                    game_dir=game_dir,
+                )
+            self.send_json(result, status=200 if result.get("ok") else 503)
+            return
+
+        if route == "/game-item-probe/command":
+            query = parse_qs(parsed_url.query)
+            result = proxy_game_item_probe(
+                "/api/command",
+                query={"id": (query.get("id") or [""])[0]},
+            )
+            upstream_status = int(result.get("upstream_status") or 503)
+            self.send_json(result, status=200 if result.get("ok") else upstream_status)
+            return
+
         if route == "/mods/database":
-            self.send_json({"ok": True, "database": database_status()})
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+            self.send_json({"ok": True, "database": database_status(game_dir=game_dir or None)})
             return
 
         if route.startswith("/mods/models/"):
@@ -157,6 +278,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "database": card_database_status()})
             return
 
+        if route == "/library/cards/missing-mods":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                result = inspect_card_missing_mods(game_dir, relative_path)
+            except (OSError, sqlite3.Error, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+                return
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/plugins":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
@@ -178,6 +311,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             author = query.get("author", [""])[0]
             status = query.get("status", [""])[0]
             usage = query.get("usage", [""])[0]
+            guid = str(query.get("guid", [""])[0]).strip()
             zipmod_id = self.parse_int_query(query, "zipmod_id", 0)
             self.send_json({
                 "ok": True,
@@ -187,6 +321,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     author=author,
                     status=status,
                     usage=usage,
+                    guid=guid,
                     zipmod_id=zipmod_id,
                 ),
             })
@@ -196,8 +331,47 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "data": list_zipmod_authors()})
             return
 
+        if route == "/mods/zipmods/by-guid":
+            query = parse_qs(parsed_url.query)
+            guid = str((query.get("guid") or [""])[0]).strip()
+            game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+            if not guid or not game_dir:
+                self.send_json({"ok": False, "error": "guid and game_dir are required"}, status=400)
+                return
+            matched_paths, missing_guids = find_zipmod_paths_by_guid(
+                [guid],
+                mods_dir=Path(game_dir).resolve() / "mods",
+            )
+            self.send_json({
+                "ok": True,
+                "paths": sorted(matched_paths),
+                "missing": sorted(missing_guids),
+            })
+            return
+
         if route == "/mods/items/filters":
-            self.send_json({"ok": True, "data": list_mod_item_filters()})
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+            self.send_json({"ok": True, "data": list_mod_item_filters(game_dir=game_dir or None)})
+            return
+
+        if route == "/workbench/template-items":
+            query = parse_qs(parsed_url.query)
+            offset = self.parse_int_query(query, "offset", 0)
+            limit = self.parse_int_query(query, "limit", 30)
+            search = query.get("search", [""])[0]
+            author = query.get("author", [""])[0]
+            kind = query.get("kind", [""])[0]
+            self.send_json({
+                "ok": True,
+                "data": list_workbench_template_items(
+                    offset=offset,
+                    limit=limit,
+                    search=search,
+                    author=author,
+                    kind=kind,
+                ),
+            })
             return
 
         if route == "/mods/items":
@@ -210,6 +384,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             author = query.get("author", [""])[0]
             status = query.get("status", [""])[0]
             usage = query.get("usage", [""])[0]
+            source = query.get("source", ["mod"])[0]
+            game_dir = unquote((query.get("game_dir") or [""])[0]).strip()
+            include_total = (query.get("include_total", ["1"])[0] or "1").strip().lower() not in {"0", "false", "no"}
             self.send_json({
                 "ok": True,
                 "data": list_mod_items(
@@ -221,6 +398,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                     author=author,
                     status=status,
                     usage=usage,
+                    source=source,
+                    game_dir=game_dir or None,
+                    include_total=include_total,
                 ),
             })
             return
@@ -262,10 +442,101 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_file(str(resolved_thumbnail), DEFAULT_THUMBNAIL_DIR)
             return
 
+        if route.startswith("/mods/items/") and route.endswith("/thumbnail"):
+            item_id = self.parse_route_int(route, "/mods/items/", "/thumbnail")
+            if item_id is None:
+                self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
+                return
+            result = ensure_mod_item_thumbnail(item_id)
+            if not result.get("ok"):
+                self.send_json(result, status=404)
+                return
+            resolved_thumbnail = resolve_thumbnail_cache_path(
+                str(result.get("thumbnail_cache_path") or ""),
+                DEFAULT_THUMBNAIL_DIR,
+            )
+            if not resolved_thumbnail:
+                self.send_json({"ok": False, "error": "Thumbnail cache was not created"}, status=404)
+                return
+            self.send_file(str(resolved_thumbnail), DEFAULT_THUMBNAIL_DIR)
+            return
+
         if route == "/library/cards/tree":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
             self.send_json(build_character_card_tree(game_dir))
+            return
+
+        if route == "/library/clothes/tree":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            self.send_json(build_clothes_card_tree(game_dir))
+            return
+
+        if route == "/library/clothes":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            offset = self.parse_int_query(query, "offset", 0)
+            limit = self.parse_optional_int_query(query, "limit")
+            try:
+                result = list_clothes_cards(game_dir, relative_path, offset=offset, limit=limit)
+                self.send_json(result, status=200 if result.get("ok") else 400)
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/library/clothes/detail":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                result = get_clothes_card_detail(game_dir, relative_path)
+                self.send_json(result, status=200 if result.get("ok") else 404)
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/library/clothes/image":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            original_cover = (query.get("original") or [""])[0] == "1"
+            try:
+                valid, root, root_error = validate_coordinate_root(game_dir)
+                if not valid:
+                    raise ValueError(root_error or "Clothes-card image not found.")
+                card_path = resolve_coordinate_file(root, relative_path)
+                # The grid is intentionally image-first. Do not parse the
+                # card envelope just to decide whether a PNG may be shown;
+                # the detail endpoint performs the full AIS_Clothes parse on
+                # demand after the user opens one card.
+                if original_cover:
+                    stat = card_path.stat()
+                    card_data = card_path.read_bytes()
+                    png_end = find_png_end(card_data)
+                    self.send_bytes(
+                        card_data[:png_end],
+                        "image/png",
+                        etag=f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}-cover-{png_end:x}"',
+                        modified_at=stat.st_mtime,
+                    )
+                    return
+                preview_path = normalize_card_preview(card_path)
+                allowed_root = DEFAULT_CARD_PREVIEW_DIR if preview_path != card_path else root
+                self.send_file(str(preview_path), allowed_root)
+            except (OSError, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error)}, status=404)
+            return
+
+        if route == "/library/cards/changes":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                self.send_json(assess_character_card_folder_changes(game_dir, relative_path))
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
             return
 
         if route == "/library/cards":
@@ -337,6 +608,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if route.startswith("/tasks/"):
             task_id = route.removeprefix("/tasks/")
+            if task_id.endswith("/control"):
+                task_id = task_id.removesuffix("/control")
+                task = task_store.get_task(task_id)
+                if task is None:
+                    self.send_json({"ok": False, "error": f"Task not found: {task_id}"}, status=404)
+                    return
+                self.send_json({"ok": True, "task": task.to_dict()})
+                return
             task = task_store.get_task(task_id)
             if task is None:
                 self.send_json({"ok": False, "error": f"Task not found: {task_id}"}, status=404)
@@ -350,6 +629,54 @@ class RequestHandler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         body = self.read_json_body()
 
+        if route == "/trash/empty":
+            self.send_json(empty_trash())
+            return
+
+        trash_parts = [unquote(part) for part in route.split("/") if part]
+        if len(trash_parts) == 4 and trash_parts[0] == "trash" and trash_parts[3] in {"restore", "delete"}:
+            kind, entry_id, action = trash_parts[1], trash_parts[2], trash_parts[3]
+            if action == "restore":
+                result = restore_trash_entry(kind, entry_id)
+                if result.get("ok") and kind == "mods":
+                    game_dir = str(result.get("game_dir") or "").strip()
+                    restored_path = str(result.get("restored_path") or "").strip()
+                    if game_dir and restored_path:
+                        try:
+                            result["index"] = index_single_zipmod(Path(game_dir), Path(restored_path))
+                        except (OSError, ValueError, sqlite3.Error) as error:
+                            result["index_warning"] = f"模组已恢复，但索引更新失败：{error}"
+                self.send_json(result, status=200 if result.get("ok") else 400)
+                return
+            result = permanently_delete_trash_entry(kind, entry_id)
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/game-card-loader/load":
+            result = load_character_card_to_game(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
+                body,
+            )
+            upstream_status = int(result.get("upstream_status") or 503)
+            self.send_json(
+                result,
+                status=200 if result.get("ok") else (
+                    upstream_status
+                    if "upstream_status" in result
+                    else 503
+                    if result.get("error_code") == "probe_unavailable"
+                    else 400
+                ),
+            )
+            return
+
+        if route == "/game-item-probe/apply":
+            result = proxy_game_item_probe("/api/apply", method="POST", payload=body)
+            upstream_status = int(result.get("upstream_status") or 503)
+            self.send_json(result, status=200 if result.get("ok") else upstream_status)
+            return
+
         if route == "/tools/sims4/package-fbx":
             result = export_sims4_package_lod0_fbx(
                 str(body.get("package_path") or ""),
@@ -359,11 +686,75 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
+        if route == "/workbench/unity3d/assets":
+            result = list_unity3d_main_data_candidates(str(body.get("path") or ""))
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/workbench/unity3d/preprocess":
+            result = preprocess_unity3d_asset(
+                str(body.get("path") or ""),
+                str(body.get("operation") or ""),
+                int(body.get("selected_path_id") or 0),
+                str(body.get("selected_asset_file") or ""),
+                str(body.get("new_name") or ""),
+                str(body.get("selected_name") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/workbench/unity3d/duplicate":
+            result = preprocess_unity3d_asset(
+                str(body.get("path") or ""),
+                "duplicate_selected",
+                int(body.get("selected_path_id") or 0),
+                str(body.get("selected_asset_file") or ""),
+                str(body.get("new_name") or ""),
+                str(body.get("selected_name") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/workbench/unity3d/import-texture":
+            result = import_texture2d_into_unity3d(
+                str(body.get("path") or ""),
+                str(body.get("image_path") or ""),
+                str(body.get("texture_name") or ""),
+                replace_existing=body.get("replace_existing") is True,
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/workbench/unity3d/model-preview":
+            result = prepare_workbench_model_preview(
+                str(body.get("unity3d_path") or ""),
+                str(body.get("main_data") or ""),
+                str(body.get("kind") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/workbench/unity3d/thumbnail":
+            result = prepare_workbench_thumbnail_preview(
+                str(body.get("path") or ""),
+                str(body.get("texture") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/library/cards/set-navi":
             result = set_character_card_as_navi(
                 str(body.get("game_dir") or ""),
                 str(body.get("path") or ""),
                 str(body.get("slot") or ""),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/cards/delete":
+            result = delete_character_card(
+                str(body.get("game_dir") or ""),
+                str(body.get("path") or ""),
             )
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
@@ -442,6 +833,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
+        if route == "/plugins/toggle":
+            result = set_bepinex_plugin_enabled(
+                str(body.get("game_dir") or ""),
+                str(body.get("relative_path") or ""),
+                bool(body.get("enabled")),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/tasks":
             task_type = body.get("task_type", "")
             payload = body.get("payload") or {}
@@ -449,6 +849,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"Unsupported task type: {task_type}"}, status=400)
                 return
             task = task_store.create_task(task_type, payload)
+            self.send_json({"ok": True, "task": task.to_dict()})
+            return
+
+        if route.startswith("/tasks/") and route.endswith("/control"):
+            task_id = route.removeprefix("/tasks/").removesuffix("/control")
+            try:
+                task = task_store.control_task(task_id, str(body.get("action") or "").strip().lower())
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=409)
+                return
+            if task is None:
+                self.send_json({"ok": False, "error": f"Task not found: {task_id}"}, status=404)
+                return
             self.send_json({"ok": True, "task": task.to_dict()})
             return
 
@@ -519,12 +932,21 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
-        if route.startswith("/mods/items/") and route.endswith("/export-fbx"):
-            item_id = self.parse_route_int(route, "/mods/items/", "/export-fbx")
+        if route.startswith("/mods/items/") and route.endswith("/open-unity3d"):
+            item_id = self.parse_route_int(route, "/mods/items/", "/open-unity3d")
             if item_id is None:
                 self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
                 return
-            result = export_item_fbx(item_id, str(body.get("target_dir") or ""))
+            result = prepare_item_unity3d_file(item_id)
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route.startswith("/mods/items/") and route.endswith("/export-unity3d"):
+            item_id = self.parse_route_int(route, "/mods/items/", "/export-unity3d")
+            if item_id is None:
+                self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
+                return
+            result = export_item_unity3d_file(item_id, str(body.get("target_path") or ""))
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 

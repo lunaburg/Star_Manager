@@ -42,7 +42,14 @@ watch(
 
 <template>
   <span ref="root" class="lazy-thumbnail" :class="{ pending: src && !visible }">
-    <img v-if="src && visible" :src="src" :alt="alt" loading="lazy" decoding="async">
+    <img
+      v-if="src && visible"
+      :src="src"
+      :alt="alt"
+      :loading="eager ? 'eager' : 'lazy'"
+      :fetchpriority="eager ? 'high' : 'auto'"
+      decoding="async"
+    >
     <span v-else class="lazy-thumbnail-placeholder" aria-hidden="true">
       <slot>IMG</slot>
     </span>

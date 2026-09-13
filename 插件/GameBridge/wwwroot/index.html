@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ControlPanel</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="main-view">
+    <div id="top-panel">
+        <div id="load-h-scene">
+            <div id="slots-column">
+    <div id="slots-group">
+    <div class="slot" id="slot-male" data-slot="male">
+        <span class="slot-label">Male</span>
+        <button class="slot-default-btn" data-slot="male">Load Default</button>
+        <button class="slot-remove-btn" data-slot="male" title="Remove">✕</button>
+    </div>
+    <div class="slot" id="slot-female1" data-slot="female1">
+        <span class="slot-label">Female 1</span>
+        <button class="slot-default-btn" data-slot="female1">Load Default</button>
+        <button class="slot-remove-btn" data-slot="female1" title="Remove">✕</button>
+    </div>
+    <div class="slot" id="slot-extra" data-slot="extra">
+        <span class="slot-label">Female 2 / Male 2 (optional)</span>
+        <button class="slot-remove-btn" data-slot="extra" title="Remove">✕</button>
+    </div>
+</div>
+
+    <div id="main-view-buttons">
+        <button class="mainview-btn active" id="mainview-cards-btn" data-view="cards">Cards</button>
+        <button class="mainview-btn" id="mainview-honeybattle-btn" data-view="honeybattle">Honey Battle</button>
+        <button class="mainview-btn" id="mainview-about-btn" data-view="about">About</button>
+    </div>
+</div>
+
+            <div id="actions-map-group">
+                <div id="actions-row">
+                    <button id="run-h-btn">RUN H</button>
+                    <button id="chill-on-btn">Chill ON</button>
+                    <button id="chill-off-btn">Chill OFF</button>
+                </div>
+                <div id="map-row">
+                    <select id="map-select"></select>
+                    <button id="toggle-fav-map-btn" title="Toggle favorite for selected map">☆</button>
+                </div>
+                <label id="fav-maps-label"><input type="checkbox" id="show-fav-maps"> Show only favorite maps</label>
+            </div>
+
+            <div id="log-console">
+                <div id="log-console-body"></div>
+            </div>
+        </div>
+    </div>
+    <button id="top-panel-toggle-btn" title="Collapse control panel">▲</button>
+
+    <div id="status-bar">
+        <div class="status-pill" id="status-ready">
+            <span class="status-dot" id="dot-ready"></span>Ready
+        </div>
+        <div class="status-pill" id="status-ineditor">
+            <span class="status-dot" id="dot-ineditor"></span>InEditor
+        </div>
+        <div class="status-pill" id="status-hscene">
+            <span class="status-dot" id="dot-hscene"></span>HScene
+        </div>
+        <div class="status-pill" id="status-homescene">
+            <span class="status-dot" id="dot-homescene"></span>HomeScene
+        </div>
+        <div class="status-pill" id="status-connection">
+            <span class="status-dot" id="dot-connection"></span>GameConnection
+        </div>
+
+        <label class="status-toggle">
+            <input type="checkbox" id="toggle-focus-on-loaded">
+            Focus game on loaded scene
+        </label>
+        <label class="status-toggle">
+            <input type="checkbox" id="toggle-sound-on-loaded">
+            Play sound alert on loaded scene
+        </label>
+
+        <div id="status-search-group">
+            <select id="sort-select" title="Sort cards">
+                <option value="name">Name</option>
+                <option value="score">Card Score</option>
+                <option value="grade">Card Grade</option>
+                <option value="lastEdited">Last Edited</option>
+                <option value="created">Created Date</option>
+                <option value="persona">Persona</option>
+            </select>
+            <input type="text" id="status-search" placeholder="Search cards...">
+            <button id="status-search-btn">Search</button>
+            <button id="status-search-clear-btn">Clear</button>
+        </div>
+    </div>
+
+    <div id="view-cards" class="main-content-view active">
+        <div id="main-layout">
+            <div id="folder-column">
+               <div id="create-new-buttons">
+                    <button id="create-new-male">+ New Male</button>
+                    <button id="create-new-female">+ New Female</button>
+                    <button id="refresh-cards-btn" title="Re-read the card list from disk">⟳</button>
+                </div>
+                <div id="link-mode-controls">
+                    <button id="link-same-person-btn" title="Select 2+ cards that are the same character, then confirm">🔗 Link Persona</button>
+                    <button id="link-confirm-btn" style="display:none;">Confirm Link (0)</button>
+                </div>
+                <label><input type="checkbox" id="show-fav-folders"> Show only favorite folders</label>
+                <div id="folder-list"></div>
+            </div>
+            <div id="folder-column-handle">
+                <button id="folder-toggle-btn" title="Collapse folder list">◀</button>
+            </div>
+            <div id="card-panel"></div>
+        </div>
+    </div>
+
+    <div id="view-honeybattle" class="main-content-view">
+       <div id="hb-setup" class="hb-screen active">
+            <div id="hb-setup-banners">
+                <img id="hb-banner-left" src="assets/left_baner.png" alt="">
+                <img id="hb-banner-right" src="assets/right_baner.png" alt="">
+            </div>
+            <div id="hb-fight-flash">FIGHT!</div>
+            <div class="hb-setup-overlay">
+                <div id="hb-mode-info" class="hb-mode-info"></div>
+                <div class="hb-setup-group">
+                    <div class="hb-setup-label">Choose sex</div>
+                    <div class="hb-setup-row">
+                        <button class="hb-choice-btn" data-sex="female">Female</button>
+                        <button class="hb-choice-btn" data-sex="male">Male</button>
+                    </div>
+                </div>
+                <div class="hb-setup-group">
+                    <div class="hb-setup-label">Choose mode</div>
+                    <div class="hb-setup-row">
+                        <button class="hb-choice-btn" data-mode="unranked">Unranked Fight</button>
+                        <button class="hb-choice-btn" data-mode="ranked">Ranked Fight</button>
+                    </div>
+                    <div class="hb-setup-row">
+                        <button class="hb-choice-btn" data-mode="ranked-random">Ranked Fight Random</button>
+                        <button class="hb-choice-btn" data-mode="boss">Boss Fight</button>
+                    </div>
+                </div>
+                <button id="hb-start-btn" disabled>Start</button>
+                <div class="hb-start-extra-row">
+                    <label id="hb-favorites-only-label" class="hb-favorites-toggle">
+                        <input type="checkbox" id="hb-favorites-only-toggle">
+                        Favorites only
+                    </label>
+                    <button id="hb-clear-scores-btn" class="hb-clear-scores-btn" title="Delete every card's Honey Battle score">🗑️ Clear all card scores</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="hb-fight" class="hb-screen">
+            <div id="hb-fight-header">
+                <button id="hb-back-btn">&larr; Back</button>
+                <div id="hb-link-bar">
+                    <button id="hb-link-same-person-btn" title="Mark both cards below as the same character — score stays as-is, a new matchup is drawn">🔗 These are the same person</button>
+                </div>
+            </div>
+            <div id="hb-boss-badge" class="hb-boss-badge" style="display:none;">🏆 Boss Challenge</div>
+            <div id="hb-reign-badge" class="hb-reign-badge" style="display:none;"></div>
+            <div id="hb-fight-cards">
+                <div class="hb-side-buttons" id="hb-side-buttons-left"></div>
+                <div class="hb-fight-card" id="hb-card-left"></div>
+                <div class="hb-fight-vs">VS</div>
+                <div class="hb-fight-card" id="hb-card-right"></div>
+                <div class="hb-side-buttons" id="hb-side-buttons-right"></div>
+            </div>
+        </div>
+
+        <div id="hb-empty-state" class="hb-screen">
+            <p id="hb-empty-message">No unranked cards left for this sex.</p>
+            <button id="hb-empty-back-btn">&larr; Back</button>
+        </div>
+
+        <div id="hb-clear-confirm-modal" class="hb-modal-overlay">
+            <div class="hb-modal-box">
+                <p>Are you sure you want to delete every card's Honey Battle score for the whole available deck?</p>
+                <p class="hb-modal-warning">This cannot be undone.</p>
+                <div class="hb-modal-buttons">
+                    <button id="hb-clear-confirm-cancel-btn">Cancel</button>
+                    <button id="hb-clear-confirm-delete-btn" class="hb-modal-delete-btn">Delete all scores</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-about" class="main-content-view">
+        <div id="about-panel">
+            <div id="about-hero">
+                <img id="about-avatar" src="assets/avatar.png" alt="Avatar">
+                <div id="about-hero-text">
+    <h1>PerfectAddiction</h1>
+    <p id="about-tagline">Systems Developer — C# &amp; Unity</p>
+    <p class="about-version">Control Panel 0.3 BETA · GameBridge 0.5</p>
+</div>
+            </div>
+
+            <div class="about-section">
+                <h2>Who I am</h2>
+                <p>Hey there! I'm a systems developer working with C# and HTML. I've got a strong grip on Unity's inner structure, which I love using to break down games, build features, and mess around with code.</p>
+            </div>
+
+            <div class="about-section">
+                <h2>Do I use AI?</h2>
+                <p>Yes, I use AI to help with my work from simple tasks to complex ones. I never run in full-auto mode. I always design the architecture, I control the development process, and every new feature is conceived by me. The system's logic is 100% based on my own reasoning, and I handle every edge case myself. AI just speeds up writing and debugging.</p>
+                <p>Also I can't draw, and I hate Photoshop, so AI paints for me.</p>
+            </div>
+
+            <div class="about-section">
+                <h2>Links &amp; contact</h2>
+                <div class="about-links">
+                    <a class="about-link-card" href="https://f95zone.to/members/perfectaddiction.6007310/" target="_blank" rel="noopener">
+                        <span class="about-link-title">F95zone</span>
+                        <span class="about-link-sub">PerfectAddiction</span>
+                    </a>
+                    <div class="about-link-card about-link-static">
+                        <span class="about-link-title">Discord</span>
+                        <span class="about-link-sub">perfectaddiction — NSFW account, may take a few days to reply</span>
+                    </div>
+                </div>
+                <p>I'm open to commissions, though I don't have a Ko-fi or Patreon yet — planning to set one up on SubscribeStar. If you've got a Unity game and want an interesting mod, or just have a cool idea, feel free to reach out and we'll see what's possible.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="preview-view">
+    <button id="back-to-main-btn">&larr; Back</button>
+    <div id="preview-card-panel"></div>
+</div>
+
+<div id="screenshot-toast" class="screenshot-toast">📸 Screenshot taken!</div>
+
+<div id="lightbox-overlay" class="lightbox-overlay">
+    <img id="lightbox-img" class="lightbox-img" src="" alt="">
+    <button id="lightbox-close-btn" class="lightbox-close-btn" title="Close">✕</button>
+</div>
+<div id="photo-gallery-modal" class="hb-modal-overlay">
+    <div class="photo-gallery-box">
+        <div class="photo-gallery-header">
+            <h3 id="photo-gallery-title">Photo Gallery</h3>
+            <button id="photo-gallery-close-btn" class="photo-gallery-close-btn" title="Close">✕</button>
+        </div>
+        <div id="photo-gallery-grid" class="photo-gallery-grid"></div>
+        <p id="photo-gallery-empty" class="photo-gallery-empty">Gallery is empty.</p>
+    </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/api.js"></script>
+<script src="js/log.js"></script>
+<script src="js/main.js"></script>
+<script src="js/honeybattle.js"></script>
+</body>
+</html>

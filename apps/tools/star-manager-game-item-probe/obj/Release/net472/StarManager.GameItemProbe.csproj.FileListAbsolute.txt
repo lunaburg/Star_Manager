@@ -1,0 +1,10 @@
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\bin\Release\net472\StarManager.GameItemProbe.dll
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\bin\Release\net472\StarManager.GameItemProbe.pdb
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.csproj.AssemblyReference.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.GeneratedMSBuildEditorConfig.editorconfig
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.AssemblyInfoInputs.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.AssemblyInfo.cs
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.csproj.CoreCompileInputs.cache
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.sourcelink.json
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.dll
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Release\net472\StarManager.GameItemProbe.pdb

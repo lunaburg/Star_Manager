@@ -24,12 +24,14 @@ MOD_ITEMS_COLUMNS = [
     "main_manifest",
     "main_ab",
     "main_data",
+    "tex_ab",
     "thumb_ab",
     "thumb_tex",
     "thumbnail_cache_path",
     "thumbnail_status",
     "thumbnail_error",
     "unity3d_status",
+    "unity3d_source",
     "unity3d_error",
     "parse_status",
     "parse_error",
@@ -70,6 +72,7 @@ class CsvItem:
     thumb_tex: str
     parse_status: str
     parse_error: str
+    tex_ab: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,17 @@ class ThumbnailResult:
 class Unity3dStatus:
     status: str
     error: str
+    source: str = ""
+
+
+@dataclass(frozen=True)
+class Unity3dProvider:
+    zipmod_path: str
+    relative_path: str
+    guid: str
+    resource_path: str
+    member_path: str
+    source_kind: str
 
 
 @dataclass(frozen=True)
@@ -103,6 +117,8 @@ class PreparedModItem:
     unity3d_error: str
     parse_status: str
     parse_error: str
+    unity3d_source: str = ""
+    tex_ab: str = ""
 
 
 @dataclass(frozen=True)
@@ -115,6 +131,8 @@ class PreparedZipmodItems:
     unity3d_in_game_count: int
     unity3d_missing_count: int
     unity3d_error: str
+    unity3d_not_in_mod_count: int = 0
+    unity3d_other_mod_count: int = 0
 
 
 def utc_now() -> str:
@@ -158,12 +176,14 @@ def migrate_mod_items_unique_key(conn: sqlite3.Connection) -> None:
             main_manifest TEXT NOT NULL DEFAULT '',
             main_ab TEXT NOT NULL DEFAULT '',
             main_data TEXT NOT NULL DEFAULT '',
+            tex_ab TEXT NOT NULL DEFAULT '',
             thumb_ab TEXT NOT NULL DEFAULT '',
             thumb_tex TEXT NOT NULL DEFAULT '',
             thumbnail_cache_path TEXT NOT NULL DEFAULT '',
             thumbnail_status TEXT NOT NULL DEFAULT '',
             thumbnail_error TEXT NOT NULL DEFAULT '',
             unity3d_status TEXT NOT NULL DEFAULT '',
+            unity3d_source TEXT NOT NULL DEFAULT '',
             unity3d_error TEXT NOT NULL DEFAULT '',
             parse_status TEXT NOT NULL,
             parse_error TEXT NOT NULL DEFAULT '',
@@ -206,8 +226,10 @@ def init_db(conn: sqlite3.Connection) -> None:
             modified_at TEXT NOT NULL DEFAULT '',
             item_count INTEGER NOT NULL DEFAULT 0,
             unity3d_status TEXT NOT NULL DEFAULT '',
+            unity3d_not_in_mod_count INTEGER NOT NULL DEFAULT 0,
             unity3d_in_mod_count INTEGER NOT NULL DEFAULT 0,
             unity3d_in_game_count INTEGER NOT NULL DEFAULT 0,
+            unity3d_other_mod_count INTEGER NOT NULL DEFAULT 0,
             unity3d_missing_count INTEGER NOT NULL DEFAULT 0,
             unity3d_error TEXT NOT NULL DEFAULT '',
             scan_status TEXT NOT NULL,
@@ -229,18 +251,49 @@ def init_db(conn: sqlite3.Connection) -> None:
             main_manifest TEXT NOT NULL DEFAULT '',
             main_ab TEXT NOT NULL DEFAULT '',
             main_data TEXT NOT NULL DEFAULT '',
+            tex_ab TEXT NOT NULL DEFAULT '',
             thumb_ab TEXT NOT NULL DEFAULT '',
             thumb_tex TEXT NOT NULL DEFAULT '',
             thumbnail_cache_path TEXT NOT NULL DEFAULT '',
             thumbnail_status TEXT NOT NULL DEFAULT '',
             thumbnail_error TEXT NOT NULL DEFAULT '',
             unity3d_status TEXT NOT NULL DEFAULT '',
+            unity3d_source TEXT NOT NULL DEFAULT '',
             unity3d_error TEXT NOT NULL DEFAULT '',
             parse_status TEXT NOT NULL,
             parse_error TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(zipmod_guid, kind, item_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS builtin_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_dir_key TEXT NOT NULL,
+            game_dir TEXT NOT NULL,
+            category_no TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            name_en TEXT NOT NULL DEFAULT '',
+            name_zh_cn TEXT NOT NULL DEFAULT '',
+            name_zh_tw TEXT NOT NULL DEFAULT '',
+            source_path TEXT NOT NULL DEFAULT '',
+            source_asset TEXT NOT NULL DEFAULT '',
+            main_manifest TEXT NOT NULL DEFAULT '',
+            main_ab TEXT NOT NULL DEFAULT '',
+            main_data TEXT NOT NULL DEFAULT '',
+            thumb_ab TEXT NOT NULL DEFAULT '',
+            thumb_tex TEXT NOT NULL DEFAULT '',
+            thumbnail_cache_path TEXT NOT NULL DEFAULT '',
+            thumbnail_status TEXT NOT NULL DEFAULT '',
+            thumbnail_error TEXT NOT NULL DEFAULT '',
+            resource_status TEXT NOT NULL DEFAULT '',
+            resource_error TEXT NOT NULL DEFAULT '',
+            source_signature TEXT NOT NULL DEFAULT '',
+            parser_version TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(game_dir_key, category_no, item_id)
         );
 
         CREATE TABLE IF NOT EXISTS duplicate_zipmods (
@@ -296,6 +349,37 @@ def init_db(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS unity3d_provider_archives (
+            zipmod_path TEXT PRIMARY KEY,
+            relative_path TEXT NOT NULL DEFAULT '',
+            guid TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            modified_at TEXT NOT NULL DEFAULT '',
+            scan_status TEXT NOT NULL DEFAULT '',
+            scan_error TEXT NOT NULL DEFAULT '',
+            scanned_at TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS unity3d_providers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            zipmod_path TEXT NOT NULL,
+            resource_key TEXT NOT NULL,
+            resource_path TEXT NOT NULL,
+            member_path TEXT NOT NULL DEFAULT '',
+            source_kind TEXT NOT NULL DEFAULT 'file',
+            relative_path TEXT NOT NULL DEFAULT '',
+            guid TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            modified_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(zipmod_path, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_unity3d_providers_resource_key
+            ON unity3d_providers(resource_key);
+        CREATE INDEX IF NOT EXISTS idx_unity3d_providers_zipmod_path
+            ON unity3d_providers(zipmod_path);
+
         CREATE TABLE IF NOT EXISTS bepinex_plugin_cache (
             game_dir TEXT PRIMARY KEY,
             fingerprint TEXT NOT NULL,
@@ -308,14 +392,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "zipmods", "file_size", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "zipmods", "modified_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "zipmods", "unity3d_status", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "zipmods", "unity3d_not_in_mod_count", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "zipmods", "unity3d_in_mod_count", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "zipmods", "unity3d_in_game_count", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "zipmods", "unity3d_other_mod_count", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "zipmods", "unity3d_missing_count", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "zipmods", "unity3d_error", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "thumbnail_cache_path", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "thumbnail_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "thumbnail_error", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "tex_ab", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_status", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "unity3d_source", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_error", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "character_cards", "tags_json", "TEXT NOT NULL DEFAULT '[]'")
     ensure_column(conn, "character_cards", "favorite", "INTEGER NOT NULL DEFAULT 0")
@@ -337,8 +425,19 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_mod_items_author ON mod_items(zipmod_author);
         CREATE INDEX IF NOT EXISTS idx_mod_items_kind ON mod_items(kind);
         CREATE INDEX IF NOT EXISTS idx_mod_items_name ON mod_items(name);
+        CREATE INDEX IF NOT EXISTS idx_mod_items_name_nocase_id
+            ON mod_items(name COLLATE NOCASE, id);
         CREATE INDEX IF NOT EXISTS idx_mod_items_parse_status ON mod_items(parse_status);
         CREATE INDEX IF NOT EXISTS idx_mod_items_unity3d_status ON mod_items(unity3d_status);
+
+        CREATE INDEX IF NOT EXISTS idx_builtin_items_game_category_item
+            ON builtin_items(game_dir_key, category_no, item_id);
+        CREATE INDEX IF NOT EXISTS idx_builtin_items_name
+            ON builtin_items(game_dir_key, name);
+        CREATE INDEX IF NOT EXISTS idx_builtin_items_name_nocase_id
+            ON builtin_items(game_dir_key, name COLLATE NOCASE, id);
+        CREATE INDEX IF NOT EXISTS idx_builtin_items_thumbnail_status
+            ON builtin_items(thumbnail_status);
 
         CREATE INDEX IF NOT EXISTS idx_duplicate_zipmods_guid ON duplicate_zipmods(guid);
 

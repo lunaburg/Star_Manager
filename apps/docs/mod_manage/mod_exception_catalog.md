@@ -48,18 +48,21 @@
 
 触发条件：
 
-- `MainAB` 关联的主 `.unity3d` 文件在 zipmod 内和游戏目录中都找不到。
-- 或者 `MainAB` 主 `.unity3d` 文件只存在于游戏目录 `abdata` 中。
-- 或者 `MainAB` 主 `.unity3d` 文件存在但无法作为有效 Unity 资源使用。当前实现中，这类 `error` 主要由 `ThumbAB` 与 `MainAB` 指向同一个 `.unity3d`，且缩略图解析发现 UnityPy 无法读取可用资源时触发。
+- `MainAB` 关联的 `.unity3d` 文件在当前 zipmod、游戏目录和其它 zipmod 中都找不到。
+- `MainAB` 或 `TexAB` 不在当前 zipmod 内，但只存在于游戏目录 `abdata` 中，且不在公共 `abdata/chara/00`–`abdata/chara/60` 目录下。
+- `MainAB` 或 `TexAB` 不在当前 zipmod 内，但由其它 zipmod 提供。
+- 或者主资源 `.unity3d` 文件存在但无法作为有效 Unity 资源使用。当前实现中，这类 `error` 主要由 `ThumbAB` 与 `MainAB` 指向同一个 `.unity3d`，且缩略图解析发现 UnityPy 无法读取可用资源时触发。
 
 界面标题：
 
-- `Unity3D 文件无法找到`
+- `missing`：`Unity3D 文件无法找到`
+- `not_in_mod`：`Unity3D 文件不在当前 zipmod 内`
 
 解决方案：
 
-- `in_game`：将对应 `.unity3d` 文件补入 zipmod。
-- `missing`：重新安装来源模组，或手动找回对应 `.unity3d` 文件后重建数据库。
+- `not_in_mod` + `source = game_abdata`：将对应 `.unity3d` 文件补入 zipmod；外置非公共目录的 `MainAB` 或 `TexAB` 允许此操作。
+- `not_in_mod` + `source = other_zipmod`：显示提供该资源的其它 zipmod，不显示补入按钮。
+- `missing`：重新安装来源模组，或手动找回缺失的 `MainAB` 后重建数据库。
 
 操作入口：
 
@@ -71,7 +74,9 @@
 
 说明：
 
-- `ThumbAB` 缺失、缩略图 Unity3D 缺失、缩略图 Unity3D 解析失败，如果该 `ThumbAB` 不是同一个物品的 `MainAB`，只归入 `thumbnail` 异常，不归入 `unity3d` 异常。
+- `ThumbAB` 缺失、缩略图 Unity3D 缺失、缩略图 Unity3D 解析失败，如果该 `ThumbAB` 不是同一个物品的 `MainAB`，只归入 `thumbnail` 异常，不归入 `unity3d` 异常；`TexAB` 缺失不单独产生 `unity3d` 异常；公共 `chara/00`–`60` 目录中的外部 `MainAB` 或 `TexAB` 也不产生异常。其它 zipmod 提供的 `not_in_mod/other_zipmod` 会保留来源信息，并与 `game_abdata` 一样计入模组警告。
+
+诊断读取时会将同一路径的其它 zipmod 提供者合并到同一个异常项；提供者记录统一使用字典字段 `path`、`relative_path` 和 `guid`，避免把接口输出字典误当作内部 `Unity3dProvider` 对象。
 
 ### `thumbnail`
 
@@ -129,7 +134,7 @@
 触发条件：
 
 - 诊断结果返回 `can_delete = true`。
-- 当前实现中仅当该 zipmod 有缺失 `.unity3d`，且没有 `in_mod` 或 `in_game` 物品引用时允许删除。
+- 当前实现中仅当该 zipmod 有缺失 `.unity3d`，且没有 `in_mod` 或需要游戏目录补入的 `not_in_mod/game_abdata` 物品引用时允许删除。
 
 界面入口：
 
@@ -164,7 +169,7 @@
 
 - `正常`：`scan_status = ok`，作者不为空，没有重复 GUID，没有主资源 `unity3d` 问题，也没有缩略图问题。
 - `错误`：包括 `invalid_manifest`、`missing_manifest`、主资源 `MainAB` 缺失、主资源 Unity3D 损坏等会影响物品本体可用性的情况。
-- `警告`：包括作者为空、主资源只在游戏目录中、重复 GUID、缩略图缺失或缩略图解析失败等需要人工整理但不一定影响物品本体可用性的情况。
+- `警告`：包括作者为空、Unity3D 不在当前 zipmod 内（来源为游戏目录或其它 zipmod）、重复 GUID、缩略图缺失或缩略图解析失败等需要人工整理但不一定影响物品本体可用性的情况。
 - `已失效`：`scan_status = stale`。
 
 ## 备注

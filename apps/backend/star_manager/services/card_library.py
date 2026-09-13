@@ -17,8 +17,11 @@ from star_manager.core.card_parser import (
     extract_auto_resolver_records_from_card,
     extract_character_profile_from_card,
     extract_character_profile_from_card_data,
+    get_card_block,
     is_ais_card,
+    json_safe_msgpack,
     read_card_marker,
+    try_unpack_msgpack,
 )
 from star_manager.core.card_metadata import (
     CardMetadataError,
@@ -31,9 +34,15 @@ from star_manager.core.card_metadata import (
     set_card_tags_file,
 )
 from star_manager.core.coordinate_card import (
+    CLOTHES_MARKER,
+    PNG_SIGNATURE,
     CoordinateExtractionError,
     convert_character_card,
+    inspect_clothes_card,
+    inspect_clothes_card_listing_payload,
     make_card_data,
+    parse_coordinate_payload_parts,
+    read_dotnet_string,
 )
 from star_manager.core.character_profile import (
     CharacterProfileUpdateError,
@@ -50,14 +59,46 @@ from star_manager.services.mod_database_core import (
     timestamp_to_utc,
     utc_now,
 )
+from star_manager.services.trash import move_to_trash
+from star_manager.services.builtin_database import resolve_builtin_coordinate_dependencies
 from star_manager.services.mod_database_queries import export_zipmods
 
 
 CARD_ROOT_PARTS = ("UserData", "chara")
 DEFAULT_CARD_PREVIEW_DIR = runtime_root() / "card_previews"
+DEFAULT_CLOTHES_CARD_INDEX_PATH = runtime_root() / "clothes_card_index.sqlite"
 STANDARD_CARD_SIZE = (252, 352)
+_CLOTHES_CARD_INDEX_SCHEMA_VERSION = 1
+_CLOTHES_CARD_INDEX_SCAN_BUDGET = 96
 IGNORED_ROOT_CARD_DIRS = {"navi"}
 MANAGED_CARD_GENDER_DIRS = {"female", "male"}
+COORDINATE_ROOT_PARTS = ("UserData", "coordinate")
+COORDINATE_GENDER_DIRS = {"female", "male"}
+COORDINATE_CLOTHES_PARTS = (
+    "上衣",
+    "下装",
+    "内衣",
+    "内裤",
+    "手套",
+    "裤袜",
+    "袜子",
+    "鞋子",
+)
+COORDINATE_ACCESSORY_TYPES = {
+    351: "头部",
+    352: "耳部",
+    353: "眼镜",
+    354: "脸部",
+    355: "颈部",
+    356: "肩部",
+    357: "胸部",
+    358: "腰部",
+    359: "背部",
+    360: "胯部",
+    361: "手部",
+    362: "腿部",
+    363: "脚部",
+}
 INVALID_WINDOWS_FILENAME_CHARS = '<>:"/\\|?*'
 WINDOWS_RESERVED_FILENAMES = {
     "CON",
@@ -164,6 +205,629 @@ def validate_card_root(game_dir: str) -> tuple[bool, Path, str]:
         return False, root, "请选择有效的游戏目录"
 
     return True, root, ""
+
+
+def get_coordinate_root(game_dir: str) -> Path:
+    game_path = Path(game_dir)
+    userdata = find_child_dir_case_insensitive(game_path, "UserData") or game_path / "UserData"
+    return find_child_dir_case_insensitive(userdata, "coordinate") or userdata / "coordinate"
+
+
+def validate_coordinate_root(game_dir: str) -> tuple[bool, Path, str]:
+    if not is_hs2_game_dir(game_dir):
+        return False, get_coordinate_root(game_dir), "请选择有效的游戏目录"
+
+    root = get_coordinate_root(game_dir)
+    if not root.is_dir():
+        return False, root, "未找到 UserData/coordinate 服装卡目录"
+    return True, root, ""
+
+
+def resolve_coordinate_directory(root: Path, relative_path: str = "") -> Path:
+    normalized_relative = normalize_relative_path(relative_path)
+    candidate = (root / normalized_relative).resolve()
+    resolved_root = root.resolve()
+    if candidate != resolved_root and resolved_root not in candidate.parents:
+        raise ValueError("Invalid clothes-card directory.")
+    if not candidate.is_dir():
+        raise ValueError("Clothes-card directory not found.")
+    return candidate
+
+
+def resolve_coordinate_file(root: Path, relative_path: str) -> Path:
+    normalized_relative = normalize_relative_path(relative_path)
+    candidate = (root / normalized_relative).resolve()
+    resolved_root = root.resolve()
+    if resolved_root not in candidate.parents or not candidate.is_file():
+        raise ValueError("Clothes-card image not found.")
+    if candidate.suffix.lower() != ".png":
+        raise ValueError("Clothes-card image not found.")
+    return candidate
+
+
+def _read_coordinate_payload_summary(file_bytes: bytes, validation: dict[str, object]) -> dict[str, object]:
+    """Decode the small, stable parts of a clothes-card envelope for the browser."""
+    png_end = int(validation["png_size"])
+    payload = file_bytes[png_end:]
+    cursor = 4
+    marker, cursor = read_dotnet_string(payload, cursor)
+    version, cursor = read_dotnet_string(payload, cursor)
+    cursor += 4  # envelope reserved field
+    name, cursor = read_dotnet_string(payload, cursor)
+    coordinate_size = int.from_bytes(payload[cursor : cursor + 4], "little")
+    coordinate_start = cursor + 4
+    coordinate_end = coordinate_start + coordinate_size
+    coordinate_blob = payload[coordinate_start:coordinate_end]
+    coordinate_objects: list[dict] = []
+    coordinate_cursor = 0
+    while coordinate_cursor < len(coordinate_blob):
+        object_size = int.from_bytes(
+            coordinate_blob[coordinate_cursor : coordinate_cursor + 4], "little"
+        )
+        object_start = coordinate_cursor + 4
+        object_end = object_start + object_size
+        decoded = try_unpack_msgpack(coordinate_blob, object_start)
+        if not decoded or decoded[1] != object_end or not isinstance(decoded[0], dict):
+            raise CoordinateExtractionError("Coordinate MessagePack is invalid.")
+        coordinate_objects.append(decoded[0])
+        coordinate_cursor = object_end
+
+    clothes_parts: list[dict[str, object]] = []
+    for index, part in enumerate((coordinate_objects[0] if coordinate_objects else {}).get("parts", [])):
+        if not isinstance(part, dict):
+            continue
+        clothes_parts.append(
+            {
+                "slot": index,
+                "label": COORDINATE_CLOTHES_PARTS[index] if index < len(COORDINATE_CLOTHES_PARTS) else f"部件 {index + 1}",
+                "id": part.get("id"),
+            }
+        )
+
+    accessory_parts: list[dict[str, object]] = []
+    for index, part in enumerate((coordinate_objects[1] if len(coordinate_objects) > 1 else {}).get("parts", [])):
+        if not isinstance(part, dict):
+            continue
+        type_code = int(part.get("type") or 0)
+        accessory_parts.append(
+            {
+                "slot": index,
+                "label": COORDINATE_ACCESSORY_TYPES.get(type_code, "其他"),
+                "type": type_code,
+                "id": part.get("id"),
+                "parent_key": str(part.get("parentKey") or ""),
+            }
+        )
+
+    extension_name, cursor = read_dotnet_string(payload, coordinate_end)
+    extension_version = int.from_bytes(payload[cursor : cursor + 4], "little")
+    extension_size = int.from_bytes(payload[cursor + 4 : cursor + 8], "little")
+    extension_start = cursor + 8
+    extension_end = extension_start + extension_size
+    plugins: dict = {}
+    decoded_plugins = try_unpack_msgpack(payload, extension_start)
+    if decoded_plugins and decoded_plugins[1] == extension_end and isinstance(decoded_plugins[0], dict):
+        plugins = decoded_plugins[0]
+
+    dependencies: list[dict[str, object]] = []
+    resolver_payload = plugins.get("com.bepis.sideloader.universalautoresolver")
+    if isinstance(resolver_payload, list) and len(resolver_payload) >= 2 and isinstance(resolver_payload[1], dict):
+        for raw_record in resolver_payload[1].get("info", []):
+            if not isinstance(raw_record, bytes):
+                continue
+            decoded_record = try_unpack_msgpack(raw_record)
+            if not decoded_record or not isinstance(decoded_record[0], dict):
+                continue
+            record = json_safe_msgpack(decoded_record[0])
+            dependencies.append(
+                {
+                    "mod_id": str(record.get("ModID") or ""),
+                    "slot": record.get("Slot"),
+                    "local_slot": record.get("LocalSlot"),
+                    "property": str(record.get("Property") or ""),
+                    "category_no": record.get("CategoryNo"),
+                }
+            )
+
+    return {
+        "marker": marker,
+        "version": version,
+        "name": name,
+        "clothes_parts": clothes_parts,
+        "accessory_parts": accessory_parts,
+        "dependencies": dependencies,
+        "dependency_count": len(dependencies),
+        "plugins": [str(plugin) for plugin in validation.get("plugins", [])],
+        "plugin_count": len(validation.get("plugins", [])),
+        "coordinate_size": int(validation.get("coordinate_size") or 0),
+        "extension_name": extension_name,
+        "extension_version": extension_version,
+        "extension_size": extension_size,
+    }
+
+
+def inspect_clothes_card_file(card_path: Path) -> dict[str, object] | None:
+    try:
+        file_bytes = card_path.read_bytes()
+        validation = inspect_clothes_card(file_bytes)
+        if validation.get("marker") != CLOTHES_MARKER:
+            return None
+        return _read_coordinate_payload_summary(file_bytes, validation)
+    except (OSError, TypeError, ValueError, CoordinateExtractionError, IndexError):
+        return None
+
+
+def inspect_clothes_card_listing_file(card_path: Path) -> dict[str, object] | None:
+    """Validate only the small clothes-card envelope needed by the index.
+
+    The PNG image data is skipped chunk by chunk. Only the appended envelope is
+    read, and its KKEx payload is not decoded. This keeps first-page indexing
+    cheap while still distinguishing AIS clothes cards from ordinary PNGs.
+    """
+    try:
+        file_size = card_path.stat().st_size
+        with card_path.open("rb") as stream:
+            if stream.read(len(PNG_SIGNATURE)) != PNG_SIGNATURE:
+                return None
+            cursor = len(PNG_SIGNATURE)
+            while cursor + 12 <= file_size:
+                chunk_header = stream.read(8)
+                if len(chunk_header) != 8:
+                    return None
+                chunk_size = int.from_bytes(chunk_header[:4], "big")
+                chunk_type = chunk_header[4:]
+                chunk_end = cursor + 12 + chunk_size
+                if chunk_end > file_size:
+                    return None
+                stream.seek(chunk_size + 4, os.SEEK_CUR)
+                cursor = chunk_end
+                if chunk_type == b"IEND":
+                    payload = stream.read()
+                    validation = inspect_clothes_card_listing_payload(payload, cursor)
+                    break
+            else:
+                return None
+        if validation.get("marker") != CLOTHES_MARKER:
+            return None
+        return validation
+    except (OSError, TypeError, ValueError, CoordinateExtractionError, IndexError):
+        return None
+
+
+def _open_clothes_card_index(index_path: Path | None = None) -> sqlite3.Connection:
+    path = Path(index_path or DEFAULT_CLOTHES_CARD_INDEX_PATH).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS clothes_card_index (
+            root_key TEXT NOT NULL,
+            relative_path_key TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            directory_key TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            modified_ns INTEGER NOT NULL,
+            is_valid INTEGER NOT NULL,
+            card_name TEXT NOT NULL DEFAULT '',
+            png_size INTEGER NOT NULL DEFAULT 0,
+            parser_version INTEGER NOT NULL,
+            checked_at TEXT NOT NULL,
+            PRIMARY KEY (root_key, relative_path_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_clothes_card_index_directory
+            ON clothes_card_index(root_key, directory_key, is_valid, file_name COLLATE NOCASE);
+        """
+    )
+    return conn
+
+
+def _clothes_index_root_key(root: Path) -> str:
+    return str(root.resolve()).casefold()
+
+
+def _clothes_index_relative_key(relative_path: str) -> str:
+    return normalize_relative_path(relative_path).casefold()
+
+
+def _clothes_index_row_matches(row: sqlite3.Row, stat: os.stat_result) -> bool:
+    return (
+        int(row["file_size"] or 0) == int(stat.st_size)
+        and int(row["modified_ns"] or 0) == int(stat.st_mtime_ns)
+        and int(row["parser_version"] or 0) == _CLOTHES_CARD_INDEX_SCHEMA_VERSION
+    )
+
+
+def _clothes_index_row_values(
+    root: Path,
+    file_path: Path,
+    stat: os.stat_result,
+    parsed: dict[str, object] | None,
+) -> tuple:
+    relative_path = normalize_relative(file_path, root)
+    return (
+        _clothes_index_root_key(root),
+        _clothes_index_relative_key(relative_path),
+        relative_path,
+        _clothes_index_relative_key(normalize_relative(file_path.parent, root)),
+        file_path.name,
+        int(stat.st_size),
+        int(stat.st_mtime_ns),
+        int(bool(parsed)),
+        str(parsed.get("name") or file_path.stem) if parsed else "",
+        int(parsed.get("png_size") or 0) if parsed else 0,
+        _CLOTHES_CARD_INDEX_SCHEMA_VERSION,
+        utc_now(),
+    )
+
+
+def _write_clothes_index_rows(
+    conn: sqlite3.Connection,
+    root: Path,
+    rows: list[tuple[Path, os.stat_result, dict[str, object] | None]],
+) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO clothes_card_index (
+            root_key, relative_path_key, relative_path, directory_key, file_name,
+            file_size, modified_ns, is_valid, card_name, png_size,
+            parser_version, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(root_key, relative_path_key) DO UPDATE SET
+            relative_path = excluded.relative_path,
+            directory_key = excluded.directory_key,
+            file_name = excluded.file_name,
+            file_size = excluded.file_size,
+            modified_ns = excluded.modified_ns,
+            is_valid = excluded.is_valid,
+            card_name = excluded.card_name,
+            png_size = excluded.png_size,
+            parser_version = excluded.parser_version,
+            checked_at = excluded.checked_at
+        """,
+        [_clothes_index_row_values(root, file_path, stat, parsed) for file_path, stat, parsed in rows],
+    )
+
+
+def _clothes_card_listing_payload(
+    game_dir: str,
+    root: Path,
+    folder: Path,
+    png_files: list[tuple[Path, os.stat_result]],
+    offset: int,
+    limit: int | None,
+    index_path: Path | None,
+) -> dict[str, object]:
+    """Return only indexed-valid cards, indexing a bounded current-page window."""
+    root_key = _clothes_index_root_key(root)
+    directory_key = _clothes_index_relative_key(normalize_relative(folder, root))
+    current_keys = {
+        _clothes_index_relative_key(normalize_relative(file_path, root))
+        for file_path, _ in png_files
+    }
+    target_count = offset + (limit if limit is not None else _CLOTHES_CARD_INDEX_SCAN_BUDGET)
+    scanned_rows: list[tuple[Path, os.stat_result, dict[str, object] | None]] = []
+    conn = _open_clothes_card_index(index_path)
+    try:
+        existing_rows = conn.execute(
+            """
+            SELECT *
+            FROM clothes_card_index
+            WHERE root_key = ? AND directory_key = ?
+            """,
+            (root_key, directory_key),
+        ).fetchall()
+        indexed_by_key = {str(row["relative_path_key"]): row for row in existing_rows}
+        stale_keys = set(indexed_by_key) - current_keys
+        if stale_keys:
+            conn.executemany(
+                "DELETE FROM clothes_card_index WHERE root_key = ? AND relative_path_key = ?",
+                [(root_key, key) for key in stale_keys],
+            )
+
+        scan_all = len(png_files) <= _CLOTHES_CARD_INDEX_SCAN_BUDGET
+        valid_seen = 0
+        scan_blocked = False
+        scan_stop_index: int | None = None
+        for file_index, (file_path, stat) in enumerate(png_files):
+            key = _clothes_index_relative_key(normalize_relative(file_path, root))
+            row = indexed_by_key.get(key)
+            if row is not None and _clothes_index_row_matches(row, stat):
+                if int(row["is_valid"] or 0):
+                    valid_seen += 1
+                continue
+            if not scan_all and valid_seen >= target_count:
+                scan_stop_index = file_index
+                break
+            if len(scanned_rows) >= _CLOTHES_CARD_INDEX_SCAN_BUDGET:
+                scan_blocked = True
+                scan_stop_index = file_index
+                break
+            parsed = inspect_clothes_card_listing_file(file_path)
+            scanned_rows.append((file_path, stat, parsed))
+            if parsed:
+                valid_seen += 1
+
+        with conn:
+            _write_clothes_index_rows(conn, root, scanned_rows)
+
+        all_current_rows = conn.execute(
+            """
+            SELECT *
+            FROM clothes_card_index
+            WHERE root_key = ? AND directory_key = ?
+            """,
+            (root_key, directory_key),
+        ).fetchall()
+        file_by_key = {
+            _clothes_index_relative_key(normalize_relative(file_path, root)): (file_path, stat)
+            for file_path, stat in png_files
+        }
+
+        # Re-read the current directory signatures after the bounded scan so
+        # an unknown/changed PNG keeps the directory in indexing state.
+        rows_by_key = {str(row["relative_path_key"]): row for row in all_current_rows}
+        pending_after_scan = any(
+            (row := rows_by_key.get(_clothes_index_relative_key(normalize_relative(file_path, root)))) is None
+            or not _clothes_index_row_matches(row, stat)
+            for file_path, stat in png_files
+        )
+
+        indexing = pending_after_scan
+        valid_total = 0
+        response_rows: list[tuple[Path, os.stat_result, sqlite3.Row]] = []
+        if not indexing:
+            # Once the directory has been fully indexed, let SQLite perform
+            # the ordering and pagination. This avoids rebuilding and sorting
+            # every valid card in Python on every scroll request.
+            valid_total = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM clothes_card_index
+                    WHERE root_key = ?
+                      AND directory_key = ?
+                      AND is_valid = 1
+                      AND parser_version = ?
+                    """,
+                    (root_key, directory_key, _CLOTHES_CARD_INDEX_SCHEMA_VERSION),
+                ).fetchone()[0]
+            )
+            sql_limit = -1 if limit is None else max(1, int(limit))
+            indexed_page = conn.execute(
+                """
+                SELECT *
+                FROM clothes_card_index
+                WHERE root_key = ?
+                  AND directory_key = ?
+                  AND is_valid = 1
+                  AND parser_version = ?
+                ORDER BY file_name COLLATE NOCASE, relative_path COLLATE NOCASE
+                LIMIT ? OFFSET ?
+                """,
+                (
+                    root_key,
+                    directory_key,
+                    _CLOTHES_CARD_INDEX_SCHEMA_VERSION,
+                    sql_limit,
+                    offset,
+                ),
+            ).fetchall()
+            for row in indexed_page:
+                current = file_by_key.get(str(row["relative_path_key"]))
+                if current and _clothes_index_row_matches(row, current[1]):
+                    response_rows.append((current[0], current[1], row))
+        else:
+            current_rows = sorted(
+                [
+                    row
+                    for row in all_current_rows
+                    if int(row["is_valid"] or 0)
+                    and int(row["parser_version"] or 0) == _CLOTHES_CARD_INDEX_SCHEMA_VERSION
+                ],
+                key=lambda row: (str(row["file_name"]).casefold(), str(row["relative_path"]).casefold()),
+            )
+            valid_files: list[tuple[Path, os.stat_result, sqlite3.Row]] = []
+            for row in current_rows:
+                current = file_by_key.get(str(row["relative_path_key"]))
+                if current and _clothes_index_row_matches(row, current[1]):
+                    valid_files.append((current[0], current[1], row))
+            if scan_blocked and scan_stop_index is not None:
+                visible_keys = {
+                    _clothes_index_relative_key(normalize_relative(file_path, root))
+                    for file_path, _ in png_files[:scan_stop_index]
+                }
+                valid_files = [
+                    item
+                    for item in valid_files
+                    if _clothes_index_relative_key(normalize_relative(item[0], root)) in visible_keys
+                ]
+            valid_total = len(valid_files)
+            response_rows = valid_files if limit is None else valid_files[offset : offset + limit]
+        cards: list[dict[str, object]] = []
+        for file_path, stat, row in response_rows:
+            card_relative_path = normalize_relative(file_path, root)
+            image_version = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+            image_url = (
+                "/library/clothes/image?"
+                + f"game_dir={quote(str(Path(game_dir).resolve()))}&path={quote(card_relative_path)}"
+                + f"&v={quote(image_version)}"
+            )
+            cards.append(
+                {
+                    "id": card_relative_path,
+                    "filename": file_path.name,
+                    "name": str(row["card_name"] or file_path.stem),
+                    "relative_path": card_relative_path,
+                    "directory": normalize_relative(file_path.parent, root),
+                    "absolute_path": str(file_path),
+                    "thumbnail_url": image_url,
+                    "cover_url": image_url + "&original=1",
+                    "modified_at": int(stat.st_mtime),
+                    "file_size": stat.st_size,
+                    "metadata_pending": False,
+                }
+            )
+        return {
+            "cards": cards,
+            "valid_total": valid_total,
+            "candidate_total": len(png_files),
+            "indexing": indexing,
+        }
+    finally:
+        conn.close()
+
+
+def build_clothes_card_tree(game_dir: str) -> dict:
+    is_valid, root, error = validate_coordinate_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    node = build_coordinate_tree_node(root, root.resolve())
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "tree": node,
+        "total": count_coordinate_tree_cards(node),
+    }
+
+
+def build_coordinate_tree_node(folder: Path, root: Path) -> dict:
+    entries = sorted(folder.iterdir(), key=lambda item: item.name.casefold())
+    children = [
+        build_coordinate_tree_node(child, root)
+        for child in entries
+        if child.is_dir()
+    ]
+    # The tree is intentionally a fast directory map. Exact AIS_Clothes
+    # validation happens when a folder page is opened, not for every file in
+    # every descendant during the initial tree request.
+    direct_png_count = sum(
+        1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png"
+    )
+    relative_path = normalize_relative(folder, root)
+    return {
+        "id": relative_path or ".",
+        "name": "服装卡" if folder.resolve() == root.resolve() else folder.name,
+        "relative_path": relative_path,
+        "count": direct_png_count,
+        "count_is_candidate": True,
+        "children": children,
+        "has_children": bool(children),
+    }
+
+
+def count_coordinate_tree_cards(node: dict) -> int:
+    return int(node.get("count") or 0) + sum(
+        count_coordinate_tree_cards(child) for child in node.get("children", [])
+    )
+
+
+def list_clothes_cards(
+    game_dir: str,
+    relative_path: str = "",
+    offset: int = 0,
+    limit: int | None = None,
+    *,
+    index_path: Path | None = None,
+) -> dict:
+    """List only cards confirmed by the persistent clothes-card index."""
+    is_valid, root, error = validate_coordinate_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    folder = resolve_coordinate_directory(root, relative_path)
+    offset = max(0, int(offset or 0))
+    if limit is not None:
+        limit = max(1, min(int(limit), 240))
+    png_files: list[tuple[Path, os.stat_result]] = []
+    for file_path in folder.iterdir():
+        if not file_path.is_file() or file_path.suffix.lower() != ".png":
+            continue
+        try:
+            png_files.append((file_path, file_path.stat()))
+        except OSError:
+            continue
+    png_files.sort(key=lambda item: item[0].name.casefold())
+    indexed = _clothes_card_listing_payload(
+        game_dir,
+        root,
+        folder,
+        png_files,
+        offset,
+        limit,
+        index_path,
+    )
+    indexing = bool(indexed["indexing"])
+    valid_total = int(indexed["valid_total"] or 0)
+
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "relative_path": normalize_relative(folder, root),
+        "cards": indexed["cards"],
+        "total": None if indexing else valid_total,
+        "total_is_candidate": indexing,
+        "candidate_total": int(indexed["candidate_total"] or 0),
+        "indexed_valid_count": valid_total,
+        "indexing": indexing,
+        "offset": offset,
+        "limit": limit,
+        "has_more": indexing or offset + len(indexed["cards"]) < valid_total,
+    }
+
+
+def get_clothes_card_detail(game_dir: str, relative_path: str) -> dict:
+    is_valid, root, error = validate_coordinate_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    card_path = resolve_coordinate_file(root, relative_path)
+    parsed = inspect_clothes_card_file(card_path)
+    if not parsed:
+        return {"ok": False, "error": "目标文件不是有效的 AIS 服装卡。"}
+    resolved_dependencies = resolve_dependency_records(parsed.get("dependencies") or [])
+    resolved_dependencies.extend(
+        resolve_builtin_coordinate_dependencies(
+            game_dir,
+            parsed,
+            occupied_dependencies=resolved_dependencies,
+        )
+    )
+    stat = card_path.stat()
+    card_relative_path = normalize_relative(card_path, root)
+    image_version = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+    image_url = (
+        "/library/clothes/image?"
+        + f"game_dir={quote(str(Path(game_dir).resolve()))}&path={quote(card_relative_path)}"
+        + f"&v={quote(image_version)}"
+    )
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "card": {
+            "id": card_relative_path,
+            "filename": card_path.name,
+            "name": str(parsed.get("name") or card_path.stem),
+            "relative_path": card_relative_path,
+            "directory": normalize_relative(card_path.parent, root),
+            "absolute_path": str(card_path),
+            "thumbnail_url": image_url,
+            "cover_url": image_url + "&original=1",
+            "modified_at": int(stat.st_mtime),
+            "file_size": stat.st_size,
+            **parsed,
+            "dependencies": resolved_dependencies,
+            "dependency_count": len(resolved_dependencies),
+        },
+    }
 
 
 def resolve_card_directory(root: Path, relative_path: str = "") -> Path:
@@ -448,9 +1112,17 @@ def delete_character_card(
             conn.close()
 
     try:
-        card_path.unlink()
+        trash_record = move_to_trash(
+            card_path,
+            "cards",
+            name=str(card_path.stem),
+            metadata={
+                "game_dir": str(Path(game_dir).resolve()),
+                "relative_path": normalized_relative,
+            },
+        )
     except OSError as exc:
-        return {"ok": False, "error": f"人物卡删除失败：{exc}"}
+        return {"ok": False, "error": f"人物卡移入回收站失败：{exc}"}
 
     if resolved_db_path.is_file():
         conn = sqlite3.connect(resolved_db_path)
@@ -474,6 +1146,8 @@ def delete_character_card(
         "ok": True,
         "relative_path": normalized_relative,
         "file_name": card_path.name,
+        "trash_id": str(trash_record.get("id") or ""),
+        "trash_path": str(trash_record.get("payload_path") or ""),
     }
 
 
@@ -598,6 +1272,78 @@ def list_character_cards(
         "total": len(cards),
         "recursive": recursive,
         "tag": str(tag or "").strip(),
+    }
+
+
+def assess_character_card_folder_changes(
+    game_dir: str,
+    relative_path: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict:
+    """Compare one visible card folder with its indexed file signatures."""
+    is_valid, root, error = validate_card_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    folder = resolve_card_directory(root, relative_path)
+    current: dict[str, tuple[int, int, str]] = {}
+    for file_path in folder.iterdir():
+        if not file_path.is_file() or file_path.suffix.lower() != ".png":
+            continue
+        if not is_ais_card(str(file_path)):
+            continue
+        stat = file_path.stat()
+        current[str(file_path.resolve()).casefold()] = (
+            stat.st_size,
+            stat.st_mtime_ns,
+            timestamp_to_utc(stat.st_mtime),
+        )
+
+    indexed: dict[str, tuple[int, int, str]] = {}
+    resolved_db_path = Path(db_path).resolve()
+    if resolved_db_path.is_file():
+        conn = sqlite3.connect(resolved_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            init_db(conn)
+            for row in conn.execute(
+                """
+                SELECT file_path, modified_at, metadata_file_size, metadata_modified_ns
+                FROM character_cards
+                WHERE parse_status != 'stale'
+                """
+            ):
+                indexed_path = Path(str(row["file_path"] or "")).resolve()
+                if indexed_path.parent != folder.resolve():
+                    continue
+                indexed[str(indexed_path).casefold()] = (
+                    int(row["metadata_file_size"] or 0),
+                    int(row["metadata_modified_ns"] or 0),
+                    str(row["modified_at"] or ""),
+                )
+        finally:
+            conn.close()
+
+    added = len(set(current) - set(indexed))
+    removed = len(set(indexed) - set(current))
+    modified = sum(
+        1
+        for path, signature in current.items()
+        if path in indexed and indexed[path] != signature
+    )
+    changed_total = added + removed + modified
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "relative_path": normalize_relative(folder, root),
+        "current_total": len(current),
+        "indexed_total": len(indexed),
+        "added": added,
+        "removed": removed,
+        "modified": modified,
+        "changed_total": changed_total,
+        "changed": changed_total > 0,
     }
 
 
@@ -762,7 +1508,11 @@ def update_indexed_card_listing_metadata(
         return
 
 
-def get_character_card_detail(game_dir: str, relative_path: str) -> dict:
+def get_character_card_detail(
+    game_dir: str,
+    relative_path: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict:
     is_valid, root, error = validate_card_root(game_dir)
     if not is_valid:
         return invalid_payload(error)
@@ -772,7 +1522,10 @@ def get_character_card_detail(game_dir: str, relative_path: str) -> dict:
         return {"ok": False, "error": "Card image not found."}
 
     profile = extract_character_profile_from_card(str(card_path))
-    dependencies = resolve_card_dependencies(str(card_path))
+    dependencies = resolve_character_card_dependencies(
+        str(card_path), game_dir=game_dir, db_path=db_path
+    )
+    reconcile_indexed_card_dependencies(card_path, dependencies, db_path)
     metadata = read_card_metadata(card_path)
     return {
         "ok": True,
@@ -791,6 +1544,112 @@ def get_character_card_detail(game_dir: str, relative_path: str) -> dict:
             "tags": list(metadata["tags"]),
         },
     }
+
+
+def extract_character_coordinate_parts(card_path: Path) -> dict[str, list[dict[str, object]]]:
+    """Read the clothing/accessory IDs from a character card's Coordinate block."""
+    card_data, _ = make_card_data(card_path.read_bytes())
+    coordinate = get_card_block(card_data, "Coordinate")
+    if not coordinate:
+        return {"clothes_parts": [], "accessory_parts": []}
+    return parse_coordinate_payload_parts(coordinate[1])
+
+
+def resolve_character_card_dependencies(
+    card_path: str,
+    game_dir: str | Path,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict]:
+    """Resolve UAR dependencies and original-game Coordinate items for a character card."""
+    dependencies = resolve_card_dependencies(card_path, db_path=db_path)
+    try:
+        coordinate_parts = extract_character_coordinate_parts(Path(card_path))
+    except (OSError, TypeError, ValueError, CoordinateExtractionError):
+        return dependencies
+    dependencies.extend(
+        resolve_builtin_coordinate_dependencies(
+            game_dir,
+            coordinate_parts,
+            db_path=db_path,
+            occupied_dependencies=dependencies,
+        )
+    )
+    return dependencies
+
+
+def reconcile_indexed_card_dependencies(
+    card_path: Path,
+    dependencies: list[dict],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    """Keep the list badge cache aligned with the detail view's live resolution."""
+    resolved_db_path = Path(db_path).resolve()
+    if not resolved_db_path.is_file():
+        return
+
+    try:
+        conn = sqlite3.connect(resolved_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            init_db(conn)
+            card_row = conn.execute(
+                "SELECT id FROM character_cards WHERE file_path = ? LIMIT 1",
+                (str(card_path.resolve()),),
+            ).fetchone()
+            if not card_row:
+                return
+
+            cached_dependencies = []
+            for dependency in dependencies:
+                if (
+                    dependency.get("source_type") == "builtin"
+                    or (dependency.get("item") or {}).get("source_type") == "builtin"
+                ):
+                    continue
+                zipmod = dependency.get("zipmod") or {}
+                item = dependency.get("item") or {}
+                matched = bool(dependency.get("matched"))
+                cached_dependencies.append(
+                    {
+                        "mod_id": str(dependency.get("mod_id") or ""),
+                        "category_no": str(dependency.get("category_no") or ""),
+                        "slot": str(dependency.get("slot") or ""),
+                        "local_slot": str(dependency.get("local_slot") or ""),
+                        "zipmod_id": zipmod.get("id"),
+                        "mod_item_id": item.get("id"),
+                        "resolve_status": (
+                            "resolved"
+                            if matched
+                            else "missing_item"
+                            if zipmod
+                            else "missing_zipmod"
+                        ),
+                    }
+                )
+
+            # Import lazily because card_database imports card_library during startup.
+            from star_manager.services.card_database import replace_card_dependencies
+
+            with conn:
+                card_id = int(card_row["id"])
+                replace_card_dependencies(conn, card_id, cached_dependencies)
+                conn.execute(
+                    """
+                    UPDATE character_cards
+                    SET dependency_count = ?, missing_count = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        len(cached_dependencies),
+                        sum(1 for dependency in cached_dependencies if dependency["resolve_status"] != "resolved"),
+                        card_id,
+                    ),
+                )
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        # Detail rendering must remain available when a background database task holds the lock.
+        return
 
 
 def set_character_card_favorite(
@@ -1488,7 +2347,10 @@ def unique_dependency_package_path(output_dir: Path, package_name: str, compress
 
 
 def resolve_card_dependencies(card_path: str, db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
-    records = extract_auto_resolver_records_from_card(card_path)
+    return resolve_dependency_records(extract_auto_resolver_records_from_card(card_path), db_path=db_path)
+
+
+def resolve_dependency_records(records: list[dict], db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     resolved = []
     db_exists = db_path.resolve().is_file()
     conn = None
@@ -1498,19 +2360,21 @@ def resolve_card_dependencies(card_path: str, db_path: Path = DEFAULT_DB_PATH) -
 
     try:
         for index, record in enumerate(records):
-            mod_id = str(record.get("ModID") or "").strip()
-            category = dependency_record_value(record.get("CategoryNo"))
-            slot = dependency_record_value(record.get("Slot"))
-            local_slot = dependency_record_value(record.get("LocalSlot"))
+            if not isinstance(record, dict):
+                continue
+            mod_id = str(dependency_record_field(record, "ModID", "mod_id") or "").strip()
+            category = dependency_record_value(dependency_record_field(record, "CategoryNo", "category_no"))
+            slot = dependency_record_value(dependency_record_field(record, "Slot", "slot"))
+            local_slot = dependency_record_value(dependency_record_field(record, "LocalSlot", "local_slot"))
             item = find_dependency_item(conn, mod_id, category, slot, local_slot) if conn and mod_id else None
             zipmod = find_dependency_zipmod(conn, mod_id) if conn and mod_id else None
             resolved.append(
                 {
                     "id": f"{mod_id}:{category}:{slot}:{local_slot}:{index}",
                     "mod_id": mod_id,
-                    "name": str(record.get("Name") or ""),
-                    "author": str(record.get("Author") or ""),
-                    "property": str(record.get("Property") or ""),
+                    "name": str(dependency_record_field(record, "Name", "name") or ""),
+                    "author": str(dependency_record_field(record, "Author", "author") or ""),
+                    "property": str(dependency_record_field(record, "Property", "property") or ""),
                     "category_no": category,
                     "slot": slot,
                     "local_slot": local_slot,
@@ -1531,6 +2395,13 @@ def dependency_record_value(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def dependency_record_field(record: dict, *keys: str) -> object:
+    for key in keys:
+        if key in record and record[key] is not None:
+            return record[key]
+    return ""
 
 
 def find_dependency_item(

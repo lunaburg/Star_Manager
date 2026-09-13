@@ -9,7 +9,7 @@ from star_manager.services.mod_database_core import DEFAULT_DB_PATH, init_db
 
 ACHIEVEMENTS = (
     ("collector", "收藏家", "收录 1,000 张人物卡", 1000, "cards", "CARD"),
-    ("zero_missing", "零缺失", "完成一次依赖完整的角色卡资源库扫描", 1, "milestone", "ZERO"),
+    ("zero_missing", "完美主义者", "完成一次依赖完整的角色卡资源库扫描", 1, "milestone", "ZERO"),
     ("archaeologist", "考古学家", "发现同一 GUID 的三个文件版本", 3, "versions", "GUID"),
     ("organizer", "整理大师", "清理 10 GB 重复资源", 10 * 1024**3, "bytes", "10G"),
     ("doctor", "急救医生", "修复 100 个缩略图或资源异常", 100, "repairs", "FIX"),

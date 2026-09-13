@@ -1,4 +1,9 @@
 <script setup>
+import { onBeforeUnmount, onMounted, ref } from "vue";
+
+import blenderIcon from "../../assets/blender-icon.png";
+import sb3utilityIcon from "../../assets/sb3utility-icon.png";
+
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
 });
@@ -20,26 +25,115 @@ const favoriteCardThemes = [
   { value: "sakura", label: "樱落绮梦", description: "樱粉漆面、暖白金字与花瓣柔雾" },
   { value: "obsidian", label: "黑曜鎏火", description: "黑曜裂纹、象牙白字与余烬火星" }
 ];
+
+const settingNavGroups = [
+  {
+    label: "启动与外观",
+    items: [
+      { id: "startup", label: "启动与检查" },
+      { id: "wallpaper", label: "应用壁纸" }
+    ]
+  },
+  {
+    label: "记录与输出",
+    items: [
+      { id: "appearance", label: "收藏主题" },
+      { id: "achievements", label: "本地成就" },
+      { id: "paths", label: "导出位置" }
+    ]
+  },
+  {
+    label: "工具",
+    items: [
+      { id: "tools", label: "外部工具" }
+    ]
+  }
+];
+
+const settingsContentRef = ref(null);
+const activeSection = ref("startup");
+
+function updateActiveSection() {
+  const content = settingsContentRef.value;
+  if (!content) return;
+
+  const sections = [...content.querySelectorAll("[data-settings-section]")];
+  if (!sections.length) return;
+
+  const contentTop = content.getBoundingClientRect().top;
+  const current = sections.reduce((candidate, section) => {
+    if (section.getBoundingClientRect().top <= contentTop + 1) {
+      return section;
+    }
+    return candidate;
+  }, null) || sections[0];
+
+  const sectionId = current.dataset.settingsSection;
+  if (sectionId) {
+    activeSection.value = sectionId;
+  }
+}
+
+function scrollToSection(id) {
+  const section = settingsContentRef.value?.querySelector(`#settings-${id}`);
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+onMounted(() => {
+  const content = settingsContentRef.value;
+  if (!content) return;
+
+  content.addEventListener("scroll", updateActiveSection, { passive: true });
+  updateActiveSection();
+});
+
+onBeforeUnmount(() => {
+  settingsContentRef.value?.removeEventListener("scroll", updateActiveSection);
+});
 </script>
 
 <template>
   <section class="view settings-view">
-    <div class="settings-page-head">
-      <div>
-        <span class="settings-eyebrow">MANAGER CONTROL</span>
-        <h1>设置</h1>
-      </div>
-      <span v-if="ctx.settingsNotice.message" class="settings-save-state" :class="ctx.settingsNotice.type">
-        <span class="dot"></span>{{ ctx.settingsNotice.message }}
-      </span>
-    </div>
+    <div class="settings-page-shell">
+      <aside class="settings-sidebar" aria-label="设置导航">
+        <div class="settings-sidebar-brand">
+          <span class="settings-sidebar-brand-copy">
+            <strong>设置</strong>
+          </span>
+        </div>
 
-    <div class="settings-layout">
-      <section class="panel settings-section settings-section--startup">
-        <div class="settings-section-icon" aria-hidden="true">01</div>
+        <nav class="settings-sidebar-nav">
+          <div v-for="group in settingNavGroups" :key="group.label" class="settings-sidebar-group">
+            <span class="settings-sidebar-group-label">{{ group.label }}</span>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              type="button"
+              class="settings-sidebar-item"
+              :class="{ active: activeSection === item.id }"
+              :aria-current="activeSection === item.id ? 'page' : undefined"
+              @click="scrollToSection(item.id)"
+            >
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
+        </nav>
+
+        <div class="settings-sidebar-footer">
+          <span class="settings-sidebar-footer-dot" aria-hidden="true"></span>
+          <span>本地设置</span>
+          <small>自动保存</small>
+        </div>
+      </aside>
+
+      <main ref="settingsContentRef" class="settings-content">
+        <div class="settings-layout">
+      <section id="settings-startup" data-settings-section="startup" class="panel settings-section settings-section--startup">
         <div class="settings-section-body">
           <div class="settings-section-head">
-            <div><h2>启动与检查</h2><p>决定管理器打开后的落点和资源检查方式。</p></div>
+            <div>
+              <h2>启动与检查</h2>
+            </div>
           </div>
 
           <label class="setting-row setting-row--select">
@@ -60,19 +154,44 @@ const favoriteCardThemes = [
               @click="ctx.updateManagerSetting('checkDatabaseChangesOnStartup', !ctx.managerSettings.checkDatabaseChangesOnStartup)"
             ><span></span></button>
           </div>
+        </div>
+      </section>
 
-          <div class="settings-safety-note">
-            <span class="safety-lock">SAFE</span>
-            <span><strong>文件操作默认使用 Copy</strong><small>移动和删除仍会单独要求确认，避免意外修改游戏目录。</small></span>
+      <section id="settings-wallpaper" data-settings-section="wallpaper" class="panel settings-section settings-section--wallpaper">
+        <div class="settings-section-body">
+          <div class="settings-section-head">
+            <div>
+              <h2>应用壁纸</h2>
+            </div>
+            <span class="settings-app-status" :class="{ configured: ctx.managerSettings.wallpaperPath }">
+              <i></i>{{ ctx.managerSettings.wallpaperPath ? "已配置" : "默认壁纸" }}
+            </span>
+          </div>
+
+          <div class="wallpaper-setting-card">
+            <div class="wallpaper-setting-preview" aria-hidden="true">
+              <video v-if="ctx.wallpaperIsVideo" :src="ctx.wallpaperSource" muted autoplay loop playsinline></video>
+              <img v-else :src="ctx.wallpaperSource" alt="" />
+              <span>{{ ctx.wallpaperIsVideo ? "MP4" : "IMAGE" }}</span>
+            </div>
+            <div class="wallpaper-setting-copy">
+              <strong>{{ ctx.managerSettings.wallpaperPath || "使用内置默认壁纸" }}</strong>
+              <small>支持 PNG、JPG、WebP、GIF 与 MP4。视频会自动静音循环播放，并始终位于所有页面内容的最底层。</small>
+              <div class="wallpaper-setting-actions">
+                <button type="button" class="primary" @click="ctx.selectWallpaper">选择图片或 MP4</button>
+                <button v-if="ctx.managerSettings.wallpaperPath" type="button" @click="ctx.clearWallpaper">恢复默认</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="panel settings-section">
-        <div class="settings-section-icon" aria-hidden="true">02</div>
+      <section id="settings-appearance" data-settings-section="appearance" class="panel settings-section">
         <div class="settings-section-body">
           <div class="settings-section-head">
-            <div><h2>收藏人物卡主题</h2><p>一套主题统一控制卡框、名字字体与详情卡面特效。</p></div>
+            <div>
+              <h2>收藏主题</h2>
+            </div>
           </div>
 
           <div class="frame-theme-picker" role="radiogroup" aria-label="收藏人物卡边框主题">
@@ -91,15 +210,15 @@ const favoriteCardThemes = [
               <span class="frame-theme-check" aria-hidden="true">✓</span>
             </button>
           </div>
-          <p class="frame-theme-scope">同步应用：网格卡框 · 名字铭牌与字体 · 详情卡框 · 卡面动态光效</p>
         </div>
       </section>
 
-      <section class="panel settings-section">
-        <div class="settings-section-icon" aria-hidden="true">03</div>
+      <section id="settings-achievements" data-settings-section="achievements" class="panel settings-section settings-section--achievements">
         <div class="settings-section-body">
           <div class="settings-section-head">
-            <div><h2>本地成就</h2><p>这些记录只保存在本机，不联网也不参与排行。</p></div>
+            <div>
+              <h2>本地成就</h2>
+            </div>
             <span class="settings-count">{{ ctx.achievementUnlockedCount }} / {{ ctx.achievements.length }}</span>
           </div>
 
@@ -120,11 +239,12 @@ const favoriteCardThemes = [
         </div>
       </section>
 
-      <section class="panel settings-section settings-section--wide">
-        <div class="settings-section-icon" aria-hidden="true">04</div>
+      <section id="settings-paths" data-settings-section="paths" class="panel settings-section settings-section--wide">
         <div class="settings-section-body">
           <div class="settings-section-head">
-            <div><h2>默认导出位置</h2><p>各工具仍可在执行时临时选择其他位置。</p></div>
+            <div>
+              <h2>导出位置</h2>
+            </div>
           </div>
 
           <div class="settings-path-list">
@@ -149,36 +269,49 @@ const favoriteCardThemes = [
         </div>
       </section>
 
-      <section class="panel settings-section settings-section--wide settings-section--blender">
-        <div class="settings-section-icon" aria-hidden="true">05</div>
+      <section id="settings-tools" data-settings-section="tools" class="panel settings-section settings-section--wide settings-section--blender">
         <div class="settings-section-body">
           <div class="settings-section-head">
-            <div><h2>Blender 集成</h2><p>用于 Package 导出阶段固化 T-Pose 并清除骨骼蒙皮，也可直接打开导出的 FBX。</p></div>
-            <span class="settings-app-status" :class="{ configured: ctx.blenderExecutablePath }">
-              <i></i>{{ ctx.blenderExecutablePath ? "已连接" : "未设置" }}
+            <div>
+              <h2>外部工具</h2>
+            </div>
+            <span class="settings-app-status" :class="{ configured: ctx.blenderExecutablePath || ctx.sb3utilityExecutablePath }">
+              <i></i>{{ ctx.blenderExecutablePath || ctx.sb3utilityExecutablePath ? "已配置" : "未设置" }}
             </span>
           </div>
 
           <div class="blender-path-panel" :class="{ configured: ctx.blenderExecutablePath }">
-            <span class="blender-app-mark" aria-hidden="true"><b>B</b><small>3D</small></span>
+            <span class="blender-app-mark blender-app-mark--image" aria-hidden="true"><img class="blender-app-icon" :src="blenderIcon" alt="" /></span>
             <span class="setting-copy blender-path-copy">
-              <strong>Blender 可执行文件</strong>
-              <small :title="ctx.blenderExecutablePath">{{ ctx.blenderExecutablePath || "请选择 Blender 安装目录中的 blender.exe" }}</small>
+              <strong>Blender</strong>
+              <small :title="ctx.blenderExecutablePath">{{ ctx.blenderExecutablePath || "请选择 Blender.exe" }}</small>
             </span>
             <span class="blender-path-actions">
               <button type="button" class="blender-select-button" @click="ctx.selectBlenderExecutable">
-                {{ ctx.blenderExecutablePath ? "更换路径" : "选择 blender.exe" }}
+                选择
               </button>
               <button v-if="ctx.blenderExecutablePath" type="button" class="blender-clear-button" @click="ctx.clearBlenderExecutable">清除</button>
             </span>
           </div>
 
-          <div class="blender-integration-note">
-            <span>RIG + AUTO IMPORT</span>
-            <p>导出时使用内置的 165 骨骼 TS4 模板绑定 GEOM 原始权重，并参照 HS2 固化为 T-Pose；打开模型时会保留 <code>textures</code> 相对路径。</p>
+          <div class="blender-path-panel" :class="{ configured: ctx.sb3utilityExecutablePath }">
+            <span class="blender-app-mark blender-app-mark--image" aria-hidden="true"><img class="blender-app-icon" :src="sb3utilityIcon" alt="" /></span>
+            <span class="setting-copy blender-path-copy">
+              <strong>SB3Utility</strong>
+              <small :title="ctx.sb3utilityExecutablePath">{{ ctx.sb3utilityExecutablePath || "请选择 SB3Utility.exe" }}</small>
+            </span>
+            <span class="blender-path-actions">
+              <button type="button" class="blender-select-button" @click="ctx.selectSb3UtilityExecutable">
+                选择
+              </button>
+              <button v-if="ctx.sb3utilityExecutablePath" type="button" class="blender-clear-button" @click="ctx.resetSb3UtilityExecutable">清除</button>
+            </span>
           </div>
+
         </div>
       </section>
+        </div>
+      </main>
     </div>
   </section>
 </template>

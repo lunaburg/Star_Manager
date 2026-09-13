@@ -1,0 +1,1 @@
+D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\obj\Debug\net472\StarManager.GameItemProbe.csproj.AssemblyReference.cache

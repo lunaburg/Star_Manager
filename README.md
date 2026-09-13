@@ -100,17 +100,22 @@ The former `apps/pyside6` app has been removed. Current development should stay 
 
 ## Documentation
 
-- [apps/docs/project-introduction.md](apps/docs/project-introduction.md): 面向用户的产品定位、页面导览、首次使用流程和当前功能边界。
-- [apps/docs/README.md](apps/docs/README.md): canonical documentation index and task-oriented reading map.
-- [apps/README.md](apps/README.md): application-level developer notes.
-- [apps/docs/project-overview.md](apps/docs/project-overview.md): full project map, runtime architecture, data model, workflows, tests, and development rules.
-- [apps/docs/backend-interface.md](apps/docs/backend-interface.md): frontend/backend API contract and task protocol.
-- [apps/docs/mod_manage/mod_database_design.md](apps/docs/mod_manage/mod_database_design.md): mod database schema and scanning rules.
-- [apps/docs/mod_manage/character_card_parsing.md](apps/docs/mod_manage/character_card_parsing.md): AIS card payload and dependency parsing notes.
-- [apps/docs/card-metadata-plugin.md](apps/docs/card-metadata-plugin.md): persistent card metadata plugin contract and build/install flow.
-- [apps/docs/frontend-ui/plugins-layout.md](apps/docs/frontend-ui/plugins-layout.md): BepInEx plugin inventory behavior.
-- [apps/docs/frontend-ui/workbench-layout.md](apps/docs/frontend-ui/workbench-layout.md): Sims 4 Package to FBX workflow and current limits.
-- [apps/docs/packaging-windows.md](apps/docs/packaging-windows.md): Windows packaging flow.
+文档按“仓库 → 应用 → 专题 → 具体文档”分级组织，建议从对应层级的索引进入：
+
+1. [文档总索引](apps/docs/README.md)：按阅读目标、功能和开发任务查找全部维护文档。
+2. [应用 README](apps/README.md)：从 `apps/` 目录运行、构建和排查应用时的快速说明。
+3. [项目总览](apps/docs/project-overview.md)：开发前了解架构、数据模型、工作流和边界。
+4. [前端 UI 专题索引](apps/docs/frontend-ui/README.md)：页面、应用外壳和视觉规范。
+5. [模组与资源专题索引](apps/docs/mod_manage/README.md)：模组数据库、角色卡解析、扫描变更和异常诊断。
+
+按具体场景继续阅读：
+
+- 用户首次使用： [项目介绍](apps/docs/project-introduction.md)
+- 修改接口或任务： [前后端接口](apps/docs/backend-interface.md)
+- 修改缓存或运行时文件： [缓存与运行时文件登记](apps/docs/runtime-cache-registry.md)
+- 修改 Unity3D / Workbench： [前端 UI 专题索引](apps/docs/frontend-ui/README.md) → [工作台](apps/docs/frontend-ui/workbench-layout.md)
+- 处理集成或资源恢复： [集成与排障文档](apps/docs/README.md#集成和排障)
+- 生成 Windows 发行目录： [Windows 打包指南](apps/docs/packaging-windows.md)
 
 ## Development Notes
 

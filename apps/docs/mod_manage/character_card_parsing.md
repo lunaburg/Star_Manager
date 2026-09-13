@@ -141,6 +141,44 @@ KKEx
 
 `Coordinate` is especially relevant for card detail views because it includes clothing parts and accessory entries. `KKEx` is especially relevant for dependency extraction because it contains plugin-owned resolver metadata.
 
+人物卡详情会把 `Coordinate` 的服装部件和配饰部件交给原版资源索引，按 `CategoryNo + ID` 合并到 UAR 依赖结果中。原版记录使用 `source_type=builtin`，不需要 `ModID`，也不会进入远程模组补全流程。如果 UAR 已经声明同一服装部位，UAR 记录优先，原版候选不会重复加入。
+
+## Verified bone and texture storage in one HS2 character card
+
+The following findings were verified against the standalone card with id
+`3adf5278-8db1-4b41-9647-20db5d13c069` (PNG size `2,448,799` bytes):
+
+```text
+KKEx
+├── KKABMPlugin.ABMData
+│   └── boneData                 binary ABMX/BonemodX payload
+└── KSOX
+    ├── _TextureID_9587          embedded PNG bytes
+    └── Lookup                   0 -> 2 -> 9587
+```
+
+For this card, `boneData` is a `375`-byte binary field under
+`KKABMPlugin.ABMData` and contains the ABMX bone-modifier records. The
+installed plugin that owns this schema is `HS2ABMX.dll`; its documented
+`BoneModifierData` fields are scale, length, position, and rotation modifiers.
+The field is not a complete Unity skeleton hierarchy: the game resolves the
+bone names against the character's runtime transforms.
+
+This card's KSOX `_TextureID_9587` is not merely an id. It contains a complete
+`571,941`-byte `2048 x 2048` RGBA PNG. Its SHA-256 is
+`8692678a54ffb14aed36164f44c975ab15c17a6a76b88a1ea311f67c22136f46`, matching
+the exported overlay file
+`UserData/Overlays/_Export_2024-02-02-17-52-37_FaceOver.png` in the verified
+game directory. KSOX is implemented by `HS2_OverlayMods.dll` (Skin Overlay
+Mod, version `6.1.5`).
+
+Other face, body, hair, clothing, and accessory textures are still generally
+loaded from the original `abdata` files or zipmod AssetBundles referenced by
+`Custom`, `Coordinate`, and UniversalAutoResolver records. In this sample,
+MaterialEditor contains no texture dictionary or texture-property override;
+only its shader list is populated. Therefore it is not the source of the
+embedded PNG identified above.
+
 The character-card `Coordinate` block is directly reusable as a clothes-card
 coordinate payload. It contains two little-endian length-prefixed MessagePack
 objects:

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import StartView from "./components/views/StartView.vue";
 import OverviewView from "./components/views/OverviewView.vue";
 import CharactersView from "./components/views/CharactersView.vue";
@@ -9,25 +9,72 @@ import WorkbenchView from "./components/views/WorkbenchView.vue";
 import PluginsView from "./components/views/PluginsView.vue";
 import LogsView from "./components/views/LogsView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
-import appIcon from "../build-resources/app-icon.png";
+import TrashView from "./components/views/TrashView.vue";
+import { getAchievementIcon } from "./achievementIcons";
+import itemKindBottom from "./assets/item-kind-bottom.png";
+import itemKindGloves from "./assets/item-kind-gloves.png";
+import itemKindPanties from "./assets/item-kind-panties.png";
+import itemKindShoes from "./assets/item-kind-shoes.png";
+import itemKindSocks from "./assets/item-kind-socks.png";
+import itemKindTights from "./assets/item-kind-tights.png";
+import itemKindTop from "./assets/item-kind-top.png";
+import itemKindUnderwear from "./assets/item-kind-underwear.png";
 import brandLogo from "../build-resources/brand-logo.png";
+import wallpaperDefault from "./assets/wallpaper-default.jpg";
 
 const views = [
   { id: "start", icon: "ST", label: "开始游戏" },
   { id: "overview", icon: "OV", label: "总览" },
-  { id: "characters", icon: "CH", label: "角色管理" },
-  { id: "mods", icon: "MD", label: "模组管理" },
-  { id: "plugins", icon: "PL", label: "插件管理" },
+  { id: "characters", icon: "CH", label: "卡片" },
+  { id: "mods", icon: "MD", label: "模组" },
+  { id: "plugins", icon: "PL", label: "插件" },
   { id: "workbench", icon: "WB", label: "工作台" },
-  { id: "logs", icon: "LG", label: "运行日志" }
+  { id: "logs", icon: "LG", label: "日志" },
+  { id: "trash", icon: "TR", label: "回收站" }
 ];
 
 const activeView = ref("start");
+const pageComponents = {
+  start: StartView,
+  overview: OverviewView,
+  characters: CharactersView,
+  mods: ModsView,
+  plugins: PluginsView,
+  workbench: WorkbenchView,
+  logs: LogsView,
+  settings: SettingsView,
+  trash: TrashView
+};
+const activePageComponent = computed(() => pageComponents[activeView.value] || StartView);
+const cardBrowserMode = ref("character");
 const libraryMode = ref("mods");
+const itemViewMode = ref("table");
+const isItemLibraryView = computed(() => activeView.value === "mods" && libraryMode.value === "items");
+const itemKindLevel = ref("categories");
+const itemKindGroup = ref("male");
+const itemKindCategory = ref("");
 const itemTab = ref("详情");
 const modTab = ref("详情");
 const cardDetailTab = ref("详情");
 const selectedCards = ref(new Set());
+
+try {
+  const savedItemViewMode = window.localStorage.getItem("star-manager:item-view-mode");
+  if (["table", "compact"].includes(savedItemViewMode)) itemViewMode.value = savedItemViewMode;
+} catch {
+  // The view switch still works for the current session when storage is unavailable.
+}
+
+function setItemViewMode(mode) {
+  if (!["table", "compact"].includes(mode)) return;
+  itemViewMode.value = mode;
+  try {
+    window.localStorage.setItem("star-manager:item-view-mode", mode);
+  } catch {
+    // Ignore storage failures; the in-memory preference remains active.
+  }
+}
+
 const backendStatus = ref("checking");
 const gameDirStatus = ref("未选择");
 const taskName = ref("等待任务");
@@ -39,26 +86,196 @@ const isBusy = ref(false);
 const activeAction = ref("");
 const settingsNotice = reactive({ type: "", message: "" });
 const blenderExecutablePath = ref("");
+const sb3utilityExecutablePath = ref("");
+const workbenchAuthorId = ref("");
+const workbenchWorkspacePath = ref("");
+const workbenchActiveProjectId = ref("");
+const workbenchProjects = ref([]);
+const WORKBENCH_PROFILE_CACHE_KEY = "star-manager.workbench-profile";
 
 const managerSettings = reactive({
   startupView: "start",
   favoriteCardTheme: "gold",
-  checkDatabaseChangesOnStartup: true
+  checkDatabaseChangesOnStartup: true,
+  wallpaperPath: "",
+  wallpaperType: ""
 });
+const wallpaperDataUrl = ref("");
+
+function wallpaperUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^(?:file|https?|data):/i.test(raw)) return raw;
+  // Route local media through Electron's wallpaper:// protocol so both the
+  // dev HTTP renderer and the packaged file renderer can stream MP4 safely.
+  return `wallpaper://file?path=${encodeURIComponent(raw)}`;
+}
+
+const wallpaperSource = computed(() => managerSettings.wallpaperPath
+  ? (wallpaperIsVideo.value ? wallpaperUrl(managerSettings.wallpaperPath) : (wallpaperDataUrl.value || wallpaperDefault))
+  : wallpaperDefault);
+const wallpaperIsVideo = computed(() => managerSettings.wallpaperType === "video"
+  || /\.mp4$/i.test(managerSettings.wallpaperPath || ""));
+
+async function refreshWallpaperPreview() {
+  wallpaperDataUrl.value = "";
+  if (!managerSettings.wallpaperPath || wallpaperIsVideo.value) return;
+  const result = await window.desktopApi?.readWallpaperImage?.(managerSettings.wallpaperPath);
+  if (result?.ok && result.dataUrl) {
+    wallpaperDataUrl.value = result.dataUrl;
+  } else if (result?.error) {
+    log(`[Wallpaper Error] ${result.error}`);
+  }
+}
 
 const paths = reactive({
   gameDir: "",
   inputDir: "",
   outputDir: ""
 });
+let settingsSaveQueue = Promise.resolve();
 
+function readWorkbenchProfileCache() {
+  try {
+    const cached = JSON.parse(window.localStorage?.getItem(WORKBENCH_PROFILE_CACHE_KEY) || "{}");
+    return {
+      authorId: String(cached?.authorId || "").trim(),
+      workspacePath: String(cached?.workspacePath || "").trim()
+    };
+  } catch {
+    return { authorId: "", workspacePath: "" };
+  }
+}
+
+function writeWorkbenchProfileCache(authorId, workspacePath) {
+  try {
+    window.localStorage?.setItem(WORKBENCH_PROFILE_CACHE_KEY, JSON.stringify({
+      authorId: String(authorId || "").trim(),
+      workspacePath: String(workspacePath || "").trim()
+    }));
+  } catch {
+    // LocalStorage may be unavailable in a restricted renderer; Electron settings remain the source of truth.
+  }
+}
+
+function comparableWorkbenchPath(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/]+$/g, "")
+    .replaceAll("/", "\\")
+    .toLocaleLowerCase();
+}
+
+function serializeWorkbenchProjects(projects = workbenchProjects.value) {
+  return (Array.isArray(projects) ? projects : []).map((project) => ({
+    id: String(project?.id || ""),
+    guid: String(project?.guid || ""),
+    name: String(project?.name || ""),
+    path: String(project?.path || ""),
+    manifestPath: String(project?.manifestPath || ""),
+    projectFilePath: String(project?.projectFilePath || ""),
+    createdAt: String(project?.createdAt || "")
+  }));
+}
+
+function mergeWorkbenchProjects(scannedProjects) {
+  const scanned = Array.isArray(scannedProjects) ? scannedProjects : [];
+  const scannedByPath = new Map(
+    scanned
+      .filter((project) => project?.path)
+      .map((project) => [comparableWorkbenchPath(project.path), project])
+  );
+  const knownPaths = new Set();
+  const merged = [];
+
+  for (const existing of workbenchProjects.value) {
+    const key = comparableWorkbenchPath(existing?.path);
+    const discovered = scannedByPath.get(key);
+    if (discovered) {
+      merged.push({ ...existing, ...discovered });
+      knownPaths.add(key);
+    } else if (!existing?.projectFilePath) {
+      merged.push(existing);
+    }
+  }
+  for (const project of scanned) {
+    const key = comparableWorkbenchPath(project?.path);
+    if (key && !knownPaths.has(key)) {
+      merged.push(project);
+      knownPaths.add(key);
+    }
+  }
+  return merged;
+}
+
+function workbenchProjectsInCurrentWorkspace() {
+  const workspacePath = comparableWorkbenchPath(workbenchWorkspacePath.value);
+  if (!workspacePath) return [];
+  return workbenchProjects.value.filter((project) => {
+    const projectPath = comparableWorkbenchPath(project?.path);
+    return projectPath === workspacePath || projectPath.startsWith(`${workspacePath}\\`);
+  });
+}
+
+function syncWorkbenchActiveProject() {
+  const projects = workbenchProjectsInCurrentWorkspace();
+  const currentId = String(workbenchActiveProjectId.value || "").trim();
+  if (projects.some((project) => String(project?.id || "") === currentId)) return false;
+  const nextId = String(projects[0]?.id || "");
+  if (currentId === nextId) return false;
+  workbenchActiveProjectId.value = nextId;
+  return true;
+}
+
+async function refreshWorkbenchProjects({ persist = false } = {}) {
+  const workspacePath = String(workbenchWorkspacePath.value || "").trim();
+  if (!workspacePath) return { ok: true, projects: workbenchProjects.value };
+  const result = await window.desktopApi?.scanWorkbenchProjects?.({
+    workspacePath,
+    knownProjects: serializeWorkbenchProjects()
+  });
+  if (!result?.ok) {
+    log("[Workbench Scan] " + (result?.error || "workbench project scan failed"));
+    return result || { ok: false, error: "工程扫描失败", projects: [] };
+  }
+  const previous = JSON.stringify(workbenchProjects.value);
+  workbenchProjects.value = mergeWorkbenchProjects(result.projects);
+  const activeProjectChanged = syncWorkbenchActiveProject();
+  if (persist && (previous !== JSON.stringify(workbenchProjects.value) || activeProjectChanged)) {
+    await saveAppSettings();
+  }
+  return { ...result, projects: workbenchProjects.value };
+}
+
+const setupLanguageOptions = [
+  { value: 0, label: "中文" },
+  { value: 1, label: "日文" },
+  { value: 2, label: "English" }
+];
+const setupQualityOptions = [
+  { value: 0, label: "性能" },
+  { value: 1, label: "普通" },
+  { value: 2, label: "质量" }
+];
 const setup = reactive({
-  language: "中文",
-  quality: "?",
-  display: "Display 0",
-  resolution: "1920 x 1080",
+  language: 0,
+  quality: 1,
+  display: 0,
+  width: 1280,
+  height: 720,
+  resolution: "1280 x 720",
   fullscreen: false,
-  dirty: false
+  dirty: false,
+  loading: false,
+  saving: false,
+  loaded: false,
+  exists: false,
+  error: "",
+  warning: "",
+  filePath: "",
+  backupPath: "",
+  displays: [{ index: 0, label: "Display 0" }],
+  resolutions: [{ label: "1280 x 720", width: 1280, height: 720 }]
 });
 
 const stats = reactive({
@@ -69,11 +286,23 @@ const stats = reactive({
   zipmodErrors: null,
   zipmodWarnings: null,
   modItems: null,
+  builtinItems: null,
   duplicateZipmods: null,
   lastDatabaseBuiltAt: ""
 });
 
 const logs = ref([]);
+const trashEntries = ref([]);
+const trashLoading = ref(false);
+const trashAction = ref("");
+const trashError = ref("");
+const trashNotice = ref("");
+const trashRoot = ref("");
+const trashFilter = ref("all");
+const filteredTrashEntries = computed(() => {
+  if (trashFilter.value === "all") return trashEntries.value;
+  return trashEntries.value.filter((item) => item.kind === trashFilter.value);
+});
 const seenTaskMessages = ref(new Set());
 const recentTasks = ref([]);
 const achievements = ref([]);
@@ -93,10 +322,21 @@ const cardFolders = ref([]);
 const cardTree = ref(null);
 const expandedCardFolders = ref(new Set());
 const cards = ref([]);
+const clothesFolders = ref([]);
+const clothesTree = ref(null);
+const expandedClothesFolders = ref(new Set());
+const clothesCards = ref([]);
+const selectedClothesFolder = ref("");
+const selectedClothesDetailPath = ref("");
+const selectedClothesDetail = ref(null);
+const clothesDetailTab = ref("详情");
+const clothesSearch = ref("");
+const clothesSort = ref("name");
 const cardDependencyFilter = ref("all");
 const selectedCardFolder = ref("");
 const selectedCardDetailPath = ref("");
 const characterSideMode = ref("tree");
+const clothesSideMode = ref("tree");
 const cardBulkMode = ref(false);
 const selectedCardProfile = ref(null);
 const selectedCardDependencies = ref([]);
@@ -111,15 +351,57 @@ const exportingPortablePackage = ref(false);
 const portablePackageDir = ref("");
 const portablePackageCompress = ref(true);
 const PORTABLE_PACKAGE_TYPES = [
-  { key: "face", label: "面部与五官", marker: "脸", description: "脸型、眉眼、妆容与面部细节" },
-  { key: "hair", label: "发型", marker: "发", description: "前发、后发、侧发与扩展发型" },
-  { key: "body", label: "身体与肌肤", marker: "身", description: "身体肌肤、细节、晒痕与人体彩绘" },
-  { key: "clothes", label: "服装", marker: "衣", description: "上衣、下装、内衣、袜子与鞋子" },
-  { key: "accessory", label: "配饰", marker: "饰", description: "头部、脸部、身体与四肢配饰" }
+  { key: "face", label: "面部与五官", description: "脸型、眉眼、妆容与面部细节" },
+  { key: "hair", label: "发型", description: "前发、后发、侧发与扩展发型" },
+  { key: "body", label: "身体与肌肤", description: "身体肌肤、细节、晒痕与人体彩绘" },
+  { key: "clothes", label: "服装", description: "上衣、下装、内衣、袜子与鞋子" },
+  { key: "accessory", label: "配饰", description: "头部、脸部、身体与四肢配饰" }
 ];
 const portablePackageTypes = ref(PORTABLE_PACKAGE_TYPES.map((type) => type.key));
 const portablePackagePrompt = reactive({ open: false, draftDir: "", compress: true, types: [], error: "" });
 const portablePackageNotice = reactive({ type: "", message: "", path: "" });
+const CARD_LOAD_OPTIONS = [
+  { key: "face", label: "脸部", description: "脸型、眉眼、妆容与面部细节" },
+  { key: "body", label: "身体", description: "身体比例、肌肤、细节与彩绘" },
+  { key: "hair", label: "头发", description: "后发、前发、侧发与扩展发型" },
+  { key: "clothes", label: "衣服", description: "服装栏位；不会改变配饰" },
+  { key: "accessory", label: "装饰", description: "配饰栏位；不会改变衣服" },
+  { key: "parameter", label: "人物设定", description: "姓名、性格、生日、声线等参数" }
+];
+const cardLoadPrompt = reactive({
+  open: false,
+  busy: false,
+  error: "",
+  selected: CARD_LOAD_OPTIONS.map((option) => option.key)
+});
+const cardLoadNotice = reactive({ type: "", message: "" });
+const cardDependencyRemote = reactive({
+  loading: false,
+  error: "",
+  byGuid: {},
+  busyGuids: {},
+  notices: {},
+  installingAll: false,
+  taskIds: {},
+  taskGuids: {},
+  progress: {},
+  statuses: {},
+  phase: "",
+  phaseProgress: 0,
+  downloadSpeedBps: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
+  currentFile: "",
+  allTaskId: "",
+  allProgress: 0,
+  allStatus: "",
+  allPhase: "",
+  allPhaseProgress: 0,
+  allDownloadSpeedBps: 0,
+  allDownloadedBytes: 0,
+  allTotalBytes: 0,
+  allCurrentFile: ""
+});
 const replacingCardCover = ref(false);
 const cardCoverNotice = reactive({ type: "", message: "" });
 const cardCoverCrop = reactive({
@@ -140,6 +422,7 @@ const cardTagPrompt = reactive({
   error: "",
   draft: "",
   selected: [],
+  current: [],
   available: []
 });
 const bulkCardTagPrompt = reactive({
@@ -165,6 +448,8 @@ const cardTagFilter = reactive({
   libraryCards: []
 });
 let cardTagLibraryRequestId = 0;
+let clothesListRequestId = 0;
+let clothesIndexRetryTimer = 0;
 const selectedCardProfileError = ref("");
 const cardProfileEditor = reactive({
   editing: false,
@@ -187,11 +472,162 @@ const cardLibrary = reactive({
   validGameDir: false,
   root: ""
 });
+const clothesLibrary = reactive({
+  checked: false,
+  loading: false,
+  loadingMore: false,
+  detailLoading: false,
+  error: "",
+  validGameDir: false,
+  root: "",
+  total: null,
+  totalIsCandidate: true,
+  indexing: false,
+  nextOffset: 0,
+  hasMore: false
+});
 
-const ITEM_PAGE_SIZE = 500;
+// Keep each incremental response small. The compact item view virtualizes its
+// DOM window, so this controls request/JSON work rather than rendered nodes.
+const ITEM_PAGE_SIZE = 96;
+// The grid is image-first. LazyThumbnail still requests only rows near the
+// viewport; card payload parsing happens only when a user opens a detail view.
+const CLOTHES_CARD_PAGE_SIZE = 96;
 const MOD_PAGE_SIZE = 200;
 const UNKNOWN_AUTHOR_LABEL = "未知作者";
 const POSE_ITEM_KIND_CODES = new Set(["500", "501"]);
+const MAP_SCENE_KIND = "__map_scene__";
+const GAME_MAP_SCENE_KIND = "__game_map_scene__";
+const DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__";
+const MAP_SCENE_KIND_CODES = new Set([MAP_SCENE_KIND, GAME_MAP_SCENE_KIND, DUAL_MAP_SCENE_KIND]);
+const MAP_SCENE_FILTER_KIND = "__map_filter__";
+const MAP_SCENE_FILTER_KINDS = [MAP_SCENE_FILTER_KIND];
+const GAME_CLOTHING_CATEGORY_NOS = new Set([
+  "140", "141", "144", "147",
+  "240", "241", "242", "243", "244", "245", "246", "247"
+]);
+const GAME_CLOTHING_SLOT_LABELS = {
+  140: "上衣",
+  141: "下衣",
+  144: "手套",
+  147: "鞋子",
+  240: "上衣",
+  241: "下衣",
+  242: "内衣",
+  243: "内裤",
+  244: "手套",
+  245: "裤袜",
+  246: "袜子",
+  247: "鞋子"
+};
+const GAME_ACCESSORY_CATEGORY_NOS = new Set([
+  "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "361", "362", "363"
+]);
+const GAME_HAIR_CATEGORY_NOS = new Set(["300", "301", "302", "303"]);
+const GAME_FACE_CATEGORY_NOS = new Set([
+  "110", "111", "112", "121", "210", "211", "212",
+  "314", "315", "316", "317", "318", "319", "320", "322", "323"
+]);
+const GAME_FACE_EYE_CATEGORY_NOS = new Set(["317", "318"]);
+const GAME_BODY_CATEGORY_NOS = new Set([
+  "8", "131", "132", "133",
+  "231", "232", "233", "313", "334", "335"
+]);
+const GAME_BODY_PAINT_CATEGORY_NOS = new Set(["8", "313"]);
+const GAME_BODY_SLOT_LABELS = {
+  8: "身体彩绘",
+  131: "身体肌肤",
+  132: "身体细节",
+  133: "身体晒痕",
+  231: "身体肌肤",
+  232: "身体细节",
+  233: "身体晒痕",
+  313: "身体彩绘",
+  334: "乳头",
+  335: "阴毛"
+};
+const GAME_BODY_PAINT_SLOT_OPTIONS = [
+  { value: 0, label: "彩绘层 1" },
+  { value: 1, label: "彩绘层 2" }
+];
+const GAME_HAIR_SLOT_OPTIONS = [
+  { value: 0, categoryNo: 300, label: "后发", apiName: "HairBack" },
+  { value: 1, categoryNo: 301, label: "前发", apiName: "HairFront" },
+  { value: 2, categoryNo: 302, label: "侧发", apiName: "HairSide" },
+  { value: 3, categoryNo: 303, label: "扩展发", apiName: "HairOption" }
+];
+const GAME_CURRENT_SLOT_LABELS = {
+  8: "身体彩绘",
+  110: "脸模",
+  111: "脸部肌肤",
+  112: "脸部细节",
+  121: "胡子",
+  131: "身体肌肤",
+  132: "身体细节",
+  133: "身体晒痕",
+  210: "脸模",
+  211: "脸部肌肤",
+  212: "脸部细节",
+  231: "身体肌肤",
+  232: "身体细节",
+  233: "身体晒痕",
+  313: "身体彩绘",
+  314: "眉毛",
+  315: "睫毛",
+  316: "眼影",
+  317: "美瞳",
+  318: "瞳孔",
+  319: "眼睛高光",
+  320: "腮红",
+  322: "口红",
+  323: "痣/雀斑",
+  334: "乳头",
+  335: "阴毛"
+};
+const GAME_FACE_SLOT_LABELS = {
+  110: "脸模",
+  111: "脸部肌肤",
+  112: "脸部细节",
+  121: "胡子",
+  210: "脸模",
+  211: "脸部肌肤",
+  212: "脸部细节",
+  314: "眉毛",
+  315: "睫毛",
+  316: "眼影",
+  317: "美瞳",
+  318: "瞳孔",
+  319: "眼睛高光",
+  320: "腮红",
+  322: "口红",
+  323: "痣/雀斑"
+};
+const GAME_ACCESSORY_SLOT_LABELS = {
+  351: "头部",
+  352: "耳朵",
+  353: "眼镜",
+  354: "脸部",
+  355: "脖子",
+  356: "肩部",
+  357: "胸部",
+  358: "腰部",
+  359: "后背",
+  360: "胯部",
+  361: "手部",
+  362: "腿部",
+  363: "脚部"
+};
+const GAME_CURRENT_GROUPS = [
+  { key: "clothes", label: "服装栏位", description: "上衣、下衣、内衣与鞋袜" },
+  { key: "hairs", label: "头发栏位", description: "后发、前发、侧发与扩展发" },
+  { key: "faces", label: "面部栏位", description: "脸模、眼睛与妆容细节" },
+  { key: "bodies", label: "身体栏位", description: "身体肌肤、彩绘与身体细节" },
+  { key: "accessories", label: "配饰栏位", description: "角色当前占用的配饰槽" }
+];
+const GAME_ACCESSORY_SLOT_OPTIONS = Array.from({ length: 20 }, (_, slotNo) => ({
+  value: slotNo,
+  label: `配饰槽 ${slotNo + 1}（slotNo ${slotNo}）`
+}));
 const PERSONALITY_LABELS = [
   "\u9177\u59b9",
   "\u6807\u51c6",
@@ -210,14 +646,18 @@ const PERSONALITY_LABELS = [
 ];
 const personalityOptions = PERSONALITY_LABELS.map((label, value) => ({ label, value }));
 const ITEM_KIND_LABELS = {
+  [MAP_SCENE_FILTER_KIND]: "地图",
+  [MAP_SCENE_KIND]: "地图 / 工作室",
+  [GAME_MAP_SCENE_KIND]: "地图 / 本体",
+  [DUAL_MAP_SCENE_KIND]: "地图 / 本体 + 工作室",
   8: "男/身体/人体彩绘",
   110: "男/面部/眼睛",
   111: "男/面部/眉毛",
   112: "男/面部/睫毛",
   121: "男/面部/胡子",
-  131: "男/面部/腮红",
-  132: "男/面部/口红",
-  133: "男/面部/痣",
+  131: "男/身体/身体肌肤",
+  132: "男/身体/身体细节",
+  133: "男/身体/身体晒痕",
   140: "男/服饰/上衣",
   141: "男/服饰/下衣",
   144: "男/服饰/手套",
@@ -270,6 +710,67 @@ const ITEM_KIND_LABELS = {
   501: "女姿势"
 };
 
+// The top bar is intentionally a small taxonomy rather than a dump of every
+// database Kind. A category opens the second level, where the concrete Kinds
+// are shown as selectable children.
+const TOPBAR_KIND_GROUPS = [
+  {
+    key: "female",
+    label: "女性",
+    tone: "female",
+    categories: [
+      { key: "face", label: "面部", kinds: ["210", "211", "212", "314", "315", "316", "317", "318", "319", "320", "322", "323"] },
+      { key: "body", label: "身体", kinds: ["231", "232", "233", "313", "334", "335"] },
+      { key: "clothes", label: "服饰", kinds: ["240", "241", "242", "243", "244", "245", "246", "247"] },
+      { key: "pose", label: "姿势", kinds: ["501"] }
+    ]
+  },
+  {
+    key: "male",
+    label: "男性",
+    tone: "male",
+    categories: [
+      { key: "face", label: "面部", kinds: ["110", "111", "112", "121"] },
+      { key: "body", label: "身体", kinds: ["8", "131", "132", "133"] },
+      { key: "clothes", label: "服饰", kinds: ["140", "141", "144", "147"] },
+      { key: "pose", label: "姿势", kinds: ["500"] }
+    ]
+  },
+  {
+    key: "common",
+    label: "通用",
+    tone: "common",
+    categories: [
+      { key: "hair", label: "头发", kinds: ["300", "301", "302", "303"] },
+      { key: "accessory", label: "饰品", kinds: ["351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "361", "362", "363"] }
+    ]
+  },
+  {
+    key: "other",
+    label: "其它",
+    tone: "neutral",
+    categories: [
+      { key: "map", label: "地图", kinds: [MAP_SCENE_FILTER_KIND] },
+      { key: "pattern", label: "图案", kinds: ["348"] }
+    ]
+  }
+];
+
+const TOPBAR_KIND_ICON_URLS = {
+  "240": itemKindTop,
+  "241": itemKindBottom,
+  "242": itemKindUnderwear,
+  "243": itemKindPanties,
+  "244": itemKindGloves,
+  "245": itemKindTights,
+  "246": itemKindSocks,
+  "247": itemKindShoes
+};
+
+function topbarKindIcon(kind) {
+  return TOPBAR_KIND_ICON_URLS[String(kind)] || "";
+}
+
 function svgDataUrl(svg) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
@@ -311,13 +812,198 @@ const POSE_ITEM_THUMBNAILS = {
   <text x="14" y="24" fill="#55233a" font-family="Verdana, sans-serif" font-size="14" font-weight="700">F</text>
 </svg>`)
 };
+const MAP_SCENE_THUMBNAIL = svgDataUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="8" x2="84" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1c4b67"/>
+      <stop offset="1" stop-color="#9b77d8"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="14" fill="url(#bg)"/>
+  <path d="M13 66 33 43l15 16 14-23 21 30v16H13Z" fill="#d9f4ff" opacity=".92"/>
+  <path d="m22 67 11-24 8 16 12-29 8 29 14-11" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="72" cy="23" r="8" fill="#dffbff" opacity=".9"/>
+  <text x="13" y="27" fill="#fff" font-family="Verdana, sans-serif" font-size="13" font-weight="700">MAP</text>
+</svg>`);
 const itemRows = ref([]);
 const modRows = ref([]);
 const selectedItem = ref(null);
+const itemContextMenu = reactive({ open: false, x: 0, y: 0, item: null });
+const itemAccessoryPrompt = reactive({ open: false, item: null, slotNo: 0, busy: false, error: "" });
+const itemGameApply = reactive({ busy: false, itemId: null, commandId: "", status: "", error: "" });
+const itemGameNotice = reactive({ type: "", message: "" });
+const itemFacePrompt = reactive({ open: false, item: null, facePartNo: 0, busy: false, error: "" });
+const itemBodyPrompt = reactive({ open: false, item: null, bodyPartNo: 0, busy: false, error: "" });
+const assemblyMode = ref(false);
+watch([isItemLibraryView, assemblyMode], () => {
+  if (!isItemLibraryView.value || assemblyMode.value) {
+    itemKindLevel.value = "categories";
+    itemKindCategory.value = "";
+  }
+});
+const assemblyTargetSlot = reactive({
+  active: false,
+  groupKey: "",
+  partIndex: null,
+  categoryNo: null,
+  label: "",
+  accessorySlotNo: null,
+  hairSlotNo: null,
+  facePartNo: null,
+  bodyPartNo: null
+});
+const currentGameState = reactive({
+  loading: false,
+  error: "",
+  available: false,
+  source: "",
+  characterId: 0,
+  sex: 0,
+  characterName: "",
+  characterFileName: "",
+  coordinateName: "",
+  hairs: [],
+  clothes: [],
+  faces: [],
+  bodies: [],
+  accessories: []
+});
+const assemblyContext = reactive({
+  loading: false,
+  error: "",
+  available: false,
+  scene: "none",
+  editor: null,
+  hscene: {
+    available: false,
+    femaleCount: 0,
+    maleCount: 0,
+    totalCount: 0,
+    females: [],
+    males: []
+  }
+});
+const assemblyCharacterTarget = reactive({
+  target: "editor",
+  sex: null,
+  characterIndex: null,
+  characterId: null
+});
+const assemblyCharacterPickerOpen = ref(false);
+
+function assemblySexLabel(sex) {
+  const value = Number(sex);
+  return value === 1 ? "女性" : value === 0 ? "男性" : "未知";
+}
+
+function isAssemblyCharacterSelected(option) {
+  if (option.target === "editor") return assemblyCharacterTarget.target === "editor";
+  return assemblyCharacterTarget.target === "hscene"
+    && assemblyCharacterTarget.sex === option.character?.sex
+    && assemblyCharacterTarget.characterIndex === option.character?.characterIndex
+    && assemblyCharacterTarget.characterId === option.character?.characterId;
+}
+
+const assemblyCharacterOptions = computed(() => {
+  const options = [];
+  if (assemblyContext.editor?.available) {
+    options.push({
+      key: "editor",
+      target: "editor",
+      character: null,
+      name: assemblyContext.editor.characterName || "角色编辑器角色",
+      meta: `角色编辑器 · ${assemblySexLabel(assemblyContext.editor.sex)}`
+    });
+  }
+  if (assemblyContext.scene === "hscene") {
+    for (const character of assemblyContext.hscene?.females || []) {
+      options.push({
+        key: `female-${character.characterIndex}-${character.characterId}`,
+        target: "hscene",
+        character,
+        name: character.characterName || `女性角色 ${character.characterIndex + 1}`,
+        meta: `女性 · 角色 ${character.characterIndex + 1}`
+      });
+    }
+    for (const character of assemblyContext.hscene?.males || []) {
+      options.push({
+        key: `male-${character.characterIndex}-${character.characterId}`,
+        target: "hscene",
+        character,
+        name: character.characterName || `男性角色 ${character.characterIndex + 1}`,
+        meta: `男性 · 角色 ${character.characterIndex + 1}`
+      });
+    }
+  }
+  return options;
+});
+
+const selectedAssemblyCharacter = computed(() => (
+  assemblyCharacterOptions.value.find(isAssemblyCharacterSelected)
+  || assemblyCharacterOptions.value[0]
+  || { name: "未选择角色", meta: "等待角色信息同步", target: "none", character: null }
+));
+
+const assemblyStatusNotice = computed(() => {
+  const itemMessage = String(itemGameNotice.message || "").trim();
+  const syncMessage = currentGameState.available
+    ? String(currentGameState.error || "").trim()
+    : "";
+  if (!itemMessage && !syncMessage) return null;
+  const itemType = String(itemGameNotice.type || "info");
+  const hasSyncIssue = Boolean(syncMessage);
+  const tone = itemType === "error" || hasSyncIssue ? "error" : itemType;
+  return {
+    tone,
+    title: hasSyncIssue && itemMessage ? "同步与操作提示" : hasSyncIssue ? "同步异常" : itemType === "error" ? "换装失败" : "操作提示",
+    message: syncMessage || itemMessage,
+    detail: hasSyncIssue && itemMessage
+      ? `最近操作：${itemMessage}`
+      : hasSyncIssue
+        ? "已保留最近一次成功同步的数据。"
+        : "",
+    showRetry: hasSyncIssue,
+    showClose: Boolean(itemMessage)
+  };
+});
+
+function toggleAssemblyCharacterPicker() {
+  if (!assemblyContext.available || !assemblyCharacterOptions.value.length) return;
+  assemblyCharacterPickerOpen.value = !assemblyCharacterPickerOpen.value;
+}
+
+async function handleAssemblyCharacterSelect(option) {
+  if (!option) return;
+  const selected = await selectAssemblyCharacter(option.target, option.character);
+  if (selected) assemblyCharacterPickerOpen.value = false;
+}
+
+watch(assemblyMode, () => {
+  assemblyCharacterPickerOpen.value = false;
+});
+
+watch([
+  () => assemblyContext.scene,
+  () => assemblyContext.available,
+  () => currentGameState.available
+], () => {
+  assemblyCharacterPickerOpen.value = false;
+});
+let currentGameStatePollTimer = null;
+let currentGameStateRequestSeq = 0;
 const selectedMod = ref(null);
+const workbenchTemplateSelection = reactive({
+  active: false,
+  busy: false,
+  error: "",
+  request: null,
+  result: null
+});
 const modBulkMode = ref(false);
 const selectedModIds = ref(new Set());
 const modAuthorFilterOpen = ref(false);
+const itemAuthorFilterOpen = ref(false);
 const selectedModItems = ref([]);
 const selectedModItemsLoading = ref(false);
 const selectedModItemsError = ref("");
@@ -341,14 +1027,16 @@ const itemFilters = reactive({
   search: "",
   kind: "",
   author: "",
-  status: ""
+  status: "",
+  source: ""
 });
 let itemFilterTimer = null;
 let modFilterTimer = null;
 let itemRowsRequestSeq = 0;
 const repairingUnity3dPath = ref("");
 const repairingThumbnailItemId = ref(null);
-const exportingFbxItemId = ref(null);
+const openingUnity3dItemId = ref(null);
+const exportingUnity3dItemId = ref(null);
 const deletingItemId = ref(null);
 const bulkActionBusy = ref("");
 const cleaningDuplicateZipmods = ref(false);
@@ -412,6 +1100,12 @@ const cardDeletePrompt = reactive({
   busy: false,
   error: ""
 });
+const cardSingleDeletePrompt = reactive({
+  open: false,
+  busy: false,
+  error: "",
+  card: null
+});
 const cardMovePrompt = reactive({
   open: false,
   busy: false,
@@ -444,7 +1138,11 @@ const missingItemPrompt = reactive({
   open: false,
   name: "",
   modId: "",
-  property: ""
+  property: "",
+  remoteLoading: false,
+  remoteCandidate: null,
+  remoteEntry: null,
+  remoteError: ""
 });
 const bulkOrganizePrompt = reactive({
   open: false,
@@ -520,6 +1218,12 @@ const cardTagFilterSuggestions = computed(() => {
     .sort((left, right) => left.localeCompare(right, "zh-CN"));
   return query ? matchedTags.slice(0, 12) : matchedTags;
 });
+const cardTagPromptLibraryTags = computed(() => {
+  const query = cardTagPrompt.draft.trim().toLocaleLowerCase();
+  return uniqueCardTags(cardTagPrompt.available)
+    .filter((tag) => !query || tag.toLocaleLowerCase().includes(query))
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+});
 const visibleCards = computed(() => {
   if (cardDependencyFilter.value === "missing") {
     return cards.value.filter((card) => Number(card.missingCount || 0) > 0);
@@ -553,6 +1257,34 @@ const cardBrowserCountText = computed(() => {
 });
 const selectedCardDetail = computed(() => {
   return visibleCards.value.find((card) => card.absolutePath === selectedCardDetailPath.value) || null;
+});
+const visibleClothesCards = computed(() => {
+  const query = String(clothesSearch.value || "").trim().toLocaleLowerCase();
+  const filtered = query
+    ? clothesCards.value.filter((card) => [card.name, card.filename, card.relativePath]
+      .some((value) => String(value || "").toLocaleLowerCase().includes(query)))
+    : [...clothesCards.value];
+  return filtered.sort((left, right) => {
+    if (clothesSort.value === "modified") return right.modifiedTimestamp - left.modifiedTimestamp;
+    if (clothesSort.value === "size") return right.fileSize - left.fileSize;
+    return String(left.name || "").localeCompare(String(right.name || ""), "zh-CN", { numeric: true });
+  });
+});
+const selectedClothesCard = computed(() => (
+  selectedClothesDetail.value
+  || clothesCards.value.find((card) => card.relativePath === selectedClothesDetailPath.value)
+  || null
+));
+const selectedClothesFolderRow = computed(() => (
+  clothesFolders.value.find((folder) => folder.relativePath === selectedClothesFolder.value) || null
+));
+const clothesCardCountText = computed(() => {
+  const total = clothesLibrary.total ?? selectedClothesFolderRow.value?.count;
+  if (Number.isFinite(Number(total)) && Number(total) > clothesCards.value.length) {
+    const prefix = clothesLibrary.totalIsCandidate ? "候选 " : "";
+    return `${prefix}${clothesCards.value.length} / ${Number(total)}`;
+  }
+  return String(clothesCards.value.length);
 });
 const visibleCardPaths = computed(() => visibleCards.value.map((card) => card.absolutePath).filter(Boolean));
 const visibleSelectedCardCount = computed(() => visibleCardPaths.value.filter((path) => selectedCards.value.has(path)).length);
@@ -639,7 +1371,7 @@ const importResultGroups = computed(() => {
         title: item.target_path?.split(/[\\/]/).pop() || "角色卡",
         meta: "AIS/HS2 PNG",
         detail: item.target_path || "",
-        note: item.source_path ? `来源：${item.source_path}` : "已复制到 UserData/chara/female"
+        note: item.source_path ? `来源：${item.source_path}` : "已复制到 UserData/chara/female/imported"
       }))
     },
     {
@@ -732,6 +1464,15 @@ const bulkAuthorSuggestions = computed(() => {
   return matched.slice(0, 40);
 });
 const itemAuthorOptions = computed(() => ["", ...itemFilterAuthors.value, UNKNOWN_AUTHOR_LABEL]);
+const filteredItemAuthorOptions = computed(() => {
+  const query = String(itemFilters.author || "").trim().toLowerCase();
+  const options = itemAuthorOptions.value;
+  if (!query) return options;
+  return options.filter((author) => {
+    const label = author || "全部作者";
+    return label.toLowerCase().includes(query);
+  });
+});
 const itemKindOptions = computed(() => {
   const genderOrder = { male: 0, female: 1, neutral: 2 };
   const categoryOrder = {
@@ -741,7 +1482,8 @@ const itemKindOptions = computed(() => {
     "\u5934\u53d1": 3,
     "\u9970\u54c1": 4
   };
-  const options = itemFilterKinds.value.map((kind, sourceIndex) => {
+  const databaseKinds = itemFilterKinds.value.filter((kind) => !MAP_SCENE_KIND_CODES.has(String(kind)));
+  const options = [...MAP_SCENE_FILTER_KINDS, ...databaseKinds].map((kind, sourceIndex) => {
     const label = itemKindLabel(kind);
     const gender = label.startsWith("\u2642")
       ? "male"
@@ -766,6 +1508,67 @@ const itemKindOptions = computed(() => {
   ));
   return [{ value: "", label: "全部 Kind", gender: "all" }, ...options];
 });
+const workbenchItemCategoryOptions = computed(() => {
+  const options = [
+    ...itemKindOptions.value,
+    ...Object.keys(ITEM_KIND_LABELS)
+      .filter((kind) => /^\d+$/.test(String(kind)))
+      .map((kind) => ({ value: kind, label: itemKindLabel(kind) }))
+  ];
+  const seen = new Set();
+  return options.filter((option) => {
+    const value = String(option?.value || "").trim();
+    if (!value || value.startsWith("__") || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+});
+
+const activeTopbarKindGroup = computed(() => (
+  TOPBAR_KIND_GROUPS.find((group) => group.key === itemKindGroup.value) || TOPBAR_KIND_GROUPS[0]
+));
+const activeTopbarKindCategory = computed(() => (
+  activeTopbarKindGroup.value.categories.find((category) => category.key === itemKindCategory.value) || null
+));
+const activeTopbarKindChildren = computed(() => (
+  activeTopbarKindCategory.value?.kinds.map((kind) => ({
+    value: kind,
+    label: kind === MAP_SCENE_FILTER_KIND ? "地图" : String(ITEM_KIND_LABELS[kind] || kind).split("/").pop()
+  })) || []
+));
+
+function topbarKindFilterIsActive(kind) {
+  return String(itemFilters.kind || "") === String(kind || "");
+}
+
+function resetTopbarKindNavigation() {
+  itemKindLevel.value = "categories";
+  itemKindCategory.value = "";
+}
+
+function openTopbarKindCategory(group, category) {
+  itemKindGroup.value = group.key;
+  itemKindCategory.value = category.key;
+  if (category.kinds.length === 1) {
+    // 地图、图案本身就是末级类别，不需要再打开一个空的二级页面。
+    itemKindLevel.value = "categories";
+    selectTopbarKindChild(category.kinds[0]);
+    return;
+  }
+  itemKindLevel.value = "children";
+}
+
+function selectTopbarKindChild(kind) {
+  itemFilters.kind = String(kind);
+  void applyItemFilters();
+}
+
+function clearTopbarKindFilter() {
+  itemFilters.kind = "";
+  resetTopbarKindNavigation();
+  void applyItemFilters();
+}
+
 const selectedModDiagnosticGroups = computed(() => {
   const issues = selectedModDiagnostics.value?.issues || [];
   return issues.map((issue) => ({
@@ -873,16 +1676,14 @@ const overviewSummaryCards = computed(() => {
       key: "cards",
       label: "人物卡",
       value: stats.cards,
-      caption: "AIS PNG",
       action: "characters"
     });
   }
-  if (modDatabase.checked && modDatabase.exists && Number.isFinite(stats.zipmods)) {
+  if (modDatabase.checked && modDatabase.exists && Number.isFinite(modDatabase.total)) {
     cards.push({
       key: "zipmods",
       label: "模组",
-      value: stats.zipmods,
-      caption: "本地索引",
+      value: modDatabase.total,
       action: "mods",
       libraryMode: "mods"
     });
@@ -891,8 +1692,7 @@ const overviewSummaryCards = computed(() => {
     cards.push({
       key: "items",
       label: "物品",
-      value: stats.modItems,
-      caption: "模组物品",
+      value: Number(stats.modItems || 0) + Number(stats.builtinItems || 0),
       action: "mods",
       libraryMode: "items"
     });
@@ -927,6 +1727,269 @@ function mapCharacterCardRows(rows) {
     rating: Math.min(5, Math.max(0, Number(card.rating) || 0)),
     tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : []
   }));
+}
+
+function mapClothesCardRows(rows) {
+  return (rows || []).map((card) => ({
+    id: card.id,
+    name: card.name || card.filename,
+    filename: card.filename,
+    absolutePath: card.absolute_path,
+    relativePath: card.relative_path,
+    directory: card.directory || "",
+    thumbnailUrl: backendAssetUrl(card.thumbnail_url),
+    coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    modifiedTimestamp: Number(card.modified_at || 0),
+    fileSize: Number(card.file_size || 0),
+    clothesPartCount: Number(card.clothes_part_count || 0),
+    accessoryPartCount: Number(card.accessory_part_count || 0),
+    dependencyCount: Number(card.dependency_count || 0),
+    pluginCount: Number(card.plugin_count || 0)
+  }));
+}
+
+function flattenClothesTree(node, depth = 0, expanded = expandedClothesFolders.value) {
+  if (!node) return [];
+  const relativePath = node.relative_path || "";
+  const children = Array.isArray(node.children) ? node.children : [];
+  const hasChildren = Boolean(node.has_children || children.length);
+  const row = {
+    id: node.id,
+    name: node.name,
+    relativePath,
+    count: Number(node.count || 0),
+    countIsCandidate: Boolean(node.count_is_candidate),
+    depth,
+    hasChildren,
+    expanded: hasChildren && expanded.has(relativePath)
+  };
+  if (!row.expanded) return [row];
+  return [row, ...children.flatMap((child) => flattenClothesTree(child, depth + 1, expanded))];
+}
+
+function collectExpandableClothesFolderPaths(node, output = new Set()) {
+  if (!node) return output;
+  const children = Array.isArray(node.children) ? node.children : [];
+  if (node.has_children || children.length) output.add(node.relative_path || "");
+  for (const child of children) collectExpandableClothesFolderPaths(child, output);
+  return output;
+}
+
+function refreshVisibleClothesFolders() {
+  clothesFolders.value = flattenClothesTree(clothesTree.value);
+}
+
+function resetClothesTree() {
+  clothesTree.value = null;
+  clothesFolders.value = [];
+  expandedClothesFolders.value = new Set();
+}
+
+function toggleClothesFolder(folder) {
+  if (!folder?.hasChildren) return;
+  const next = new Set(expandedClothesFolders.value);
+  if (next.has(folder.relativePath)) next.delete(folder.relativePath);
+  else next.add(folder.relativePath);
+  expandedClothesFolders.value = next;
+  refreshVisibleClothesFolders();
+}
+
+async function selectClothesFolder(relativePath = "") {
+  const requestId = ++clothesListRequestId;
+  window.clearTimeout(clothesIndexRetryTimer);
+  clothesIndexRetryTimer = 0;
+  selectedClothesFolder.value = relativePath || "";
+  selectedClothesDetailPath.value = "";
+  selectedClothesDetail.value = null;
+  clothesDetailTab.value = "详情";
+  clothesCards.value = [];
+  clothesLibrary.total = selectedClothesFolderRow.value?.count ?? null;
+  clothesLibrary.totalIsCandidate = true;
+  clothesLibrary.indexing = false;
+  clothesLibrary.nextOffset = 0;
+  clothesLibrary.hasMore = false;
+  clothesLibrary.loadingMore = false;
+  if (!backendReady.value || !paths.gameDir || !clothesLibrary.validGameDir) return;
+
+  clothesLibrary.loading = true;
+  clothesLibrary.error = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/clothes?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedClothesFolder.value)}&offset=0&limit=${CLOTHES_CARD_PAGE_SIZE}`
+    );
+    if (requestId !== clothesListRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "服装卡列表读取失败");
+    clothesCards.value = mapClothesCardRows(result.cards);
+    if (result.total != null) {
+      clothesLibrary.total = Number(result.total);
+      clothesLibrary.totalIsCandidate = Boolean(result.total_is_candidate);
+    }
+    clothesLibrary.indexing = Boolean(result.indexing);
+    clothesLibrary.nextOffset = clothesCards.value.length;
+    clothesLibrary.hasMore = Boolean(result.has_more);
+    if (clothesLibrary.indexing && clothesCards.value.length < CLOTHES_CARD_PAGE_SIZE) {
+      scheduleClothesIndexRetry(requestId);
+    }
+  } catch (error) {
+    if (requestId !== clothesListRequestId) return;
+    clothesLibrary.error = error.message;
+    clothesCards.value = [];
+    log(`[Clothes Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === clothesListRequestId) clothesLibrary.loading = false;
+  }
+}
+
+function scheduleClothesIndexRetry(requestId) {
+  window.clearTimeout(clothesIndexRetryTimer);
+  clothesIndexRetryTimer = window.setTimeout(() => {
+    clothesIndexRetryTimer = 0;
+    if (requestId !== clothesListRequestId || !clothesLibrary.indexing) return;
+    void loadMoreClothesCards();
+  }, 280);
+}
+
+async function loadMoreClothesCards() {
+  if (
+    clothesLibrary.loading
+    || clothesLibrary.loadingMore
+    || !clothesLibrary.hasMore
+    || !backendReady.value
+    || !paths.gameDir
+    || !clothesLibrary.validGameDir
+  ) return;
+
+  const requestId = clothesListRequestId;
+  const offset = clothesLibrary.nextOffset || clothesCards.value.length;
+  clothesLibrary.loadingMore = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/clothes?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedClothesFolder.value)}&offset=${offset}&limit=${CLOTHES_CARD_PAGE_SIZE}`
+    );
+    if (requestId !== clothesListRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "更多服装卡读取失败");
+    const nextCards = mapClothesCardRows(result.cards);
+    clothesCards.value = [...clothesCards.value, ...nextCards];
+    if (result.total != null) {
+      clothesLibrary.total = Number(result.total);
+      clothesLibrary.totalIsCandidate = Boolean(result.total_is_candidate);
+    }
+    clothesLibrary.indexing = Boolean(result.indexing);
+    clothesLibrary.nextOffset = offset + nextCards.length;
+    clothesLibrary.hasMore = Boolean(result.has_more);
+    if (clothesLibrary.indexing && nextCards.length < CLOTHES_CARD_PAGE_SIZE) {
+      scheduleClothesIndexRetry(requestId);
+    }
+  } catch (error) {
+    if (requestId !== clothesListRequestId) return;
+    clothesLibrary.error = error.message;
+    log(`[Clothes Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === clothesListRequestId) clothesLibrary.loadingMore = false;
+  }
+}
+
+function handleClothesCardGridScroll(event) {
+  const element = event?.currentTarget;
+  if (!element || element.scrollHeight - element.scrollTop - element.clientHeight > 900) return;
+  void loadMoreClothesCards();
+}
+
+async function loadClothesTree() {
+  if (clothesLibrary.loading) return;
+  clothesLibrary.checked = true;
+  clothesLibrary.loading = true;
+  clothesLibrary.error = "";
+  if (!backendReady.value || !paths.gameDir) {
+    clothesLibrary.validGameDir = false;
+    clothesCards.value = [];
+    resetClothesTree();
+    clothesLibrary.loading = false;
+    return;
+  }
+
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/clothes/tree?game_dir=${encodeQuery(paths.gameDir)}`
+    );
+    if (!result?.ok) throw new Error(result?.error || "服装卡目录读取失败");
+    clothesLibrary.validGameDir = Boolean(result.is_valid_game_dir);
+    clothesLibrary.root = result.root || "";
+    if (!clothesLibrary.validGameDir) {
+      clothesLibrary.error = result.error || "未找到 UserData/coordinate 服装卡目录";
+      clothesCards.value = [];
+      resetClothesTree();
+      return;
+    }
+    clothesTree.value = result.tree || null;
+    expandedClothesFolders.value = collectExpandableClothesFolderPaths(clothesTree.value);
+    refreshVisibleClothesFolders();
+    const folderExists = clothesFolders.value.some((folder) => folder.relativePath === selectedClothesFolder.value);
+    await selectClothesFolder(folderExists ? selectedClothesFolder.value : "");
+  } catch (error) {
+    clothesLibrary.validGameDir = false;
+    clothesLibrary.error = error.message;
+    clothesCards.value = [];
+    resetClothesTree();
+    log(`[Clothes Cards Error] ${error.message}`);
+  } finally {
+    clothesLibrary.loading = false;
+  }
+}
+
+async function ensureClothesLibraryLoaded({ force = false } = {}) {
+  if (!backendReady.value || !paths.gameDir) return false;
+  if (!force && clothesLibrary.checked && clothesLibrary.validGameDir && clothesTree.value) return true;
+  if (clothesLibrary.loading) return false;
+  await loadClothesTree();
+  return clothesLibrary.validGameDir && Boolean(clothesTree.value);
+}
+
+async function refreshClothesCards() {
+  if (clothesLibrary.loading || !clothesLibrary.validGameDir) return;
+  await ensureClothesLibraryLoaded({ force: true });
+}
+
+async function handleClothesCardClick(card) {
+  if (!card?.relativePath || clothesLibrary.detailLoading) return;
+  clothesSideMode.value = "detail";
+  selectedClothesDetailPath.value = card.relativePath;
+  selectedClothesDetail.value = card;
+  clothesLibrary.detailLoading = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/clothes/detail?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(card.relativePath)}`
+    );
+    if (!result?.ok) throw new Error(result?.error || "服装卡详情读取失败");
+    const detail = result.card || {};
+    selectedClothesDetail.value = {
+      ...card,
+      ...detail,
+      thumbnailUrl: backendAssetUrl(detail.thumbnail_url || detail.thumbnailUrl || card.thumbnailUrl),
+      coverUrl: backendAssetUrl(detail.cover_url || detail.coverUrl || card.coverUrl),
+      dependencies: Array.isArray(detail.dependencies)
+        ? detail.dependencies.map((dependency) => ({
+            ...dependency,
+            item: dependency.item
+              ? {
+                  ...dependency.item,
+                  kind: itemKindLabel(dependency.item.kind),
+                  thumbnailUrl: backendAssetUrl(dependency.item.thumbnail_url)
+                }
+              : null
+          }))
+        : [],
+      modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString() : card.modifiedAt,
+      modifiedTimestamp: Number(detail.modified_at || card.modifiedTimestamp),
+      fileSize: Number(detail.file_size || card.fileSize)
+    };
+  } catch (error) {
+    clothesLibrary.error = error.message;
+    log(`[Clothes Card Detail Error] ${error.message}`);
+  } finally {
+    clothesLibrary.detailLoading = false;
+  }
 }
 
 async function refreshCharacterCardsAfterDatabaseBuild() {
@@ -987,12 +2050,14 @@ async function measureStep(label, action, { logStart = false } = {}) {
 
 function taskStatusLabel(task) {
   if (task.status === "completed") return "Done";
+  if (task.status === "cancelled") return "已取消";
   if (task.status === "failed") return "Error";
   return formatProgressPercent(task.progress);
 }
 
 function taskStatusClass(task) {
   if (task.status === "completed") return "ok";
+  if (task.status === "cancelled") return "danger";
   if (task.status === "failed") return "danger";
   return "warn";
 }
@@ -1043,6 +2108,10 @@ function taskSummary(task) {
     const zipmods = task.data?.stats?.primary_zipmods;
     return zipmods ? `已索引 ${zipmods} 个 zipmod` : taskHint.value;
   }
+  if (task.task_type === "build_card_database") {
+    const cards = task.data?.stats?.changed_cards;
+    return cards == null ? taskHint.value : `已重新扫描 ${cards} 张人物卡`;
+  }
   if (task.task_type === "bulk_export_zipmods") {
     const unity3dCount = task.data?.exported_unity3d_count ?? 0;
     return `已导出 ${task.data?.exported_count ?? task.data?.selected_count ?? 0} 个 zipmod，包含 ${unity3dCount} 个 unity3d`;
@@ -1066,7 +2135,7 @@ function taskSummary(task) {
     return `已添加 ${task.data?.updated_count ?? 0} 张，失败 ${task.data?.failure_count ?? 0} 张`;
   }
   if (task.task_type === "import_external_zipmods") {
-    return `导入 ${task.data?.imported_count ?? 0} 个，替换 ${task.data?.promoted_count ?? 0} 个，补入 ${task.data?.unity3d_repaired_count ?? 0} 个 unity3d，角色卡 ${task.data?.card_imported_count ?? 0} 张，服装卡 ${task.data?.coordinate_imported_count ?? 0} 张`;
+    return `导入 ${task.data?.imported_count ?? 0} 个（zip→zipmod ${task.data?.zip_renamed_count ?? 0} 个），替换 ${task.data?.promoted_count ?? 0} 个，补入 ${task.data?.unity3d_repaired_count ?? 0} 个 unity3d，角色卡 ${task.data?.card_imported_count ?? 0} 张，服装卡 ${task.data?.coordinate_imported_count ?? 0} 张`;
   }
   if (task.task_type === "bulk_update_zipmod_authors") {
     return `已更新 ${task.data?.updated_count ?? 0} 个`;
@@ -1092,7 +2161,7 @@ function rememberTask(task) {
     label: taskStatusLabel(task),
     badgeClass: taskStatusClass(task)
   };
-  recentTasks.value = [item, ...recentTasks.value.filter((entry) => entry.id !== item.id)].slice(0, 5);
+  recentTasks.value = [item, ...recentTasks.value.filter((entry) => entry.id !== item.id)];
 }
 
 function encodeQuery(value) {
@@ -1206,6 +2275,7 @@ function clearResourceStats() {
   stats.zipmodErrors = null;
   stats.zipmodWarnings = null;
   stats.modItems = null;
+  stats.builtinItems = null;
   stats.duplicateZipmods = null;
   stats.lastDatabaseBuiltAt = "";
 }
@@ -1434,7 +2504,85 @@ async function selectCardFolder(relativePath = "") {
   }
 }
 
+function rebuildCharacterCardDatabase() {
+  isBusy.value = true;
+  activeAction.value = "build_card_database";
+  taskName.value = "扫描人物卡";
+  progress.value = 1;
+  taskId.value = "queued";
+  taskHint.value = "等待人物卡扫描开始";
+
+  const scanPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
+
+    submitTaskInBackground(
+      "build_card_database",
+      { mode: "incremental" },
+      async (task) => {
+        if (task.status === "completed") {
+          settle(resolve, task);
+        } else {
+          settle(reject, new Error(task.error || "人物卡数据扫描失败"));
+        }
+      }
+    ).catch((error) => settle(reject, error));
+  });
+  return scanPromise.finally(() => {
+    isBusy.value = false;
+    activeAction.value = "";
+  });
+}
+
+async function refreshCurrentCardFolder() {
+  if (cardLibrary.loading || !cardLibrary.validGameDir || !backendReady.value || !paths.gameDir) return;
+  const currentFolder = selectedCardFolder.value;
+  cardLibrary.loading = true;
+  cardLibrary.error = "";
+
+  try {
+    const changes = await window.desktopApi?.backendRequest?.(
+      `/library/cards/changes?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(currentFolder)}`
+    );
+    if (!changes?.ok) {
+      throw new Error(changes?.error || "人物卡变动检查失败");
+    }
+    if (!changes.is_valid_game_dir) {
+      cardLibrary.validGameDir = false;
+      cardLibrary.error = changes.error || "不是有效的 HS2 目录";
+      cards.value = [];
+      return;
+    }
+
+    if (changes.changed) {
+      const changedTotal = Number(changes.changed_total || 0);
+      taskHint.value = `检测到当前目录 ${changedTotal} 张人物卡变动，正在重新扫描`;
+      log(
+        `[Cards] 当前目录检测到人物卡变动：新增 ${changes.added || 0}，删除 ${changes.removed || 0}，修改 ${changes.modified || 0}`
+      );
+      await rebuildCharacterCardDatabase();
+      await loadCardTree();
+    } else {
+      await selectCardFolder(currentFolder);
+      if (cardTagFilter.scope === "library" && cardDependencyFilter.value.startsWith("tag:")) {
+        await loadLibraryCardsByTag(cardDependencyFilter.value.slice(4));
+      }
+      log(`[Cards] 当前目录未检测到人物卡变动，已重新读取列表`);
+    }
+  } catch (error) {
+    cardLibrary.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    cardLibrary.loading = false;
+  }
+}
+
 function setLibraryMode(mode) {
+  if (mode !== "items" && assemblyMode.value) setAssemblyMode(false);
   libraryMode.value = mode;
   if (mode === "items") {
     exitModBulkMode();
@@ -1451,7 +2599,18 @@ function isPoseItemKind(kind) {
 }
 
 function itemFallbackThumbnailUrl(kind) {
-  return POSE_ITEM_THUMBNAILS[String(kind || "").trim()] || "";
+  const key = String(kind || "").trim();
+  if (MAP_SCENE_KIND_CODES.has(key)) return MAP_SCENE_THUMBNAIL;
+  return POSE_ITEM_THUMBNAILS[key] || "";
+}
+
+function setCardBrowserMode(mode) {
+  const nextMode = ["character", "clothes", "scene"].includes(String(mode))
+    ? String(mode)
+    : "character";
+  cardBrowserMode.value = nextMode;
+  activeView.value = "characters";
+  if (nextMode === "clothes") void ensureClothesLibraryLoaded();
 }
 
 function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind = "") {
@@ -1460,6 +2619,10 @@ function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind =
   if (isPoseItemKind(kind)) return "ready";
   if (thumbnailStatus && thumbnailStatus !== "ready" && thumbnailStatus !== "ok") return "thumb";
   return "ready";
+}
+
+function isMapSceneItem(item) {
+  return MAP_SCENE_KIND_CODES.has(String(item?.kindCode || item?.raw?.kind || "").trim());
 }
 
 function itemKindLabel(kind) {
@@ -1471,16 +2634,21 @@ function itemKindLabel(kind) {
 }
 
 function mapModItemRow(row) {
+  const sourceType = String(row.source_type || "mod").trim() || "mod";
+  const isBuiltin = sourceType === "builtin";
   const thumbnailUrl = backendAssetUrl(row.thumbnail_url) || itemFallbackThumbnailUrl(row.kind);
   return {
-    id: row.id,
-    zipmodId: row.zipmod_id,
+    id: isBuiltin ? `builtin:${row.id}` : row.id,
+    dbId: row.id,
+    zipmodId: row.zipmod_id || null,
+    sourceType,
+    isBuiltin,
     status: normalizeItemStatus(row.status, row.thumbnail_status, row.unity3d_status, row.kind),
     name: row.name || `(item ${row.item_id || row.id})`,
     kind: itemKindLabel(row.kind),
     kindCode: row.kind || "",
-    author: row.author || "-",
-    sourceMod: row.source_mod || row.zipmod_guid || "-",
+    author: row.author || (isBuiltin ? "游戏本体" : "-"),
+    sourceMod: row.source_mod || (isBuiltin ? "游戏本体" : row.zipmod_guid) || "-",
     thumbnailUrl,
     fallbackThumbnail: !backendAssetUrl(row.thumbnail_url) && Boolean(thumbnailUrl),
     raw: row
@@ -1493,7 +2661,8 @@ function currentErrorItemFilterPayload() {
     kind: String(itemFilters.kind || ""),
     author: String(itemFilters.author || ""),
     status: "error",
-    usage: String(dependencyUsageFilter.value || "")
+    usage: String(dependencyUsageFilter.value || ""),
+    source: "mod"
   };
 }
 
@@ -1525,8 +2694,10 @@ function normalizeZipmodStatus(row) {
   ) return "错误";
   if (
     missingAuthor ||
-    unity3dStatus === "in_game" ||
+    ["in_game", "not_in_mod"].includes(unity3dStatus) ||
+    Number(row?.unity3d_not_in_mod_count || 0) > 0 ||
     Number(row?.unity3d_in_game_count || 0) > 0 ||
+    Number(row?.unity3d_other_mod_count || 0) > 0 ||
     duplicateZipmodCount > 0 ||
     thumbnailIssueCount > 0
   ) return "警告";
@@ -1565,7 +2736,8 @@ async function loadZipmodAuthors() {
 
 async function loadItemFilters() {
   try {
-    const result = await window.desktopApi?.backendRequest?.("/mods/items/filters");
+    const query = paths.gameDir ? `?game_dir=${encodeQuery(paths.gameDir)}` : "";
+    const result = await window.desktopApi?.backendRequest?.(`/mods/items/filters${query}`);
     if (!result?.ok) return;
     itemFilterAuthors.value = Array.isArray(result.data?.authors) ? result.data.authors : [];
     itemFilterKinds.value = Array.isArray(result.data?.kinds) ? result.data.kinds : [];
@@ -1625,8 +2797,916 @@ function closeModAuthorFilterSoon() {
   }, 120);
 }
 
+function selectItemAuthorFilter(author) {
+  itemFilters.author = author;
+  itemAuthorFilterOpen.value = false;
+  applyItemFilters();
+}
+
+function closeItemAuthorFilterSoon() {
+  window.setTimeout(() => {
+    itemAuthorFilterOpen.value = false;
+  }, 120);
+}
+
 function selectItem(row) {
   selectedItem.value = row;
+  if (row?.isBuiltin) {
+    itemTab.value = "详情";
+    itemGameNotice.type = "";
+    itemGameNotice.message = "";
+  }
+}
+
+function itemGameApplySpec(item) {
+  const raw = item?.raw || {};
+  const isBuiltin = Boolean(item?.isBuiltin || raw.source_type === "builtin");
+  const categoryText = String(item?.kindCode || raw.kind || "").trim();
+  const categoryNo = Number.parseInt(categoryText, 10);
+  const guid = String(raw.zipmod_guid || "").trim();
+  const originalSlotText = String(raw.item_id ?? "").trim();
+  const originalSlot = Number.parseInt(originalSlotText, 10);
+
+  if (!Number.isSafeInteger(categoryNo) || categoryNo < 0) {
+    return { supported: false, reason: "当前物品没有可用的游戏类别编号。" };
+  }
+  const isHair = GAME_HAIR_CATEGORY_NOS.has(categoryText);
+  const isAccessory = GAME_ACCESSORY_CATEGORY_NOS.has(categoryText);
+  const isClothing = GAME_CLOTHING_CATEGORY_NOS.has(categoryText);
+  const isFace = GAME_FACE_CATEGORY_NOS.has(categoryText);
+  const isBody = GAME_BODY_CATEGORY_NOS.has(categoryText);
+  if (!isClothing && !isAccessory && !isHair && !isFace && !isBody) {
+    return { supported: false, reason: "当前插件只支持服饰、结构头发（300–303）、面部栏位、身体栏位和饰品换装；发色预设、发网格/发型选项、姿势和地图不能直接换装。" };
+  }
+  if (!/^\d+$/.test(originalSlotText) || !Number.isSafeInteger(originalSlot) || originalSlot < 0) {
+    return { supported: false, reason: `${isBuiltin ? "该原版物品的 ID" : "该物品的 CSV slot"} 不是有效的数字，无法进行严格运行时映射。` };
+  }
+  if (!isBuiltin && !guid) {
+    return { supported: false, reason: "该物品缺少模组 GUID，无法进行严格运行时映射。" };
+  }
+
+  return {
+    supported: true,
+    isBuiltin,
+    type: isHair ? "hair" : isAccessory ? "accessory" : isFace ? "face" : isBody ? "body" : "clothes",
+    categoryNo,
+    originalSlot,
+    localSlot: isBuiltin ? originalSlot : null,
+    guid,
+    hairSlotNo: isHair ? GAME_HAIR_SLOT_OPTIONS.find((option) => option.categoryNo === categoryNo)?.value ?? null : null,
+    facePartNo: null
+  };
+}
+
+function gameHairSlotOption(categoryNo) {
+  return GAME_HAIR_SLOT_OPTIONS.find((option) => option.categoryNo === Number(categoryNo)) || null;
+}
+
+function itemGameApplyLabel(item) {
+  const spec = itemGameApplySpec(item);
+  if (spec.type === "accessory") return "应用到角色配饰槽…";
+  if (spec.type === "hair") {
+    const hairSlotLabel = gameHairSlotOption(spec.categoryNo)?.label;
+    return hairSlotLabel ? `应用到${hairSlotLabel}栏位` : "应用到对应头发栏位";
+  }
+  if (spec.type === "face") {
+    return `应用到${GAME_FACE_SLOT_LABELS[spec.categoryNo] || "面部"}栏位`;
+  }
+  if (spec.type === "body") {
+    return `应用到${GAME_BODY_SLOT_LABELS[spec.categoryNo] || "身体"}栏位`;
+  }
+  if (spec.type === "clothes") {
+    const clothingSlotLabel = GAME_CLOTHING_SLOT_LABELS[spec.categoryNo];
+    return clothingSlotLabel ? `应用到${clothingSlotLabel}栏位` : "应用到对应服饰栏位";
+  }
+  return "让当前角色穿上";
+}
+
+function normalizeCurrentGameItems(items, partType) {
+  return (Array.isArray(items) ? items : []).map((item) => ({
+    ...item,
+    partType: String(item?.partType || partType || ""),
+    partIndex: Number.isFinite(Number(item?.partIndex)) ? Number(item.partIndex) : 0,
+    categoryNo: Number.isFinite(Number(item?.categoryNo)) ? Number(item.categoryNo) : 0,
+    localSlot: Number.isFinite(Number(item?.localSlot)) ? Number(item.localSlot) : 0,
+    listId: Number.isFinite(Number(item?.listId)) ? Number(item.listId) : 0,
+    originalId: item?.originalId == null ? null : Number(item.originalId),
+    kind: Number.isFinite(Number(item?.kind)) ? Number(item.kind) : 0,
+    name: String(item?.name || "").trim(),
+    partLabel: String(item?.partLabel || "").trim(),
+    thumbnailUrl: backendAssetUrl(item?.thumbnailUrl || item?.thumbnail_url),
+    resolverRecords: Array.isArray(item?.resolverRecords) ? item.resolverRecords : []
+  }));
+}
+
+function normalizeCurrentGameState(data) {
+  const current = data && typeof data === "object" ? data : {};
+  return {
+    available: Boolean(current.available),
+    source: String(current.source || ""),
+    characterId: Number.isFinite(Number(current.characterId)) ? Number(current.characterId) : 0,
+    sex: Number.isFinite(Number(current.sex)) ? Number(current.sex) : 0,
+    characterName: String(current.characterName || "").trim(),
+    characterFileName: String(current.characterFileName || "").trim(),
+    coordinateName: String(current.coordinateName || "").trim(),
+    hairs: normalizeCurrentGameItems(current.hairs, "hair"),
+    clothes: normalizeCurrentGameItems(current.clothes, "clothes"),
+    faces: normalizeCurrentGameItems(current.faces, "face"),
+    bodies: normalizeCurrentGameItems(current.bodies, "body"),
+    accessories: normalizeCurrentGameItems(current.accessories, "accessory")
+  };
+}
+
+function normalizeContextCharacter(data) {
+  const character = data && typeof data === "object" ? data : {};
+  const current = normalizeCurrentGameState(character.current);
+  return {
+    ...character,
+    available: Boolean(character.available),
+    active: Boolean(character.active),
+    characterIndex: Number.isFinite(Number(character.characterIndex)) ? Number(character.characterIndex) : -1,
+    characterId: Number.isFinite(Number(character.characterId)) ? Number(character.characterId) : 0,
+    sex: Number.isFinite(Number(character.sex)) ? Number(character.sex) : -1,
+    characterName: String(character.characterName || "").trim(),
+    characterFileName: String(character.characterFileName || "").trim(),
+    current
+  };
+}
+
+function normalizeAssemblyContext(data) {
+  const context = data && typeof data === "object" ? data : {};
+  const hscene = context.hscene && typeof context.hscene === "object" ? context.hscene : {};
+  return {
+    loading: false,
+    error: "",
+    available: Boolean(context.available),
+    scene: String(context.scene || "none"),
+    editor: context.editor ? normalizeContextCharacter(context.editor) : null,
+    hscene: {
+      available: Boolean(hscene.available),
+      femaleCount: Number.isFinite(Number(hscene.femaleCount)) ? Number(hscene.femaleCount) : 0,
+      maleCount: Number.isFinite(Number(hscene.maleCount)) ? Number(hscene.maleCount) : 0,
+      totalCount: Number.isFinite(Number(hscene.totalCount)) ? Number(hscene.totalCount) : 0,
+      females: Array.isArray(hscene.females) ? hscene.females.map(normalizeContextCharacter) : [],
+      males: Array.isArray(hscene.males) ? hscene.males.map(normalizeContextCharacter) : []
+    }
+  };
+}
+
+function resetAssemblyCharacterTarget() {
+  Object.assign(assemblyCharacterTarget, {
+    target: "editor",
+    sex: null,
+    characterIndex: null,
+    characterId: null
+  });
+}
+
+function currentStateForAssemblyTarget() {
+  if (assemblyCharacterTarget.target === "hscene") {
+    const roles = assemblyCharacterTarget.sex === 1
+      ? assemblyContext.hscene.females
+      : assemblyContext.hscene.males;
+    const role = roles.find((candidate) => (
+      candidate.characterIndex === assemblyCharacterTarget.characterIndex
+      && candidate.characterId === assemblyCharacterTarget.characterId
+    ));
+    return role?.current || null;
+  }
+  return assemblyContext.editor?.current || null;
+}
+
+function resetAssemblyContext(error = "") {
+  Object.assign(assemblyContext, normalizeAssemblyContext(null), { error });
+  resetAssemblyCharacterTarget();
+  resetAssemblyTargetSlot();
+  resetCurrentGameState();
+  itemGameNotice.type = "";
+  itemGameNotice.message = "";
+  itemGameApply.error = "";
+  currentGameState.error = error;
+}
+
+async function refreshAssemblyContext({ silent = false } = {}) {
+  const requestSeq = ++currentGameStateRequestSeq;
+  const request = window.desktopApi?.backendRequest;
+  if (typeof request !== "function") {
+    const error = "资源通信接口尚未加载，请重启应用后再试。";
+    if (requestSeq === currentGameStateRequestSeq) resetAssemblyContext(error);
+    return false;
+  }
+  if (!silent) {
+    assemblyContext.loading = true;
+    assemblyContext.error = "";
+    currentGameState.loading = true;
+    currentGameState.error = "";
+  }
+  try {
+    const contextQuery = paths.gameDir
+      ? `?game_dir=${encodeQuery(paths.gameDir)}`
+      : "";
+    const result = await request(`/game-item-probe/context${contextQuery}`);
+    if (!result?.ok) throw new Error(formatGameItemProbeError(result));
+    if (requestSeq !== currentGameStateRequestSeq) return false;
+    Object.assign(assemblyContext, normalizeAssemblyContext(result.data));
+    if (assemblyContext.scene === "hscene") {
+      const target = assemblyCharacterTarget;
+      const roles = target.sex === 1 ? assemblyContext.hscene.females : assemblyContext.hscene.males;
+      const selected = target.target === "hscene"
+        ? roles.find((role) => role.characterIndex === target.characterIndex && role.characterId === target.characterId)
+        : null;
+      if (!selected) {
+        const first = assemblyContext.hscene.females[0] || assemblyContext.hscene.males[0] || null;
+        if (first) {
+          Object.assign(assemblyCharacterTarget, {
+            target: "hscene",
+            sex: first.sex,
+            characterIndex: first.characterIndex,
+            characterId: first.characterId
+          });
+        } else {
+          resetAssemblyCharacterTarget();
+        }
+      }
+    } else if (assemblyContext.scene === "editor") {
+      resetAssemblyCharacterTarget();
+    } else {
+      resetAssemblyCharacterTarget();
+    }
+    const state = currentStateForAssemblyTarget();
+    if (state) Object.assign(currentGameState, state);
+    else resetCurrentGameState();
+    currentGameState.error = "";
+    return assemblyContext.available;
+  } catch (error) {
+    if (requestSeq !== currentGameStateRequestSeq) return false;
+    assemblyContext.error = error instanceof Error ? error.message : String(error);
+    resetAssemblyContext(assemblyContext.error);
+    if (!silent) log(`[Game Context Error] ${assemblyContext.error}`);
+    return false;
+  } finally {
+    if (requestSeq === currentGameStateRequestSeq) {
+      if (!silent) assemblyContext.loading = false;
+      if (!silent) currentGameState.loading = false;
+    }
+  }
+}
+
+async function selectAssemblyCharacter(target, character = null) {
+  if (!assemblyMode.value) return false;
+  if (target === "hscene" && !character) return false;
+  if (target === "hscene") {
+    Object.assign(assemblyCharacterTarget, {
+      target: "hscene",
+      sex: character.sex,
+      characterIndex: character.characterIndex,
+      characterId: character.characterId
+    });
+  } else {
+    resetAssemblyCharacterTarget();
+  }
+  resetAssemblyTargetSlot();
+  itemGameNotice.type = "";
+  itemGameNotice.message = "";
+  const state = currentStateForAssemblyTarget();
+  if (state) Object.assign(currentGameState, state);
+  else resetCurrentGameState();
+  await applyItemFilters();
+  return true;
+}
+
+function resetCurrentGameState() {
+  Object.assign(currentGameState, {
+    loading: false,
+    error: "",
+    ...normalizeCurrentGameState(null)
+  });
+}
+
+function resetAssemblyTargetSlot() {
+  Object.assign(assemblyTargetSlot, {
+    active: false,
+    groupKey: "",
+    partIndex: null,
+    categoryNo: null,
+    label: "",
+    accessorySlotNo: null,
+    hairSlotNo: null,
+    facePartNo: null,
+    bodyPartNo: null
+  });
+}
+
+function facePartNoFromCurrentItem(item) {
+  const categoryNo = Number(item?.categoryNo);
+  const partIndex = Number(item?.partIndex);
+  if (categoryNo === 317 && partIndex >= 20 && partIndex <= 21) return partIndex - 20;
+  if (categoryNo === 318 && partIndex >= 30 && partIndex <= 31) return partIndex - 30;
+  return null;
+}
+
+function bodyPartNoFromCurrentItem(item) {
+  const categoryNo = Number(item?.categoryNo);
+  const partIndex = Number(item?.partIndex);
+  if (GAME_BODY_PAINT_CATEGORY_NOS.has(String(categoryNo))
+      && partIndex >= 10 && partIndex <= 11) {
+    return partIndex - 10;
+  }
+  return null;
+}
+
+function gameCurrentSlotLabel(item) {
+  const categoryNo = Number(item?.categoryNo);
+  if (GAME_CLOTHING_SLOT_LABELS[categoryNo]) return `${GAME_CLOTHING_SLOT_LABELS[categoryNo]}栏位`;
+  const hairSlot = gameHairSlotOption(categoryNo);
+  if (hairSlot) return `${hairSlot.label}栏位`;
+  if (GAME_ACCESSORY_SLOT_LABELS[categoryNo]) return `${GAME_ACCESSORY_SLOT_LABELS[categoryNo]}配饰`;
+  return GAME_CURRENT_SLOT_LABELS[categoryNo] || `CategoryNo ${categoryNo || "-"}`;
+}
+
+function gameCurrentItemName(item) {
+  if (Number(item?.localSlot || 0) === 0) return "未装配";
+  return String(item?.name || "").trim() || "原生物品（名称未读取）";
+}
+
+async function refreshCurrentGameState({ silent = false } = {}) {
+  return refreshAssemblyContext({ silent });
+}
+
+function stopCurrentGameStatePolling() {
+  if (currentGameStatePollTimer != null) {
+    window.clearInterval(currentGameStatePollTimer);
+    currentGameStatePollTimer = null;
+  }
+  currentGameStateRequestSeq += 1;
+}
+
+function setAssemblyMode(enabled) {
+  const nextValue = Boolean(enabled);
+  if (nextValue === assemblyMode.value) return;
+  stopCurrentGameStatePolling();
+  assemblyMode.value = nextValue;
+  resetAssemblyTargetSlot();
+  itemGameNotice.type = "";
+  itemGameNotice.message = "";
+  itemGameApply.error = "";
+  if (!nextValue) {
+    resetAssemblyCharacterTarget();
+    resetCurrentGameState();
+    return;
+  }
+  itemFilters.kind = "";
+  itemFilters.source = "";
+  void applyItemFilters();
+  currentGameState.error = "";
+  void refreshAssemblyContext();
+  currentGameStatePollTimer = window.setInterval(() => {
+    if (!assemblyContext.loading) void refreshAssemblyContext({ silent: true });
+  }, 1000);
+}
+
+async function selectAssemblySlot(item, groupKey = "") {
+  if (!assemblyMode.value || !item) return false;
+  const categoryNo = Number(item.categoryNo);
+  if (!Number.isSafeInteger(categoryNo) || categoryNo <= 0) return false;
+
+  const normalizedGroupKey = String(groupKey || {
+    hair: "hairs",
+    clothes: "clothes",
+    face: "faces",
+    body: "bodies",
+    accessory: "accessories"
+  }[String(item.partType || "")] || "");
+  const hairSlot = gameHairSlotOption(categoryNo);
+  const accessorySlotNo = Number(item.partIndex);
+  const facePartNo = facePartNoFromCurrentItem(item);
+  const bodyPartNo = bodyPartNoFromCurrentItem(item);
+  Object.assign(assemblyTargetSlot, {
+    active: true,
+    groupKey: normalizedGroupKey,
+    partIndex: Number.isSafeInteger(Number(item.partIndex)) ? Number(item.partIndex) : null,
+    categoryNo,
+    label: gameCurrentSlotLabel(item),
+    accessorySlotNo: GAME_ACCESSORY_CATEGORY_NOS.has(String(categoryNo))
+      && Number.isInteger(accessorySlotNo)
+      && accessorySlotNo >= 0
+      && accessorySlotNo <= 19
+      ? accessorySlotNo
+      : null,
+    hairSlotNo: hairSlot?.value ?? null,
+    facePartNo: GAME_FACE_EYE_CATEGORY_NOS.has(String(categoryNo)) ? facePartNo : null,
+    bodyPartNo: GAME_BODY_PAINT_CATEGORY_NOS.has(String(categoryNo)) ? bodyPartNo : null
+  });
+  itemFilters.kind = String(categoryNo);
+  await applyItemFilters();
+  itemGameApply.error = "";
+  itemGameNotice.type = "info";
+  itemGameNotice.message = `已选择${assemblyTargetSlot.label}，左侧单击物品即可直接穿戴。`;
+  return true;
+}
+
+async function applyAssemblyItem(item) {
+  if (!assemblyMode.value || !item?.id || itemGameApply.busy) return false;
+  selectItem(item);
+
+  if (!assemblyTargetSlot.active) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "请先点击右侧角色栏位，再从左侧选择要穿戴的物品。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  const targetGroupKey = assemblyTargetSlot.groupKey;
+  if (!["clothes", "hairs", "faces", "bodies", "accessories"].includes(targetGroupKey)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "当前目标栏位不支持直接换装。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  const spec = itemGameApplySpec(item);
+  if (!spec.supported) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = spec.reason;
+    itemGameApply.error = spec.reason;
+    return false;
+  }
+
+  const expectedType = targetGroupKey === "clothes"
+    ? "clothes"
+    : targetGroupKey === "hairs"
+      ? "hair"
+      : targetGroupKey === "faces"
+        ? "face"
+        : targetGroupKey === "bodies"
+          ? "body"
+          : "accessory";
+  if (spec.type !== expectedType || spec.categoryNo !== Number(assemblyTargetSlot.categoryNo)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = `「${item.name}」与当前${assemblyTargetSlot.label}不匹配，请从该栏位筛选结果中选择物品。`;
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  if (expectedType === "hair" && spec.hairSlotNo !== assemblyTargetSlot.hairSlotNo) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = `头发物品只能装配到类别对应的${gameHairSlotOption(spec.categoryNo)?.label || "头发"}栏位。`;
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+  if (expectedType === "face" && GAME_FACE_EYE_CATEGORY_NOS.has(String(spec.categoryNo))) {
+    if (spec.categoryNo !== Number(assemblyTargetSlot.categoryNo)
+      || !Number.isInteger(assemblyTargetSlot.facePartNo)
+      || assemblyTargetSlot.facePartNo < 0
+      || assemblyTargetSlot.facePartNo > 1) {
+      itemGameNotice.type = "error";
+      itemGameNotice.message = "当前面部物品需要明确的左眼或右眼栏位，已拒绝换装。";
+      itemGameApply.error = itemGameNotice.message;
+      return false;
+    }
+  }
+  if (expectedType === "accessory" && !Number.isInteger(assemblyTargetSlot.accessorySlotNo)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "当前配饰栏位缺少有效的角色配饰槽位，已拒绝换装。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+  if (expectedType === "body" && GAME_BODY_PAINT_CATEGORY_NOS.has(String(spec.categoryNo))
+    && (!Number.isInteger(assemblyTargetSlot.bodyPartNo)
+      || assemblyTargetSlot.bodyPartNo < 0
+      || assemblyTargetSlot.bodyPartNo > 1)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "当前身体彩绘缺少有效的彩绘层，已拒绝换装。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  if (expectedType === "hair") {
+    return applyItemToGame(item, { hairSlotNo: assemblyTargetSlot.hairSlotNo });
+  }
+  if (expectedType === "accessory") {
+    return applyItemToGame(item, { accessorySlotNo: assemblyTargetSlot.accessorySlotNo });
+  }
+  if (expectedType === "face") {
+    return applyItemToGame(item, { facePartNo: assemblyTargetSlot.facePartNo });
+  }
+  if (expectedType === "body") {
+    return applyItemToGame(item, { bodyPartNo: assemblyTargetSlot.bodyPartNo });
+  }
+  return applyItemToGame(item);
+}
+
+function formatGameItemProbeError(payload) {
+  const code = String(payload?.error_code || payload?.errorCode || payload?.data?.errorCode || payload?.data?.error_code || "");
+  const details = String(payload?.error || payload?.data?.error || "").trim();
+  const labels = {
+    probe_unavailable: "游戏物品探针未连接",
+    invalid_probe_response: "游戏物品探针响应无效",
+    not_in_editor: "当前不在角色制作器中",
+    invalid_category: "当前物品类别不支持换装",
+    item_not_found: "游戏当前列表中找不到该物品",
+    ambiguous_mapping: "该物品的运行时映射不唯一，已拒绝自动选择",
+    invalid_accessory_slot: "配饰槽位无效",
+    invalid_hair_slot: "头发栏位无效或与物品类别不匹配",
+    invalid_face_slot: "面部栏位无效或缺少眼别",
+    invalid_body_slot: "身体栏位无效或缺少彩绘层",
+    invalid_card_path: "人物卡路径无效",
+    invalid_card: "不是有效的 AIS 人物卡",
+    invalid_card_selection: "人物卡读取内容选择无效",
+    card_sex_mismatch: "人物卡性别与当前角色不一致",
+    card_load_failed: "游戏无法读取这张人物卡",
+    target_unavailable: "当前角色数据尚未就绪",
+    queue_full: "游戏换装队列已满",
+    execution_error: "游戏执行换装失败",
+    command_expired: "游戏换装命令已超时",
+    probe_request_failed: "游戏物品探针请求失败"
+  };
+  const label = labels[code] || details || "游戏换装失败";
+  return details && details !== label ? `${label}：${details}` : label;
+}
+
+function closeItemContextMenu() {
+  itemContextMenu.open = false;
+  itemContextMenu.item = null;
+}
+
+function openItemContextMenu(item, event) {
+  if (!item?.id || !event) return;
+  selectItem(item);
+  const menuWidth = 286;
+  const menuHeight = 210;
+  itemContextMenu.item = item;
+  itemContextMenu.x = Math.max(8, Math.min(Number(event.clientX) || 8, window.innerWidth - menuWidth - 8));
+  itemContextMenu.y = Math.max(8, Math.min(Number(event.clientY) || 8, window.innerHeight - menuHeight - 8));
+  itemContextMenu.open = true;
+}
+
+function requestItemGameApply() {
+  const item = itemContextMenu.item;
+  const spec = itemGameApplySpec(item);
+  closeItemContextMenu();
+  if (!spec.supported) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = spec.reason;
+    return;
+  }
+  if (spec.type === "accessory") {
+    itemAccessoryPrompt.item = item;
+    itemAccessoryPrompt.slotNo = 0;
+    itemAccessoryPrompt.error = "";
+    itemAccessoryPrompt.open = true;
+    return;
+  }
+  if (spec.type === "face" && GAME_FACE_EYE_CATEGORY_NOS.has(String(spec.categoryNo))) {
+    itemFacePrompt.item = item;
+    itemFacePrompt.facePartNo = 0;
+    itemFacePrompt.error = "";
+    itemFacePrompt.open = true;
+    return;
+  }
+  if (spec.type === "body" && GAME_BODY_PAINT_CATEGORY_NOS.has(String(spec.categoryNo))) {
+    itemBodyPrompt.item = item;
+    itemBodyPrompt.bodyPartNo = 0;
+    itemBodyPrompt.error = "";
+    itemBodyPrompt.open = true;
+    return;
+  }
+  if (spec.type === "hair") {
+    void applyItemToGame(item, { hairSlotNo: spec.hairSlotNo });
+    return;
+  }
+  void applyItemToGame(item);
+}
+
+function closeItemFacePrompt() {
+  if (itemFacePrompt.busy) return;
+  itemFacePrompt.open = false;
+  itemFacePrompt.item = null;
+  itemFacePrompt.error = "";
+}
+
+async function confirmItemFaceApply() {
+  const item = itemFacePrompt.item;
+  if (!item || itemFacePrompt.busy || itemGameApply.busy) return;
+  itemFacePrompt.busy = true;
+  itemFacePrompt.error = "";
+  try {
+    const applied = await applyItemToGame(item, { facePartNo: Number(itemFacePrompt.facePartNo) });
+    if (applied) {
+      itemFacePrompt.busy = false;
+      closeItemFacePrompt();
+    } else {
+      itemFacePrompt.error = itemGameApply.error || itemGameNotice.message || "游戏换装失败";
+    }
+  } finally {
+    itemFacePrompt.busy = false;
+  }
+}
+
+function closeItemBodyPrompt() {
+  if (itemBodyPrompt.busy) return;
+  itemBodyPrompt.open = false;
+  itemBodyPrompt.item = null;
+  itemBodyPrompt.error = "";
+}
+
+async function confirmItemBodyApply() {
+  const item = itemBodyPrompt.item;
+  if (!item || itemBodyPrompt.busy || itemGameApply.busy) return;
+  itemBodyPrompt.busy = true;
+  itemBodyPrompt.error = "";
+  try {
+    const applied = await applyItemToGame(item, { bodyPartNo: Number(itemBodyPrompt.bodyPartNo) });
+    if (applied) {
+      itemBodyPrompt.busy = false;
+      closeItemBodyPrompt();
+    } else {
+      itemBodyPrompt.error = itemGameApply.error || itemGameNotice.message || "游戏换装失败";
+    }
+  } finally {
+    itemBodyPrompt.busy = false;
+  }
+}
+
+function closeItemAccessoryPrompt() {
+  if (itemAccessoryPrompt.busy) return;
+  itemAccessoryPrompt.open = false;
+  itemAccessoryPrompt.item = null;
+  itemAccessoryPrompt.error = "";
+}
+
+async function confirmItemAccessoryApply() {
+  const item = itemAccessoryPrompt.item;
+  if (!item || itemAccessoryPrompt.busy || itemGameApply.busy) return;
+  itemAccessoryPrompt.busy = true;
+  itemAccessoryPrompt.error = "";
+  try {
+    const applied = await applyItemToGame(item, {
+      accessorySlotNo: Number(itemAccessoryPrompt.slotNo)
+    });
+    if (applied) {
+      itemAccessoryPrompt.busy = false;
+      closeItemAccessoryPrompt();
+    } else {
+      itemAccessoryPrompt.error = itemGameApply.error || itemGameNotice.message || "游戏换装失败";
+    }
+  } finally {
+    itemAccessoryPrompt.busy = false;
+  }
+}
+
+async function applyItemToGame(item, { accessorySlotNo = null, hairSlotNo = null, facePartNo = null, bodyPartNo = null } = {}) {
+  if (!item?.id || itemGameApply.busy) return false;
+  const spec = itemGameApplySpec(item);
+  if (!spec.supported) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = spec.reason;
+    itemGameApply.error = spec.reason;
+    return false;
+  }
+  if (spec.type === "accessory" && (!Number.isInteger(accessorySlotNo) || accessorySlotNo < 0 || accessorySlotNo > 19)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "请选择 0–19 范围内的角色配饰槽位。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+  if (spec.type === "hair" && (!Number.isInteger(hairSlotNo) || hairSlotNo < 0 || hairSlotNo > 3 || hairSlotNo !== spec.hairSlotNo)) {
+    const hairSlot = GAME_HAIR_SLOT_OPTIONS.find((option) => option.value === spec.hairSlotNo);
+    itemGameNotice.type = "error";
+    itemGameNotice.message = `头发栏位由物品类别固定决定：${hairSlot?.label || "对应栏位"}；请求已拒绝。`;
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+  if (spec.type === "face" && GAME_FACE_EYE_CATEGORY_NOS.has(String(spec.categoryNo))
+    && (!Number.isInteger(facePartNo) || facePartNo < 0 || facePartNo > 1)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "请选择左眼或右眼面部栏位。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+  if (spec.type === "body" && GAME_BODY_PAINT_CATEGORY_NOS.has(String(spec.categoryNo))
+    && (!Number.isInteger(bodyPartNo) || bodyPartNo < 0 || bodyPartNo > 1)) {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "请选择 0–1 范围内的身体彩绘层。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  const request = window.desktopApi?.backendRequest;
+  if (typeof request !== "function") {
+    itemGameNotice.type = "error";
+    itemGameNotice.message = "资源通信接口尚未加载，请重启应用后再试。";
+    itemGameApply.error = itemGameNotice.message;
+    return false;
+  }
+
+  const body = {
+    type: spec.type,
+    categoryNo: spec.categoryNo
+  };
+  if (assemblyCharacterTarget.target === "hscene") {
+    body.target = "hscene";
+    body.sex = assemblyCharacterTarget.sex;
+    body.characterIndex = assemblyCharacterTarget.characterIndex;
+    body.targetCharacterId = assemblyCharacterTarget.characterId;
+  }
+  if (spec.isBuiltin) {
+    // Native list IDs are already the runtime localSlot. Do not send a fake
+    // GUID or route original items through the UAR resolver path.
+    body.localSlot = spec.localSlot;
+  } else {
+    body.guid = spec.guid;
+    body.slot = spec.originalSlot;
+  }
+  if (spec.type === "accessory") body.slotNo = accessorySlotNo;
+  if (spec.type === "hair") body.hairSlotNo = hairSlotNo;
+  if (spec.type === "face" && GAME_FACE_EYE_CATEGORY_NOS.has(String(spec.categoryNo))) body.facePartNo = facePartNo;
+  if (spec.type === "body" && GAME_BODY_PAINT_CATEGORY_NOS.has(String(spec.categoryNo))) body.bodyPartNo = bodyPartNo;
+
+  itemGameApply.busy = true;
+  itemGameApply.itemId = item.id;
+  itemGameApply.commandId = "";
+  itemGameApply.status = "submitting";
+  itemGameApply.error = "";
+  itemGameNotice.type = "info";
+  itemGameNotice.message = `正在向游戏提交「${item.name}」的换装请求…`;
+  try {
+    const submitted = await request("/game-item-probe/apply", {
+      method: "POST",
+      body
+    });
+    if (!submitted?.ok) throw new Error(formatGameItemProbeError(submitted));
+    const accepted = submitted.data || {};
+    const commandId = String(accepted.commandId || "").trim();
+    if (!accepted.accepted || !commandId) {
+      throw new Error(formatGameItemProbeError(accepted));
+    }
+    itemGameApply.commandId = commandId;
+    itemGameApply.status = String(accepted.status || "queued");
+
+    for (let attempt = 0; attempt < 70; attempt += 1) {
+      await sleep(attempt === 0 ? 80 : 250);
+      const polled = await request(`/game-item-probe/command?id=${encodeURIComponent(commandId)}`);
+      if (!polled?.ok) throw new Error(formatGameItemProbeError(polled));
+      const command = polled.data || {};
+      itemGameApply.status = String(command.status || "");
+      if (command.status === "succeeded") {
+        itemGameNotice.type = "success";
+        itemGameNotice.message = `已将「${item.name}」发送到当前角色。游戏资源加载可能还需要片刻。`;
+        if (assemblyMode.value) void refreshCurrentGameState({ silent: true });
+        const mappingLabel = spec.isBuiltin ? `localSlot=${spec.localSlot}` : `slot=${spec.originalSlot}`;
+        const slotLabel = spec.type === "accessory"
+          ? `，slotNo=${accessorySlotNo}`
+          : spec.type === "hair"
+            ? `，hairSlotNo=${hairSlotNo}`
+            : spec.type === "face" && GAME_FACE_EYE_CATEGORY_NOS.has(String(spec.categoryNo))
+              ? `，facePartNo=${facePartNo}`
+              : spec.type === "body" && GAME_BODY_PAINT_CATEGORY_NOS.has(String(spec.categoryNo))
+                ? `，bodyPartNo=${bodyPartNo}`
+                : "";
+        log(`[Game] 已请求换装：${item.name}（${spec.type}，categoryNo=${spec.categoryNo}，${mappingLabel}${slotLabel}）`);
+        return true;
+      }
+      if (["failed", "expired"].includes(command.status)) {
+        throw new Error(formatGameItemProbeError(command));
+      }
+    }
+    throw new Error("游戏换装命令超过 15 秒未完成，请确认角色制作器仍处于打开状态。");
+  } catch (error) {
+    itemGameApply.error = error instanceof Error ? error.message : String(error);
+    itemGameNotice.type = "error";
+    itemGameNotice.message = itemGameApply.error;
+    log(`[Game Error] ${itemGameApply.error}`);
+    return false;
+  } finally {
+    itemGameApply.busy = false;
+    itemGameApply.itemId = null;
+  }
+}
+
+function beginWorkbenchTemplateSelection(request = {}) {
+  if (!request?.projectId || !request?.itemId) return false;
+
+  workbenchTemplateSelection.active = true;
+  workbenchTemplateSelection.busy = false;
+  workbenchTemplateSelection.error = "";
+  workbenchTemplateSelection.result = null;
+  workbenchTemplateSelection.request = {
+    projectId: String(request.projectId),
+    projectPath: String(request.projectPath || ""),
+    csvPath: String(request.csvPath || ""),
+    itemId: String(request.itemId),
+    targetItem: request.targetItem || null
+  };
+
+  libraryMode.value = "items";
+  itemTab.value = "工具";
+  selectedItem.value = null;
+  selectedMod.value = null;
+  activeView.value = "mods";
+  void applyItemFilters();
+  return true;
+}
+
+function workbenchTemplateItemSnapshot(item) {
+  const raw = item?.raw || {};
+  return {
+    id: item?.id,
+    name: item?.name || raw.item_name || "",
+    item_id: raw.item_id || "",
+    zipmod_guid: raw.zipmod_guid || item?.sourceMod || "",
+    main_ab: raw.main_ab || "",
+    main_data: raw.main_data || "",
+    unity3d_status: raw.unity3d_status || "",
+    thumbnail_url: raw.thumbnail_url || item?.thumbnailUrl || "",
+    author: item?.author || "",
+    source_mod: item?.sourceMod || ""
+  };
+}
+
+async function selectWorkbenchTemplateFromItem(item) {
+  if (!workbenchTemplateSelection.active || !item?.id || workbenchTemplateSelection.busy) return false;
+
+  const mainAb = String(item.raw?.main_ab || "").trim();
+  if (isMapSceneItem(item) || !/\.unity3d$/i.test(mainAb)) {
+    workbenchTemplateSelection.error = "当前物品没有可用的 Unity3D 主资源，无法作为模板。";
+    return false;
+  }
+
+  const request = window.desktopApi?.backendRequest;
+  if (typeof request !== "function") {
+    workbenchTemplateSelection.error = "资源读取接口尚未加载，请重启应用后再试。";
+    return false;
+  }
+
+  workbenchTemplateSelection.busy = true;
+  workbenchTemplateSelection.error = "";
+  try {
+    const prepared = await request(`/mods/items/${item.id}/open-unity3d`, {
+      method: "POST",
+      body: {}
+    });
+    if (!prepared?.ok || !prepared.unity3d_path) {
+      throw new Error(prepared?.error || "无法准备所选物品的 Unity3D 文件");
+    }
+
+    const assets = await request("/workbench/unity3d/assets", {
+      method: "POST",
+      body: { path: prepared.unity3d_path }
+    });
+    if (!assets?.ok) throw new Error(assets?.error || "无法读取 Unity3D 内部模型对象");
+    const candidates = Array.isArray(assets.candidates) ? assets.candidates : [];
+    if (!candidates.length) throw new Error("所选 Unity3D 中没有可用的模型对象");
+
+    const preferred = String(item.raw?.main_data || "").trim();
+    const preferredCandidate = candidates.find((candidate) => candidate.value === preferred);
+    const mainData = preferredCandidate?.value
+      || assets.default
+      || candidates[0]?.value
+      || preferred;
+
+    workbenchTemplateSelection.result = {
+      sourceItemId: item.id,
+      templateItem: workbenchTemplateItemSnapshot(item),
+      preparedPath: prepared.unity3d_path,
+      candidates,
+      objectCount: Number(assets.object_count || 0),
+      gameObjectCount: Number(assets.game_object_count || 0),
+      mainData,
+      mainDataPathId: Number(preferredCandidate?.path_id || candidates[0]?.path_id || 0),
+      mainDataAssetFile: String(preferredCandidate?.asset_file || candidates[0]?.asset_file || "")
+    };
+    workbenchTemplateSelection.active = false;
+    activeView.value = "workbench";
+    return true;
+  } catch (error) {
+    workbenchTemplateSelection.error = error?.message || String(error);
+    return false;
+  } finally {
+    workbenchTemplateSelection.busy = false;
+  }
+}
+
+function cancelWorkbenchTemplateSelection() {
+  if (!workbenchTemplateSelection.active) return;
+  workbenchTemplateSelection.result = { cancelled: true };
+  workbenchTemplateSelection.active = false;
+  workbenchTemplateSelection.busy = false;
+  workbenchTemplateSelection.error = "";
+  activeView.value = "workbench";
+}
+
+function consumeWorkbenchTemplateSelection() {
+  if (!workbenchTemplateSelection.request) return null;
+  const payload = {
+    request: workbenchTemplateSelection.request,
+    result: workbenchTemplateSelection.result
+  };
+  workbenchTemplateSelection.request = null;
+  workbenchTemplateSelection.result = null;
+  workbenchTemplateSelection.error = "";
+  workbenchTemplateSelection.busy = false;
+  return payload;
 }
 
 function selectMod(row) {
@@ -1689,6 +3769,7 @@ async function openModItemInItemBrowser(item) {
   itemFilters.kind = "";
   itemFilters.author = "";
   itemFilters.status = "";
+  itemFilters.source = "mod";
   dependencyUsageFilter.value = "";
 
   await ensureItemDatabaseLoaded({ force: true });
@@ -1707,6 +3788,9 @@ async function openModItemInItemBrowser(item) {
 }
 
 async function openCardDependencyItem(dependency) {
+  if (dependency?.source_type === "builtin" || dependency?.item?.source_type === "builtin") {
+    return;
+  }
   if (!dependency?.matched || !dependency.item?.id) {
     showMissingItemPrompt(dependency);
     return;
@@ -1719,6 +3803,7 @@ async function openCardDependencyItem(dependency) {
   itemFilters.kind = "";
   itemFilters.author = "";
   itemFilters.status = "";
+  itemFilters.source = "mod";
   dependencyUsageFilter.value = "";
 
   await ensureItemDatabaseLoaded({ force: true });
@@ -1737,17 +3822,86 @@ async function openCardDependencyItem(dependency) {
   }
 }
 
+async function openPackagedMod(guid) {
+  const targetGuid = String(guid || "").trim();
+  if (!targetGuid) return { ok: false, error: "缺少已打包模组的 GUID" };
+
+  window.clearTimeout(modFilterTimer);
+  activeView.value = "mods";
+  libraryMode.value = "mods";
+  modTab.value = "详情";
+  modFilters.author = "";
+  modFilters.status = "";
+  dependencyUsageFilter.value = "";
+  modRows.value = [];
+  selectedMod.value = null;
+  selectedModItems.value = [];
+  selectedModDiagnostics.value = null;
+  modDatabase.hasMore = false;
+
+  const findTarget = async () => {
+    const query = new URLSearchParams({ guid: targetGuid, offset: "0", limit: "1" });
+    const response = await window.desktopApi?.backendRequest?.(`/mods/zipmods?${query.toString()}`);
+    if (!response?.ok) throw new Error(response?.error || "模组数据库查询失败");
+    const row = response.data?.rows?.[0];
+    return row ? mapZipmodRow(row) : null;
+  };
+
+  try {
+    const target = await findTarget();
+    if (!target) {
+      return { ok: false, error: `模组数据库中暂时找不到 GUID：${targetGuid}；请重试单个模组同步` };
+    }
+
+    modRows.value = [target];
+    modDatabase.checked = true;
+    modDatabase.exists = true;
+    modDatabase.offset = 1;
+    modDatabase.total = 1;
+    modDatabase.hasMore = false;
+    selectMod(target);
+    return { ok: true, mod: target };
+  } catch (error) {
+    log(`[Workbench Error] 跳转模组管理失败：${error.message}`);
+    return { ok: false, error: error.message || String(error) };
+  }
+}
+
+function syncMissingItemPromptRemote() {
+  if (!missingItemPrompt.open || !missingItemPrompt.modId) {
+    missingItemPrompt.remoteLoading = false;
+    missingItemPrompt.remoteCandidate = null;
+    missingItemPrompt.remoteEntry = null;
+    missingItemPrompt.remoteError = "";
+    return;
+  }
+  const guid = String(missingItemPrompt.modId).trim().toLocaleLowerCase();
+  const entry = cardDependencyRemote.byGuid[guid] || null;
+  missingItemPrompt.remoteLoading = Boolean(cardDependencyRemote.loading && !entry);
+  missingItemPrompt.remoteEntry = entry;
+  missingItemPrompt.remoteCandidate = entry?.candidates?.[0] || null;
+  missingItemPrompt.remoteError = cardDependencyRemote.error || "";
+}
+
+function resetMissingItemPromptRemote() {
+  missingItemPrompt.remoteLoading = false;
+  missingItemPrompt.remoteCandidate = null;
+  missingItemPrompt.remoteEntry = null;
+  missingItemPrompt.remoteError = "";
+}
+
 function showMissingItemPrompt(dependency) {
   const name = dependency?.item?.name || dependency?.name || dependency?.mod_id || "未知物品";
   missingItemPrompt.name = name;
   missingItemPrompt.modId = dependency?.mod_id || dependency?.item?.zipmod_guid || "";
   missingItemPrompt.property = dependency?.property || "";
   missingItemPrompt.open = true;
+  syncMissingItemPromptRemote();
   log(`[Cards] 物品缺失：${name}`);
 }
 
 async function locateSourceMod(row = selectedItem.value) {
-  if (!row) return;
+  if (!row || row.isBuiltin || row.raw?.source_type === "builtin") return;
   const zipmodId = Number(row.zipmodId || row.raw?.zipmod_id || 0);
   const sourceAuthor = String(row.raw?.author || row.author || "").trim();
   if (!zipmodId) {
@@ -1841,7 +3995,7 @@ function unity3dIssueTitle(issue) {
   if (issue.type === "thumbnail") return "缩略图异常";
   if (issue.type === "duplicate_zipmod") return "存在重复模组";
   if (issue.status === "error") return "Unity3D 文件资源读取异常";
-  if (issue.status === "in_game") return "Unity3D \u6587\u4ef6\u5728\u6e38\u620f\u76ee\u5f55\u4e2d\uff0c\u4f46\u4e0d\u5728\u6a21\u7ec4\u5305\u5185";
+  if (["in_game", "not_in_mod"].includes(issue.status)) return "Unity3D 文件不在当前 zipmod 内";
   if (issue.status === "missing") return "Unity3D \u6587\u4ef6\u65e0\u6cd5\u627e\u5230";
   if (issue.status === "duplicate") return "存在重复模组";
   return "Unity3D \u6587\u4ef6\u5f02\u5e38";
@@ -1852,7 +4006,10 @@ function unity3dIssueSummary(issue) {
   if (issue.type === "thumbnail") return "部分物品缩略图缺失或读取失败。";
   if (issue.type === "duplicate_zipmod") return "同一 GUID 存在多个 zipmod 文件。";
   if (issue.status === "error") return "Unity3D 文件存在，但没有解析出可用 Unity 资源。";
-  if (issue.status === "in_game") return "Unity3D 文件在游戏目录中，但不在 zipmod 内。";
+  if (["in_game", "not_in_mod"].includes(issue.status)) {
+    if (issue.source === "other_zipmod") return "Unity3D 文件不在当前 zipmod 内，由其它 zipmod 提供。";
+    return "Unity3D 文件不在当前 zipmod 内。";
+  }
   if (issue.status === "missing") return "Unity3D 文件缺失。";
   if (issue.status === "duplicate") return "存在重复文件。";
   return issue.solution || "-";
@@ -1863,7 +4020,10 @@ function unity3dIssueSolution(issue) {
   if (issue.type === "thumbnail") return "重新导入或生成物品缩略图。";
   if (issue.type === "duplicate_zipmod") return "分析同 GUID 的 zipmod 并保留推荐项。";
   if (issue.status === "error") return "重新安装来源模组，或替换该 unity3d 文件后重建数据库。";
-  if (issue.status === "in_game") return "\u5c06\u8be5\u6587\u4ef6\u590d\u5236\u8fdb zipmod \u5305\u5185\u5bf9\u5e94 abdata \u8def\u5f84\uff0c\u4f7f\u6a21\u7ec4\u5305\u81ea\u5305\u542b\uff1bCSV \u5f15\u7528\u8def\u5f84\u4fdd\u6301\u4e0d\u53d8\u3002";
+  if (["in_game", "not_in_mod"].includes(issue.status)) {
+    if (issue.source === "other_zipmod") return "当前 zipmod 不含该文件，但其它 zipmod 已提供，无需补入。";
+    return "将该文件复制进 zipmod 包内对应 abdata 路径，使模组包自包含；CSV 引用路径保持不变。";
+  }
   if (issue.status === "missing") return "\u91cd\u65b0\u5b89\u88c5\u6765\u6e90\u6a21\u7ec4\uff0c\u6216\u624b\u52a8\u627e\u56de\u8be5 unity3d \u6587\u4ef6\u540e\u91cd\u5efa\u6570\u636e\u5e93\u3002";
   if (issue.status === "duplicate") return "分析同 GUID 的 zipmod 并保留推荐项。";
   return issue.solution || "-";
@@ -2339,7 +4499,7 @@ async function submitBulkDeleteErrorItems() {
 }
 
 async function repairThumbnailItem(item = selectedItem.value, options = {}) {
-  if (!item?.id) return;
+  if (!item?.id || item.isBuiltin) return false;
   const imageData = String(options.imageData || "");
   const imagePath = imageData ? "" : await window.desktopApi?.selectImageFile?.("选择 PNG 图片");
   if (!imageData && !imagePath) return false;
@@ -2395,32 +4555,62 @@ async function repairThumbnailItem(item = selectedItem.value, options = {}) {
 }
 
 async function deleteSelectedItem(item = selectedItem.value) {
-  if (!item?.id) return;
+  if (!item?.id || item.isBuiltin) return;
   deleteItemPrompt.item = item;
   deleteItemPrompt.name = item.name || item.raw?.item_id || String(item.id);
   deleteItemPrompt.error = "";
   deleteItemPrompt.open = true;
 }
 
-async function exportItemFbx(item = selectedItem.value) {
-  if (!item?.id || exportingFbxItemId.value) return false;
-  const targetDir = await window.desktopApi?.selectDirectory?.("选择 FBX 模型导出目录");
-  if (!targetDir) return false;
-  exportingFbxItemId.value = item.id;
+async function openItemUnity3d(item = selectedItem.value) {
+  if (!item?.id || item.isBuiltin || openingUnity3dItemId.value) return false;
+  openingUnity3dItemId.value = item.id;
   try {
     const result = await window.desktopApi?.backendRequest?.(
-      `/mods/items/${item.id}/export-fbx`,
-      { method: "POST", body: { target_dir: targetDir } }
+      `/mods/items/${item.id}/open-unity3d`,
+      { method: "POST" }
     );
-    if (!result?.ok) throw new Error(result?.error || "FBX 模型导出失败");
-    log(`[Models] ${result.message}: ${result.fbx_path}`);
-    await window.desktopApi?.showItemInFolder?.(result.fbx_path);
+    if (!result?.ok) throw new Error(result?.error || "Unity3D 文件准备失败");
+    const launched = await window.desktopApi?.openUnity3dInSb3Utility?.(result.unity3d_path);
+    if (!launched?.ok) throw new Error(launched?.error || "SB3Utility 打开失败");
+    log(`[Unity3D] ${result.message || "已打开 Unity3D 文件"}: ${result.unity3d_path}`);
     return true;
   } catch (error) {
-    log(`[Models Error] ${error.message}`);
+    log(`[Unity3D Error] ${error.message}`);
     return false;
   } finally {
-    exportingFbxItemId.value = null;
+    openingUnity3dItemId.value = null;
+  }
+}
+
+async function exportItemUnity3d(item = selectedItem.value) {
+  if (!item?.id || item.isBuiltin || exportingUnity3dItemId.value) return false;
+  const defaultName = itemUnity3dFileName(item) === "-"
+    ? `item_${item.id}.unity3d`
+    : itemUnity3dFileName(item);
+  const targetPath = await window.desktopApi?.selectUnity3dExportPath?.(
+    "导出 Unity3D（复制）",
+    defaultName
+  );
+  if (!targetPath) return false;
+
+  exportingUnity3dItemId.value = item.id;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/mods/items/${item.id}/export-unity3d`,
+      {
+        method: "POST",
+        body: { target_path: targetPath }
+      }
+    );
+    if (!result?.ok) throw new Error(result?.error || "Unity3D 导出失败");
+    log(`[Unity3D] ${result.message || "已复制导出 Unity3D"}: ${result.target_path || targetPath}`);
+    return true;
+  } catch (error) {
+    log(`[Unity3D Error] ${error.message}`);
+    return false;
+  } finally {
+    exportingUnity3dItemId.value = null;
   }
 }
 
@@ -2881,7 +5071,8 @@ async function checkModDatabase() {
   modDatabase.loading = true;
   modDatabase.error = "";
   try {
-    const result = await window.desktopApi?.backendRequest?.("/mods/database");
+    const databaseQuery = paths.gameDir ? `?game_dir=${encodeQuery(paths.gameDir)}` : "";
+    const result = await window.desktopApi?.backendRequest?.(`/mods/database${databaseQuery}`);
     if (!result?.ok) {
       throw new Error(result?.error || "模组数据库读取失败");
     }
@@ -2896,9 +5087,10 @@ async function checkModDatabase() {
     stats.lastDatabaseBuiltAt = database.last_built_at || stats.lastDatabaseBuiltAt;
     itemDatabase.checked = true;
     itemDatabase.exists = Boolean(database.exists);
-    itemDatabase.total = Number(database.item_count || 0);
+    itemDatabase.total = Number(database.item_count || 0) + Number(database.builtin_item_count || 0);
     stats.zipmods = Number(database.zipmod_count ?? stats.zipmods);
     stats.modItems = Number(database.item_count ?? stats.modItems);
+    stats.builtinItems = Number(database.builtin_item_count ?? stats.builtinItems);
 
     if (!modDatabase.exists || modDatabase.total === 0) {
       modRows.value = [];
@@ -3065,6 +5257,9 @@ async function loadItemRows({ reset = false } = {}) {
     if (itemFilters.author) query.set("author", itemFilters.author);
     if (itemFilters.status) query.set("status", itemFilters.status);
     if (dependencyUsageFilter.value) query.set("usage", dependencyUsageFilter.value);
+    query.set("source", itemFilters.source || "all");
+    query.set("include_total", reset ? "1" : "0");
+    if (paths.gameDir) query.set("game_dir", paths.gameDir);
     const result = await window.desktopApi?.backendRequest?.(`/mods/items?${query.toString()}`);
     if (requestSeq !== itemRowsRequestSeq) return;
     if (!result?.ok) {
@@ -3088,7 +5283,7 @@ async function loadItemRows({ reset = false } = {}) {
     itemRows.value = reset ? rows : [...itemRows.value, ...rows];
     if (reset) selectedItem.value = null;
     itemDatabase.offset = itemRows.value.length;
-    itemDatabase.total = Number(data.total || 0);
+    if (data.total != null) itemDatabase.total = Number(data.total || 0);
     itemDatabase.hasMore = Boolean(data.has_more);
   } catch (error) {
     if (requestSeq !== itemRowsRequestSeq) return;
@@ -3130,8 +5325,10 @@ function selectedItemRefreshSnapshot() {
   const row = selectedItem.value;
   if (!row?.id) return null;
   return {
-    id: Number(row.id),
+    id: row.id,
+    sourceType: String(row.sourceType || row.raw?.source_type || "mod"),
     itemId: String(row.raw?.item_id || ""),
+    kind: String(row.raw?.kind || row.kindCode || ""),
     zipmodId: Number(row.raw?.zipmod_id || row.zipmodId || 0),
     zipmodGuid: String(row.raw?.zipmod_guid || ""),
     csvPath: String(row.raw?.csv_path || "")
@@ -3141,6 +5338,15 @@ function selectedItemRefreshSnapshot() {
 function itemMatchesRefreshSnapshot(row, snapshot) {
   if (!row || !snapshot) return false;
   const raw = row.raw || {};
+  const sourceType = String(row.sourceType || raw.source_type || "mod");
+  if (sourceType !== snapshot.sourceType) return false;
+  if (sourceType === "builtin") {
+    return Boolean(
+      snapshot.itemId
+      && String(raw.item_id || "") === snapshot.itemId
+      && String(raw.kind || row.kindCode || "") === snapshot.kind
+    );
+  }
   const stableMatch = Boolean(
     snapshot.itemId
     && snapshot.zipmodId
@@ -3190,7 +5396,10 @@ async function refreshModDatabaseList() {
 function handleModTableScroll(event) {
   const target = event.currentTarget;
   const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-  if (remaining >= 160) return;
+  // Start item requests before the user reaches the absolute end so the
+  // network/database work can overlap with the last visible rows.
+  const preloadDistance = libraryMode.value === "items" ? 480 : 160;
+  if (remaining >= preloadDistance) return;
 
   if (libraryMode.value === "items") {
     loadItemRows();
@@ -3200,6 +5409,8 @@ function handleModTableScroll(event) {
 }
 
 function applyGameDir(selected) {
+  window.clearTimeout(clothesIndexRetryTimer);
+  clothesIndexRetryTimer = 0;
   paths.gameDir = selected || "";
   paths.inputDir = selected ? `${selected}\\UserData\\chara` : "";
   clearResourceStats();
@@ -3207,30 +5418,116 @@ function applyGameDir(selected) {
   modDatabase.exists = false;
   itemDatabase.checked = false;
   itemDatabase.exists = false;
+  itemFilterAuthors.value = [];
+  itemFilterKinds.value = [];
   selectedCardFolder.value = "";
+  clothesLibrary.checked = false;
+  clothesLibrary.loading = false;
+  clothesLibrary.loadingMore = false;
+  clothesLibrary.detailLoading = false;
+  clothesLibrary.error = "";
+  clothesLibrary.validGameDir = false;
+  clothesLibrary.root = "";
+  clothesLibrary.total = null;
+  clothesLibrary.totalIsCandidate = true;
+  clothesLibrary.indexing = false;
+  clothesLibrary.nextOffset = 0;
+  clothesLibrary.hasMore = false;
+  resetClothesTree();
+  clothesCards.value = [];
+  selectedClothesFolder.value = "";
+  selectedClothesDetailPath.value = "";
+  selectedClothesDetail.value = null;
+  clothesSideMode.value = "tree";
 }
 
-async function saveAppSettings() {
-  const result = await window.desktopApi?.saveSettings?.({
-    gameDir: paths.gameDir,
-    inputDir: paths.inputDir,
-    outputDir: paths.outputDir,
-    coordinateExportDir: coordinateExportDir.value,
-    portablePackageDir: portablePackageDir.value,
-    blenderExecutablePath: blenderExecutablePath.value,
-    portablePackageCompress: portablePackageCompress.value,
-    portablePackageTypes: portablePackageTypes.value,
-    startupView: managerSettings.startupView,
-    favoriteCardTheme: managerSettings.favoriteCardTheme,
-    checkDatabaseChangesOnStartup: managerSettings.checkDatabaseChangesOnStartup
-  });
-  if (!result?.ok) {
-    log(`[Settings Error] ${result?.error || "settings save failed"}`);
+function applyGameSetupPayload(payload) {
+  const gameSetup = payload?.setup || {};
+  const width = Number(gameSetup.width) || 1280;
+  const height = Number(gameSetup.height) || 720;
+  setup.language = Number.isFinite(Number(gameSetup.language)) ? Number(gameSetup.language) : 0;
+  setup.quality = Number.isFinite(Number(gameSetup.quality)) ? Number(gameSetup.quality) : 1;
+  setup.display = Number.isFinite(Number(gameSetup.display)) ? Number(gameSetup.display) : 0;
+  setup.width = width;
+  setup.height = height;
+  setup.resolution = gameSetup.resolution || `${width} x ${height}`;
+  setup.fullscreen = Boolean(gameSetup.fullscreen);
+  setup.loaded = true;
+  setup.exists = Boolean(payload.exists);
+  setup.loading = false;
+  setup.saving = false;
+  setup.dirty = false;
+  setup.error = "";
+  setup.warning = payload.registry?.ok === false ? `配置已保存，但注册表同步失败：${payload.registry.error}` : "";
+  setup.filePath = payload.filePath || "";
+  setup.backupPath = payload.backupPath || "";
+  setup.displays = Array.isArray(payload.displays) && payload.displays.length
+    ? payload.displays
+    : [{ index: 0, label: "Display 0" }];
+  setup.resolutions = Array.isArray(payload.resolutions) && payload.resolutions.length
+    ? payload.resolutions
+    : [{ label: setup.resolution, width, height }];
+}
+
+async function loadGameSetup() {
+  if (!paths.gameDir) return false;
+  setup.loading = true;
+  setup.error = "";
+  setup.warning = "";
+  try {
+    const result = await window.desktopApi?.loadGameSetup?.(paths.gameDir);
+    if (!result?.ok) {
+      throw new Error(result?.error || "读取 setup.xml 失败");
+    }
+    applyGameSetupPayload(result);
+    log(`[Setup] 已读取 ${result.filePath}${result.exists ? "" : "（文件不存在，将按默认值创建）"}`);
+    return true;
+  } catch (error) {
+    setup.loading = false;
+    setup.loaded = false;
+    setup.dirty = false;
+    setup.error = error.message;
+    log(`[Setup Error] ${error.message}`);
+    return false;
   }
-  return result;
 }
 
-async function loadAppSettings() {
+async function saveAppSettings(options = {}) {
+  const saveOperation = settingsSaveQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const result = await window.desktopApi?.saveSettings?.({
+        gameDir: paths.gameDir,
+        inputDir: paths.inputDir,
+        outputDir: paths.outputDir,
+        workbenchAuthorId: workbenchAuthorId.value,
+        workbenchWorkspacePath: workbenchWorkspacePath.value,
+        workbenchActiveProjectId: workbenchActiveProjectId.value,
+        workbenchProjects: serializeWorkbenchProjects(),
+        coordinateExportDir: coordinateExportDir.value,
+        portablePackageDir: portablePackageDir.value,
+        blenderExecutablePath: blenderExecutablePath.value,
+        sb3utilityExecutablePath: sb3utilityExecutablePath.value,
+        portablePackageCompress: portablePackageCompress.value,
+        portablePackageTypes: [...portablePackageTypes.value],
+        characterCardLoadOptions: [...cardLoadPrompt.selected],
+        startupView: managerSettings.startupView,
+        favoriteCardTheme: managerSettings.favoriteCardTheme,
+        checkDatabaseChangesOnStartup: managerSettings.checkDatabaseChangesOnStartup,
+        wallpaperPath: managerSettings.wallpaperPath,
+        wallpaperType: managerSettings.wallpaperType,
+        clearSb3UtilityExecutablePath: options.clearSb3UtilityExecutablePath === true
+      });
+      if (!result?.ok) {
+        log(`[Settings Error] ${result?.error || "settings save failed"}`);
+      }
+      return result;
+    });
+  settingsSaveQueue = saveOperation.catch(() => undefined);
+  return saveOperation;
+}
+
+async function loadAppSettings({ loadBackendData = true } = {}) {
   try {
     const result = await measureStep("loadSettings", () => window.desktopApi?.loadSettings?.());
     if (!result?.ok) {
@@ -3240,29 +5537,66 @@ async function loadAppSettings() {
     coordinateExportDir.value = result.settings?.coordinateExportDir || "";
     portablePackageDir.value = result.settings?.portablePackageDir || "";
     blenderExecutablePath.value = result.settings?.blenderExecutablePath || "";
+    sb3utilityExecutablePath.value = result.settings?.sb3utilityExecutablePath || "";
     portablePackageCompress.value = result.settings?.portablePackageCompress !== false;
     portablePackageTypes.value = Array.isArray(result.settings?.portablePackageTypes)
       ? PORTABLE_PACKAGE_TYPES.map((type) => type.key).filter((type) => result.settings.portablePackageTypes.includes(type))
       : PORTABLE_PACKAGE_TYPES.map((type) => type.key);
+    cardLoadPrompt.selected = Array.isArray(result.settings?.characterCardLoadOptions)
+      ? CARD_LOAD_OPTIONS.map((option) => option.key).filter((optionKey) => result.settings.characterCardLoadOptions.includes(optionKey))
+      : CARD_LOAD_OPTIONS.map((option) => option.key);
     managerSettings.startupView = result.settings?.startupView || "start";
     managerSettings.favoriteCardTheme = ["gold", "neon", "sakura", "obsidian"].includes(result.settings?.favoriteCardTheme)
       ? result.settings.favoriteCardTheme
       : "gold";
     managerSettings.checkDatabaseChangesOnStartup = result.settings?.checkDatabaseChangesOnStartup !== false;
+    managerSettings.wallpaperPath = result.settings?.wallpaperPath || "";
+    managerSettings.wallpaperType = result.settings?.wallpaperType || "";
+    await refreshWallpaperPreview();
+    const cachedWorkbenchProfile = readWorkbenchProfileCache();
+    workbenchAuthorId.value = result.settings?.workbenchAuthorId || cachedWorkbenchProfile.authorId;
+    workbenchWorkspacePath.value = result.settings?.workbenchWorkspacePath || cachedWorkbenchProfile.workspacePath;
+    workbenchActiveProjectId.value = result.settings?.workbenchActiveProjectId || "";
+    workbenchProjects.value = Array.isArray(result.settings?.workbenchProjects)
+      ? result.settings.workbenchProjects
+      : [];
     paths.outputDir = result.settings?.outputDir || "";
-    activeView.value = managerSettings.startupView;
     const gameDir = result.settings?.gameDir || "";
-    if (!gameDir) return;
     applyGameDir(gameDir);
+    await refreshWorkbenchProjects({ persist: true });
+    activeView.value = managerSettings.startupView;
+    if (!gameDir || !loadBackendData) return;
+    await measureStep("loadGameSetup after settings", () => loadGameSetup());
     log(`[Settings] 已读取游戏目录：${gameDir}`);
     await measureStep("check_game_dir task", () => submitTask("check_game_dir"));
     await measureStep("loadCardTree after settings", () => loadCardTree());
+    await measureStep("loadClothesTree after settings", () => ensureClothesLibraryLoaded());
     if (managerSettings.checkDatabaseChangesOnStartup) {
       await measureStep("checkStartupDatabaseChanges", () => checkStartupDatabaseChanges());
     }
   } catch (error) {
     log(`[Settings Error] ${error.message}`);
   }
+}
+
+async function selectWallpaper() {
+  const selected = await window.desktopApi?.selectWallpaperFile?.("选择应用壁纸", managerSettings.wallpaperPath);
+  if (!selected?.path) return;
+  managerSettings.wallpaperPath = selected.path;
+  managerSettings.wallpaperType = selected.type || (/\.mp4$/i.test(selected.path) ? "video" : "image");
+  await refreshWallpaperPreview();
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "壁纸已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function clearWallpaper() {
+  managerSettings.wallpaperPath = "";
+  managerSettings.wallpaperType = "";
+  wallpaperDataUrl.value = "";
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "已恢复默认壁纸" : `保存失败：${result?.error || "未知错误"}`;
 }
 
 async function updateManagerSetting(key, value) {
@@ -3304,6 +5638,82 @@ async function saveDefaultOutputDirectory(directoryPath) {
   return result;
 }
 
+async function saveWorkbenchProfile(authorId, workspacePath) {
+  workbenchAuthorId.value = String(authorId || "").trim();
+  workbenchWorkspacePath.value = String(workspacePath || "").trim();
+  writeWorkbenchProfileCache(workbenchAuthorId.value, workbenchWorkspacePath.value);
+  const result = await saveAppSettings();
+  if (!result?.ok) {
+    log(`[Settings Error] ${result?.error || "workbench profile save failed"}`);
+    return result;
+  }
+  await refreshWorkbenchProjects({ persist: true });
+  return result;
+}
+
+async function setWorkbenchActiveProject(projectId) {
+  const nextId = String(projectId || "").trim();
+  const project = workbenchProjectsInCurrentWorkspace().find((item) => String(item?.id || "") === nextId);
+  if (!project) return { ok: false, error: "工程不在当前工作空间内" };
+
+  const previousId = workbenchActiveProjectId.value;
+  workbenchActiveProjectId.value = nextId;
+  const result = await saveAppSettings();
+  if (!result?.ok) {
+    workbenchActiveProjectId.value = previousId;
+    return result;
+  }
+  return { ok: true, project };
+}
+
+async function createWorkbenchProject(name) {
+  const result = await window.desktopApi?.createWorkbenchProject?.({
+    name: String(name || "").trim(),
+    authorId: workbenchAuthorId.value,
+    workspacePath: workbenchWorkspacePath.value
+  });
+  if (!result?.ok || !result.project) {
+    log(`[Workbench Error] ${result?.error || "workbench project creation failed"}`);
+    return result || { ok: false, error: "模组工程创建失败" };
+  }
+
+  workbenchProjects.value = [...workbenchProjects.value, result.project];
+  syncWorkbenchActiveProject();
+  const saved = await saveAppSettings();
+  if (!saved?.ok) {
+    log(`[Settings Error] ${saved?.error || "workbench project save failed"}`);
+    return { ok: false, error: `工程已创建，但项目记录保存失败：${saved?.error || "未知错误"}`, project: result.project };
+  }
+  log(`[Workbench] Created project: ${result.project.path}`);
+  return result;
+}
+
+async function deleteWorkbenchProject(project) {
+  const projectId = String(project?.id || "").trim();
+  const target = workbenchProjects.value.find((item) => String(item?.id || "") === projectId);
+  if (!target) return { ok: false, error: "工程不存在或已被删除" };
+
+  const result = await window.desktopApi?.deleteWorkbenchProject?.({
+    projectId,
+    projectPath: target.path,
+    workspacePath: workbenchWorkspacePath.value
+  });
+  if (!result?.ok) {
+    log(`[Workbench Error] ${result?.error || "workbench project deletion failed"}`);
+    return result || { ok: false, error: "工程删除失败" };
+  }
+
+  workbenchProjects.value = workbenchProjects.value.filter((item) => String(item?.id || "") !== projectId);
+  syncWorkbenchActiveProject();
+  const saved = await saveAppSettings();
+  if (!saved?.ok) {
+    log(`[Settings Error] ${saved?.error || "workbench project save failed"}`);
+    return { ok: true, warning: `工程已删除，但项目记录保存失败：${saved?.error || "未知错误"}`, project: target };
+  }
+  log(`[Workbench] Deleted project: ${target.path}`);
+  return { ok: true, project: target };
+}
+
 async function selectBlenderExecutable() {
   const selected = await window.desktopApi?.selectBlenderExecutable?.("选择 Blender 可执行文件（blender.exe）");
   if (!selected) return;
@@ -3320,15 +5730,37 @@ async function clearBlenderExecutable() {
   settingsNotice.message = result?.ok ? "Blender 路径已清除" : `保存失败：${result?.error || "未知错误"}`;
 }
 
+async function selectSb3UtilityExecutable() {
+  const selected = await window.desktopApi?.selectSb3UtilityExecutable?.("选择 SB3Utility 可执行文件（.exe）");
+  if (!selected) return;
+  sb3utilityExecutablePath.value = selected;
+  const result = await saveAppSettings();
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "SB3Utility 路径已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function resetSb3UtilityExecutable() {
+  sb3utilityExecutablePath.value = "";
+  const result = await saveAppSettings({ clearSb3UtilityExecutablePath: true });
+  if (result?.ok) {
+    sb3utilityExecutablePath.value = result.settings?.sb3utilityExecutablePath || "";
+  }
+  settingsNotice.type = result?.ok ? "success" : "error";
+  settingsNotice.message = result?.ok ? "SB3Utility 路径已恢复默认" : `保存失败：${result?.error || "未知错误"}`;
+}
+
 async function selectGameDir() {
   const selected = await window.desktopApi?.selectDirectory?.("选择 HS2 目录");
   if (!selected) return;
   applyGameDir(selected);
   await saveAppSettings();
   log(`[Directory] 选择游戏目录: ${selected}`);
+  await loadGameSetup();
   await submitTask("check_game_dir");
   await loadCardTree();
+  await ensureClothesLibraryLoaded({ force: true });
   await checkStartupDatabaseChanges();
+  await loadItemFilters();
 }
 
 async function launchExecutable(launchType) {
@@ -3343,13 +5775,24 @@ async function launchExecutable(launchType) {
     return;
   }
 
+  if (!setup.loaded) {
+    log(`[Launch Error] ${labels[launchType] || "启动"}: setup.xml 尚未成功读取。`);
+    return;
+  }
+
+  if (setup.dirty && !(await saveSetup())) {
+    log(`[Launch Error] ${labels[launchType] || "启动"}: 请先修复配置保存错误。`);
+    return;
+  }
+
   try {
     const result = await window.desktopApi?.launchGameExecutable?.(launchType, paths.gameDir);
     if (!result?.ok) {
       log(`[Launch Error] ${labels[launchType] || "Launch"}: ${result?.error || "Launch failed"}`);
       return;
     }
-    log(`[Launch] ${labels[launchType]}: ${result.executable}`);
+    const route = result.mode === "ipa" ? "IPA.exe --launch" : result.executable;
+    log(`[Launch] ${labels[launchType]}: ${route}`);
   } catch (error) {
     log(`[Launch Error] ${labels[launchType] || "启动"}: ${error.message}`);
   }
@@ -3408,22 +5851,64 @@ async function waitForBackendReady(timeoutMs = 20000) {
   return false;
 }
 
+function toPlainTaskPayload(value) {
+  if (Array.isArray(value)) return value.map((item) => toPlainTaskPayload(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, toPlainTaskPayload(item)])
+    );
+  }
+  return value;
+}
+
 function buildPayload(overrides = {}) {
-  return {
+  return toPlainTaskPayload({
     game_dir: String(paths.gameDir || ""),
     input_dir: String(paths.inputDir || ""),
     output_dir: String(paths.outputDir || ""),
     card_paths: Array.from(selectedCards.value),
     zipmod_extract_mode: String(extractMode.value || "copy"),
     ...overrides
-  };
+  });
 }
 
 function applyTask(task) {
   rememberTask(task);
+  if (task.task_type === "download_card_missing_mods") {
+    const guids = cardDependencyRemote.taskGuids[task.id] || [];
+    if (guids.length) {
+      const taskProgress = Math.max(0, Math.min(100, Number(task.progress || 0)));
+      const taskPhaseProgress = Math.max(0, Math.min(100, Number(task.phase_progress || 0)));
+      const nextProgress = { ...cardDependencyRemote.progress };
+      const nextStatuses = { ...cardDependencyRemote.statuses };
+      for (const guid of guids) {
+        nextProgress[guid] = taskProgress;
+        nextStatuses[guid] = task.status;
+      }
+      cardDependencyRemote.progress = nextProgress;
+      cardDependencyRemote.statuses = nextStatuses;
+      cardDependencyRemote.phase = String(task.phase || "");
+      cardDependencyRemote.phaseProgress = taskPhaseProgress;
+      cardDependencyRemote.downloadSpeedBps = Math.max(0, Number(task.download_speed_bps || 0));
+      cardDependencyRemote.downloadedBytes = Math.max(0, Number(task.downloaded_bytes || 0));
+      cardDependencyRemote.totalBytes = Math.max(0, Number(task.total_bytes || 0));
+      cardDependencyRemote.currentFile = String(task.current_file || "");
+      if (cardDependencyRemote.allTaskId === task.id) {
+        cardDependencyRemote.allProgress = taskProgress;
+        cardDependencyRemote.allStatus = task.status;
+        cardDependencyRemote.allPhase = String(task.phase || "");
+        cardDependencyRemote.allPhaseProgress = taskPhaseProgress;
+        cardDependencyRemote.allDownloadSpeedBps = Math.max(0, Number(task.download_speed_bps || 0));
+        cardDependencyRemote.allDownloadedBytes = Math.max(0, Number(task.downloaded_bytes || 0));
+        cardDependencyRemote.allTotalBytes = Math.max(0, Number(task.total_bytes || 0));
+        cardDependencyRemote.allCurrentFile = String(task.current_file || "");
+      }
+    }
+  }
   const isDatabaseTask = task.task_type === "build_mod_database";
-  if (isDatabaseTask) {
-    taskName.value = "重建数据库";
+  const isCardDatabaseTask = task.task_type === "build_card_database";
+  if (isDatabaseTask || isCardDatabaseTask) {
+    taskName.value = isDatabaseTask ? "重建数据库" : "扫描人物卡";
     progress.value = Number(task.progress || 0);
     taskId.value = task.id || taskId.value;
   }
@@ -3454,6 +5939,7 @@ function applyTask(task) {
   if (isDatabaseTask) {
     stats.zipmods = task.data?.stats?.primary_zipmods ?? stats.zipmods;
     stats.modItems = task.data?.stats?.mod_items ?? stats.modItems;
+    stats.builtinItems = task.data?.stats?.builtin_items ?? stats.builtinItems;
     if (task.status === "completed") {
       taskHint.value = "数据库已创建";
     } else if (task.status === "failed") {
@@ -3470,6 +5956,13 @@ function applyTask(task) {
         ensureModDatabaseLoaded({ force: true });
       }
       refreshCharacterCardsAfterDatabaseBuild();
+    }
+  }
+  if (isCardDatabaseTask) {
+    if (task.status === "completed") {
+      taskHint.value = "人物卡数据已更新";
+    } else if (task.status === "failed") {
+      taskHint.value = "人物卡数据扫描失败";
     }
   }
   if (
@@ -3520,6 +6013,11 @@ async function openGameDirectory(relativePath) {
   if (!result?.ok) log(`[Directory Error] ${result?.error || "无法打开目录"}: ${directoryPath}`);
 }
 
+async function openClothesDirectory(relativePath = "") {
+  const suffix = relativePath ? `\\${relativePath}` : "";
+  return openGameDirectory(`UserData\\coordinate${suffix}`);
+}
+
 async function pollTask(id, options = {}) {
   const { manageBusy = true, onDone = null } = options;
   let finalTask = null;
@@ -3532,7 +6030,7 @@ async function pollTask(id, options = {}) {
       }
       applyTask(result.task);
       finalTask = result.task;
-      if (["completed", "failed"].includes(result.task.status)) break;
+      if (["completed", "failed", "cancelled"].includes(result.task.status)) break;
       await new Promise((resolve) => window.setTimeout(resolve, 350));
     }
     if (finalTask?.status === "completed") await loadAchievements({ notify: true });
@@ -3566,7 +6064,7 @@ async function importExternalZipmods() {
   }
   const sourceDir = await window.desktopApi?.selectDirectory?.("选择外部模组文件夹");
   if (!sourceDir) return;
-  taskHint.value = "正在导入外部 zipmod";
+  taskHint.value = "正在导入外部 zipmod / zip";
   await submitTask("import_external_zipmods", { source_dir: sourceDir });
 }
 
@@ -3621,7 +6119,7 @@ async function submitTask(type, overrides = {}) {
   }
 }
 
-async function submitTaskInBackground(type, overrides = {}, onDone = null) {
+async function submitTaskInBackground(type, overrides = {}, onDone = null, onStarted = null) {
   if (!(await waitForBackendReady())) {
     throw new Error(`后端未就绪，无法提交任务：${type}`);
   }
@@ -3634,6 +6132,7 @@ async function submitTaskInBackground(type, overrides = {}, onDone = null) {
     throw new Error(result.error || "unknown error");
   }
   applyTask(result.task);
+  if (typeof onStarted === "function") onStarted(result.task);
   void pollTask(result.task.id, { manageBusy: false, onDone }).catch((error) => {
     log(`[Task Error] ${error.message}`);
     if (typeof onDone === "function") {
@@ -3706,6 +6205,18 @@ function openCardDeletePrompt() {
   if (selectedCount.value === 0 || cardDeletePrompt.busy) return;
   cardDeletePrompt.error = "";
   cardDeletePrompt.open = true;
+}
+
+function openSelectedCardDeletePrompt() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardSingleDeletePrompt.busy) return;
+  cardSingleDeletePrompt.card = {
+    name: card.name,
+    relativePath: card.relativePath,
+    coverUrl: card.coverUrl
+  };
+  cardSingleDeletePrompt.error = "";
+  cardSingleDeletePrompt.open = true;
 }
 
 function selectedCardRelativePaths() {
@@ -3893,6 +6404,10 @@ function toggleCardSelection(id) {
 
 function handleCardClick(card) {
   if (!card) return;
+  cardLoadPrompt.open = false;
+  cardLoadPrompt.error = "";
+  cardLoadNotice.type = "";
+  cardLoadNotice.message = "";
   naviActionNotice.type = "";
   naviActionNotice.message = "";
   coordinateExportNotice.type = "";
@@ -3909,6 +6424,11 @@ function handleCardClick(card) {
   cardRatingNotice.message = "";
   cardTagNotice.type = "";
   cardTagNotice.message = "";
+  cardDependencyRemote.loading = false;
+  cardDependencyRemote.error = "";
+  cardDependencyRemote.byGuid = {};
+  cardDependencyRemote.busyGuids = {};
+  cardDependencyRemote.notices = {};
   selectedCardDetailPath.value = card.absolutePath;
   loadSelectedCardProfile(card);
   if (cardBulkMode.value) {
@@ -4067,8 +6587,9 @@ function uniqueCardTags(values) {
 async function openCardTagPrompt() {
   const card = selectedCardDetail.value;
   if (!card?.relativePath || cardTagPrompt.busy) return;
-  cardTagPrompt.selected = uniqueCardTags(card.tags);
-  cardTagPrompt.available = uniqueCardTags([...cardTagOptions.value, ...cardTagPrompt.selected]);
+  cardTagPrompt.current = uniqueCardTags(card.tags);
+  cardTagPrompt.selected = [...cardTagPrompt.current];
+  cardTagPrompt.available = uniqueCardTags([...cardTagOptions.value, ...cardTagPrompt.current]);
   cardTagPrompt.draft = "";
   cardTagPrompt.error = "";
   cardTagPrompt.open = true;
@@ -4089,7 +6610,7 @@ async function loadCardTagCatalogForPrompt(prompt) {
     const result = await window.desktopApi?.backendRequest?.(
       `/library/cards/tags?game_dir=${encodeQuery(paths.gameDir)}`
     );
-    if (!result?.ok) throw new Error(result?.error || "已有标签读取失败");
+    if (!result?.ok) throw new Error(result?.error || "人物卡库标签读取失败");
     prompt.available = uniqueCardTags([
       ...(result.tags || []),
       ...prompt.available
@@ -4374,6 +6895,9 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
             }
           : null
       }));
+      card.dependencyCount = selectedCardDependencies.value.length;
+      card.missingCount = selectedCardDependencies.value.filter((dependency) => !dependency.matched).length;
+      void loadCardDependencyRemoteCandidates(targetPath, selectedCardDependencies.value);
     }
   } catch (error) {
     if (selectedCardDetailPath.value === targetPath) {
@@ -4384,6 +6908,336 @@ async function loadSelectedCardProfile(card = selectedCardDetail.value) {
     if (selectedCardDetailPath.value === targetPath) {
       selectedCardProfileLoading.value = false;
     }
+  }
+}
+
+function normalizeCardDependencyGuid(dependency) {
+  return String(dependency?.mod_id || dependency?.zipmod?.guid || dependency?.item?.zipmod_guid || "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function cardDependencyRemoteState(dependency) {
+  const guid = normalizeCardDependencyGuid(dependency);
+  if (!guid || dependency?.matched) return null;
+  const entry = cardDependencyRemote.byGuid[guid];
+  if (cardDependencyRemote.loading && !entry) return { status: "loading", label: "检查中" };
+  if (entry?.can_download) return { status: "available", label: "安装", candidate: entry.candidates?.[0] };
+  if (entry && !entry.can_download) return { status: "unavailable", label: "无法获取", reason: entry.reason };
+  return { status: "unavailable", label: "无法获取", reason: "远程索引中没有有效记录" };
+}
+
+function cardDependencyRemoteFor(dependency) {
+  return cardDependencyRemoteState(dependency);
+}
+
+function cardDependencyGuidFromCandidate(candidate) {
+  return String(candidate?.guid_norm || candidate?.guid || "").trim().toLocaleLowerCase();
+}
+
+function registerCardDependencyDownloadTask(task, guids, { all = false } = {}) {
+  const taskId = String(task?.id || "").trim();
+  const normalizedGuids = [...new Set((guids || []).map((guid) => String(guid || "").trim().toLocaleLowerCase()).filter(Boolean))];
+  if (!taskId || !normalizedGuids.length) return;
+  cardDependencyRemote.taskGuids = { ...cardDependencyRemote.taskGuids, [taskId]: normalizedGuids };
+  const nextTaskIds = { ...cardDependencyRemote.taskIds };
+  const nextProgress = { ...cardDependencyRemote.progress };
+  const nextStatuses = { ...cardDependencyRemote.statuses };
+  for (const guid of normalizedGuids) {
+    nextTaskIds[guid] = taskId;
+    nextProgress[guid] = Number(task?.progress || 0);
+    nextStatuses[guid] = task?.status || "queued";
+  }
+  cardDependencyRemote.taskIds = nextTaskIds;
+  cardDependencyRemote.progress = nextProgress;
+  cardDependencyRemote.statuses = nextStatuses;
+  cardDependencyRemote.phase = String(task?.phase || "preparing");
+  cardDependencyRemote.phaseProgress = Math.max(0, Math.min(100, Number(task?.phase_progress || 0)));
+  cardDependencyRemote.downloadSpeedBps = Math.max(0, Number(task?.download_speed_bps || 0));
+  cardDependencyRemote.downloadedBytes = Math.max(0, Number(task?.downloaded_bytes || 0));
+  cardDependencyRemote.totalBytes = Math.max(0, Number(task?.total_bytes || 0));
+  cardDependencyRemote.currentFile = String(task?.current_file || "");
+  if (all) {
+    cardDependencyRemote.allTaskId = taskId;
+    cardDependencyRemote.allProgress = Number(task?.progress || 0);
+    cardDependencyRemote.allStatus = task?.status || "queued";
+    cardDependencyRemote.allPhase = String(task?.phase || "preparing");
+    cardDependencyRemote.allPhaseProgress = Math.max(0, Math.min(100, Number(task?.phase_progress || 0)));
+    cardDependencyRemote.allDownloadSpeedBps = Math.max(0, Number(task?.download_speed_bps || 0));
+    cardDependencyRemote.allDownloadedBytes = Math.max(0, Number(task?.downloaded_bytes || 0));
+    cardDependencyRemote.allTotalBytes = Math.max(0, Number(task?.total_bytes || 0));
+    cardDependencyRemote.allCurrentFile = String(task?.current_file || "");
+  }
+  applyTask(task);
+}
+
+function clearCardDependencyDownloadTask(taskId, guids) {
+  const normalizedTaskId = String(taskId || "").trim();
+  const normalizedGuids = [...new Set((guids || []).map((guid) => String(guid || "").trim().toLocaleLowerCase()).filter(Boolean))];
+  const nextTaskIds = { ...cardDependencyRemote.taskIds };
+  const nextProgress = { ...cardDependencyRemote.progress };
+  const nextStatuses = { ...cardDependencyRemote.statuses };
+  const nextBusy = { ...cardDependencyRemote.busyGuids };
+  for (const guid of normalizedGuids) {
+    if (nextTaskIds[guid] === normalizedTaskId) delete nextTaskIds[guid];
+    delete nextProgress[guid];
+    delete nextStatuses[guid];
+    delete nextBusy[guid];
+  }
+  const nextTaskGuids = { ...cardDependencyRemote.taskGuids };
+  if (normalizedTaskId) delete nextTaskGuids[normalizedTaskId];
+  cardDependencyRemote.taskIds = nextTaskIds;
+  cardDependencyRemote.taskGuids = nextTaskGuids;
+  cardDependencyRemote.progress = nextProgress;
+  cardDependencyRemote.statuses = nextStatuses;
+  cardDependencyRemote.busyGuids = nextBusy;
+  if (cardDependencyRemote.allTaskId === normalizedTaskId) {
+    cardDependencyRemote.allTaskId = "";
+    cardDependencyRemote.allProgress = 0;
+    cardDependencyRemote.allStatus = "";
+    cardDependencyRemote.allPhase = "";
+    cardDependencyRemote.allPhaseProgress = 0;
+    cardDependencyRemote.allDownloadSpeedBps = 0;
+    cardDependencyRemote.allDownloadedBytes = 0;
+    cardDependencyRemote.allTotalBytes = 0;
+    cardDependencyRemote.allCurrentFile = "";
+    cardDependencyRemote.installingAll = false;
+  }
+  if (!Object.keys(nextTaskIds).length) {
+    cardDependencyRemote.phase = "";
+    cardDependencyRemote.phaseProgress = 0;
+    cardDependencyRemote.downloadSpeedBps = 0;
+    cardDependencyRemote.downloadedBytes = 0;
+    cardDependencyRemote.totalBytes = 0;
+    cardDependencyRemote.currentFile = "";
+  }
+}
+
+async function toggleCardDependencyDownload(dependency) {
+  const guid = normalizeCardDependencyGuid(dependency);
+  const taskId = cardDependencyRemote.taskIds[guid];
+  if (!taskId) return false;
+  return toggleCardDependencyDownloadTask(taskId, [guid]);
+}
+
+async function toggleCardDependencyDownloadTask(taskId, guids = cardDependencyRemote.taskGuids[taskId] || []) {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return false;
+  const currentStatus = cardDependencyRemote.statuses[guids[0]] || cardDependencyRemote.allStatus;
+  const action = currentStatus === "paused" ? "resume" : "pause";
+  const result = await window.desktopApi?.backendRequest?.(`/tasks/${encodeURIComponent(normalizedTaskId)}/control`, {
+    method: "POST",
+    body: { action }
+  });
+  if (!result?.ok) {
+    const nextNotices = { ...cardDependencyRemote.notices };
+    for (const guid of guids) nextNotices[guid] = result?.error || "无法控制下载";
+    cardDependencyRemote.notices = nextNotices;
+    return false;
+  }
+  applyTask(result.task);
+  return true;
+}
+
+async function cancelCardDependency(dependency) {
+  const guid = normalizeCardDependencyGuid(dependency);
+  const taskId = cardDependencyRemote.taskIds[guid];
+  if (!taskId) return false;
+  const result = await window.desktopApi?.backendRequest?.(`/tasks/${encodeURIComponent(taskId)}/control`, {
+    method: "POST",
+    body: { action: "cancel" }
+  });
+  if (!result?.ok) {
+    cardDependencyRemote.notices = {
+      ...cardDependencyRemote.notices,
+      [guid]: result?.error || "无法取消下载"
+    };
+    return false;
+  }
+  applyTask(result.task);
+  return true;
+}
+
+async function toggleAllCardDependencies() {
+  const taskId = cardDependencyRemote.allTaskId;
+  if (!taskId) return false;
+  return toggleCardDependencyDownloadTask(taskId, cardDependencyRemote.taskGuids[taskId] || []);
+}
+
+const cardDependencyRemoteSummary = computed(() => {
+  const available = new Map();
+  let missingCount = 0;
+  for (const dependency of selectedCardDependencies.value || []) {
+    if (dependency?.matched) continue;
+    missingCount += 1;
+    const guid = normalizeCardDependencyGuid(dependency);
+    const candidate = cardDependencyRemote.byGuid[guid]?.candidates?.[0];
+    if (guid && candidate?.remote_id && !available.has(guid)) {
+      available.set(guid, candidate);
+    }
+  }
+  return {
+    missingCount,
+    availableCount: available.size,
+    candidates: [...available.values()]
+  };
+});
+const cardDependencyRemoteBusy = computed(() => Object.keys(cardDependencyRemote.busyGuids).length > 0);
+
+function formatDownloadSpeed(bytesPerSecond) {
+  const speed = Math.max(0, Number(bytesPerSecond || 0)) / (1024 * 1024);
+  return `${speed >= 10 ? speed.toFixed(1) : speed.toFixed(2)} MB/s`;
+}
+
+function cardDependencyInlineProgress(dependency) {
+  const guid = normalizeCardDependencyGuid(dependency);
+  if (!guid || !cardDependencyRemote.taskIds[guid]) return null;
+  const phaseValue = String(cardDependencyRemote.phase || "");
+  const phase = phaseValue === "preparing" || !phaseValue ? "download" : phaseValue;
+  if (!["download", "install"].includes(phase)) return null;
+  const phaseProgress = Math.max(0, Math.min(100, Number(cardDependencyRemote.phaseProgress || 0)));
+  return {
+    phase,
+    downloadProgress: phase === "download" ? phaseProgress : 100,
+    installProgress: phase === "install" ? phaseProgress : (phase === "completed" ? 100 : 0),
+    downloadSpeedBps: Math.max(0, Number(cardDependencyRemote.downloadSpeedBps || 0))
+  };
+}
+
+async function loadCardDependencyRemoteCandidates(targetPath, dependencies) {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || selectedCardDetailPath.value !== targetPath) return;
+  const missingGuids = [...new Set(
+    (dependencies || [])
+      .filter((dependency) => !dependency?.matched)
+      .map(normalizeCardDependencyGuid)
+      .filter(Boolean)
+  )];
+  cardDependencyRemote.loading = true;
+  cardDependencyRemote.error = "";
+  cardDependencyRemote.byGuid = {};
+  syncMissingItemPromptRemote();
+  try {
+    const query = new URLSearchParams({
+      game_dir: String(paths.gameDir || ""),
+      path: String(card.relativePath || "")
+    });
+    const result = await window.desktopApi?.backendRequest?.(`/library/cards/missing-mods?${query.toString()}`);
+    if (!result?.ok) throw new Error(result?.error || "无法读取远程模组候选");
+    const entries = {};
+    for (const group of result.groups || []) entries[String(group.guid_norm || "").toLocaleLowerCase()] = group;
+    cardDependencyRemote.byGuid = Object.fromEntries(missingGuids.map((guid) => [guid, entries[guid] || { can_download: false, reason: "远程索引中没有有效记录" }]));
+    syncMissingItemPromptRemote();
+  } catch (error) {
+    cardDependencyRemote.error = error.message;
+    syncMissingItemPromptRemote();
+    log(`[Cards Completion Error] ${error.message}`);
+  } finally {
+    cardDependencyRemote.loading = false;
+    syncMissingItemPromptRemote();
+  }
+}
+
+async function installCardDependency(dependency) {
+  const card = selectedCardDetail.value;
+  const guid = normalizeCardDependencyGuid(dependency);
+  if (cardDependencyRemote.taskIds[guid]) {
+    await toggleCardDependencyDownload(dependency);
+    return;
+  }
+  const remote = cardDependencyRemote.byGuid[guid];
+  const remoteId = remote?.candidates?.[0]?.remote_id;
+  if (!card?.relativePath || !remoteId || cardDependencyRemote.busyGuids[guid]) return;
+  cardDependencyRemote.busyGuids = { ...cardDependencyRemote.busyGuids, [guid]: true };
+  cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: "正在安装..." };
+  try {
+    const task = await submitTaskInBackground(
+      "download_card_missing_mods",
+      { remote_ids: [remoteId] },
+      async (finalTask) => {
+        const data = finalTask.data || {};
+        if (finalTask.status === "completed") {
+          cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: "安装完成" };
+          await loadSelectedCardProfile(card);
+          const currentCard = selectedCardDetail.value;
+          if (currentCard) {
+            currentCard.missingCount = (selectedCardDependencies.value || []).filter((item) => !item.matched).length;
+            currentCard.dependencyCount = selectedCardDependencies.value.length;
+          }
+        } else {
+          cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: finalTask.error || data.message || "安装失败" };
+        }
+        clearCardDependencyDownloadTask(finalTask.id, [guid]);
+      },
+      (startedTask) => registerCardDependencyDownloadTask(startedTask, [guid])
+    );
+    void task;
+  } catch (error) {
+    const nextBusy = { ...cardDependencyRemote.busyGuids };
+    delete nextBusy[guid];
+    cardDependencyRemote.busyGuids = nextBusy;
+    cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: error.message };
+    log(`[Cards Completion Error] ${error.message}`);
+  }
+}
+
+async function installAllCardDependencies() {
+  const card = selectedCardDetail.value;
+  const summary = cardDependencyRemoteSummary.value;
+  if (!card?.relativePath || !summary.candidates.length || cardDependencyRemote.installingAll || cardDependencyRemoteBusy.value) return;
+
+  const candidates = summary.candidates;
+  const remoteIds = candidates.map((candidate) => candidate.remote_id);
+  const guids = candidates.map(cardDependencyGuidFromCandidate);
+  const nextBusy = { ...cardDependencyRemote.busyGuids };
+  const nextNotices = { ...cardDependencyRemote.notices };
+  for (const candidate of candidates) {
+    const guid = String(candidate.guid_norm || candidate.guid || "").trim().toLocaleLowerCase();
+    if (!guid) continue;
+    nextBusy[guid] = true;
+    nextNotices[guid] = "等待安装...";
+  }
+  cardDependencyRemote.busyGuids = nextBusy;
+  cardDependencyRemote.notices = nextNotices;
+  cardDependencyRemote.installingAll = true;
+
+  try {
+    await submitTaskInBackground(
+      "download_card_missing_mods",
+      { remote_ids: remoteIds },
+      async (finalTask) => {
+        const data = finalTask.data || {};
+        const message = finalTask.status === "completed"
+          ? "安装完成"
+          : finalTask.error || data.message || "安装失败";
+        const completedNotices = { ...cardDependencyRemote.notices };
+        for (const candidate of candidates) {
+          const guid = String(candidate.guid_norm || candidate.guid || "").trim().toLocaleLowerCase();
+          if (guid) completedNotices[guid] = message;
+        }
+        cardDependencyRemote.notices = completedNotices;
+        if (finalTask.status === "completed") {
+          await loadSelectedCardProfile(card);
+          const currentCard = selectedCardDetail.value;
+          if (currentCard) {
+            currentCard.missingCount = (selectedCardDependencies.value || []).filter((item) => !item.matched).length;
+            currentCard.dependencyCount = selectedCardDependencies.value.length;
+          }
+        }
+        clearCardDependencyDownloadTask(finalTask.id, guids);
+      },
+      (startedTask) => registerCardDependencyDownloadTask(startedTask, guids, { all: true })
+    );
+  } catch (error) {
+    const failedNotices = { ...cardDependencyRemote.notices };
+    for (const guid of guids) {
+      if (guid) {
+        failedNotices[guid] = error.message;
+      }
+    }
+    cardDependencyRemote.notices = failedNotices;
+    clearCardDependencyDownloadTask(cardDependencyRemote.allTaskId, guids);
+    log(`[Cards Completion Error] ${error.message}`);
   }
 }
 
@@ -4462,6 +7316,94 @@ async function setSelectedCardAsNavi(slot) {
   }
 }
 
+function openCardLoadPrompt() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardLoadPrompt.busy) return;
+  cardLoadPrompt.error = "";
+  cardLoadNotice.type = "";
+  cardLoadNotice.message = "";
+  cardLoadPrompt.open = true;
+}
+
+function toggleCardLoadOption(key) {
+  if (cardLoadPrompt.busy || !CARD_LOAD_OPTIONS.some((option) => option.key === key)) return;
+  const selected = new Set(cardLoadPrompt.selected);
+  if (selected.has(key)) selected.delete(key);
+  else selected.add(key);
+  cardLoadPrompt.selected = CARD_LOAD_OPTIONS
+    .map((option) => option.key)
+    .filter((optionKey) => selected.has(optionKey));
+  cardLoadPrompt.error = "";
+  void saveAppSettings().catch((error) => {
+    log(`[Settings Error] ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+async function loadSelectedCardToGame() {
+  const card = selectedCardDetail.value;
+  if (!card?.relativePath || cardLoadPrompt.busy) return;
+  if (!cardLoadPrompt.selected.length) {
+    cardLoadPrompt.error = "请至少选择一项人物卡内容。";
+    return;
+  }
+
+  const request = window.desktopApi?.backendRequest;
+  if (typeof request !== "function") {
+    cardLoadPrompt.error = "资源通信接口尚未加载，请重启应用后再试。";
+    return;
+  }
+
+  const body = {
+    game_dir: paths.gameDir,
+    path: card.relativePath
+  };
+  for (const option of CARD_LOAD_OPTIONS) {
+    body[option.key] = cardLoadPrompt.selected.includes(option.key);
+  }
+
+  cardLoadPrompt.busy = true;
+  cardLoadPrompt.error = "";
+  cardLoadNotice.type = "info";
+  cardLoadNotice.message = `正在读取人物卡「${card.name}」…`;
+  try {
+    const submitted = await request("/game-card-loader/load", {
+      method: "POST",
+      body
+    });
+    if (!submitted?.ok) throw new Error(formatGameItemProbeError(submitted));
+    const accepted = submitted.data || {};
+    const commandId = String(accepted.commandId || "").trim();
+    if (!accepted.accepted || !commandId) {
+      throw new Error(formatGameItemProbeError(accepted));
+    }
+
+    for (let attempt = 0; attempt < 70; attempt += 1) {
+      await sleep(attempt === 0 ? 80 : 250);
+      const polled = await request(`/game-item-probe/command?id=${encodeURIComponent(commandId)}`);
+      if (!polled?.ok) throw new Error(formatGameItemProbeError(polled));
+      const command = polled.data || {};
+      if (command.status === "succeeded") {
+        cardLoadPrompt.open = false;
+        cardLoadNotice.type = "success";
+        cardLoadNotice.message = `已将人物卡「${card.name}」的所选内容读取到当前角色。`;
+        log(`[Game] 已读取人物卡：${card.relativePath}（${cardLoadPrompt.selected.join(", ")}）`);
+        return;
+      }
+      if (["failed", "expired"].includes(command.status)) {
+        throw new Error(formatGameItemProbeError(command));
+      }
+    }
+    throw new Error("人物卡读取命令超过 15 秒未完成，请确认角色制作器仍处于打开状态。");
+  } catch (error) {
+    cardLoadPrompt.error = error instanceof Error ? error.message : String(error);
+    cardLoadNotice.type = "error";
+    cardLoadNotice.message = cardLoadPrompt.error;
+    log(`[Game Card Error] ${cardLoadPrompt.error}`);
+  } finally {
+    cardLoadPrompt.busy = false;
+  }
+}
+
 function setCardDependencyFilter(value) {
   const normalizedValue = String(value || "");
   cardDependencyFilter.value = ["missing", "favorite"].includes(normalizedValue) || normalizedValue.startsWith("tag:")
@@ -4482,6 +7424,36 @@ function setCardDependencyFilter(value) {
   selectedCardProfile.value = null;
   selectedCardDependencies.value = [];
   selectedCardProfileError.value = "";
+  cardDependencyRemote.loading = false;
+  cardDependencyRemote.error = "";
+  cardDependencyRemote.byGuid = {};
+  cardDependencyRemote.busyGuids = {};
+  cardDependencyRemote.notices = {};
+  cardDependencyRemote.installingAll = false;
+  cardDependencyRemote.taskIds = {};
+  cardDependencyRemote.taskGuids = {};
+  cardDependencyRemote.progress = {};
+  cardDependencyRemote.statuses = {};
+  cardDependencyRemote.phase = "";
+  cardDependencyRemote.phaseProgress = 0;
+  cardDependencyRemote.downloadSpeedBps = 0;
+  cardDependencyRemote.downloadedBytes = 0;
+  cardDependencyRemote.totalBytes = 0;
+  cardDependencyRemote.currentFile = "";
+  cardDependencyRemote.allTaskId = "";
+  cardDependencyRemote.allProgress = 0;
+  cardDependencyRemote.allStatus = "";
+  cardDependencyRemote.allPhase = "";
+  cardDependencyRemote.allPhaseProgress = 0;
+  cardDependencyRemote.allDownloadSpeedBps = 0;
+  cardDependencyRemote.allDownloadedBytes = 0;
+  cardDependencyRemote.allTotalBytes = 0;
+  cardDependencyRemote.allCurrentFile = "";
+  missingItemPrompt.open = false;
+  missingItemPrompt.name = "";
+  missingItemPrompt.modId = "";
+  missingItemPrompt.property = "";
+  resetMissingItemPromptRemote();
   cardBulkMode.value = false;
 }
 
@@ -4665,18 +7637,170 @@ function clearSelectedCards() {
 }
 
 function updateSetup(key, value) {
-  setup[key] = value;
+  if (key === "resolution") {
+    const match = String(value || "").match(/(\d+)\s*x\s*(\d+)/i);
+    if (!match) return;
+    setup.width = Number(match[1]);
+    setup.height = Number(match[2]);
+    setup.resolution = `${setup.width} x ${setup.height}`;
+  } else if (["language", "quality", "display"].includes(key)) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setup[key] = Math.max(0, Math.round(parsed));
+  } else if (key === "fullscreen") {
+    setup.fullscreen = Boolean(value);
+  } else {
+    setup[key] = value;
+  }
+  setup.error = "";
+  setup.warning = "";
   setup.dirty = true;
 }
 
-function saveSetup() {
-  setup.dirty = false;
-  log("[Setup] setup.xml saved with backup placeholder.");
+async function saveSetup() {
+  if (!paths.gameDir || !setup.loaded || setup.saving) return false;
+  setup.saving = true;
+  setup.error = "";
+  setup.warning = "";
+  try {
+    const result = await window.desktopApi?.saveGameSetup?.(paths.gameDir, {
+      language: setup.language,
+      quality: setup.quality,
+      display: setup.display,
+      width: setup.width,
+      height: setup.height,
+      fullscreen: setup.fullscreen
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "保存 setup.xml 失败");
+    }
+    applyGameSetupPayload(result);
+    setup.dirty = false;
+    if (result.registry?.ok === false) {
+      log(`[Setup Warning] setup.xml 已保存，但注册表同步失败：${result.registry.error}`);
+    } else {
+      log(`[Setup] 已保存 ${result.filePath}${result.backupPath ? "，已生成 .bak 备份" : ""}`);
+    }
+    return true;
+  } catch (error) {
+    setup.error = error.message;
+    log(`[Setup Error] ${error.message}`);
+    return false;
+  } finally {
+    setup.saving = false;
+  }
 }
 
 function clearLogs() {
   logs.value = [];
   seenTaskMessages.value = new Set();
+}
+
+function formatTrashDate(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return date.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadTrash() {
+  if (trashLoading.value) return;
+  trashLoading.value = true;
+  trashError.value = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/trash");
+    if (!result?.ok) throw new Error(result?.error || "读取回收站失败");
+    trashEntries.value = Array.isArray(result.entries) ? result.entries : [];
+    trashRoot.value = String(result.root || "runtime/trash");
+  } catch (error) {
+    trashError.value = error.message;
+  } finally {
+    trashLoading.value = false;
+  }
+}
+
+async function submitSelectedCardDelete() {
+  const card = cardSingleDeletePrompt.card;
+  if (!card?.relativePath || cardSingleDeletePrompt.busy) return;
+
+  cardSingleDeletePrompt.busy = true;
+  cardSingleDeletePrompt.error = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/library/cards/delete", {
+      method: "POST",
+      body: {
+        game_dir: paths.gameDir,
+        path: card.relativePath
+      }
+    });
+    if (!result?.ok) throw new Error(result?.error || "人物卡删除失败");
+    cardSingleDeletePrompt.open = false;
+    log(`[Cards] 人物卡已移入回收站：${card.relativePath}`);
+    await loadCardTree();
+  } catch (error) {
+    cardSingleDeletePrompt.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    cardSingleDeletePrompt.busy = false;
+  }
+}
+
+async function restoreTrash(item) {
+  if (!item?.id || trashAction.value) return;
+  trashAction.value = `${item.kind}:${item.id}`;
+  trashError.value = "";
+  trashNotice.value = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.(`/trash/${encodeURIComponent(item.kind)}/${encodeURIComponent(item.id)}/restore`, { method: "POST" });
+    if (!result?.ok) throw new Error(result?.error || "恢复失败");
+    if (item.kind === "mods") {
+      await refreshModDatabaseList();
+    } else if (item.kind === "cards") {
+      await loadCardTree();
+      await refreshCurrentCardFolder();
+    }
+    trashNotice.value = result.index_warning || `已恢复：${item.name || item.file_name}`;
+    await loadTrash();
+  } catch (error) {
+    trashError.value = error.message;
+  } finally {
+    trashAction.value = "";
+  }
+}
+
+async function permanentlyDeleteTrash(item) {
+  if (!item?.id || trashAction.value) return;
+  if (!window.confirm(`永久删除“${item.name || item.file_name}”？此操作无法恢复。`)) return;
+  trashAction.value = `${item.kind}:${item.id}`;
+  trashError.value = "";
+  trashNotice.value = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.(`/trash/${encodeURIComponent(item.kind)}/${encodeURIComponent(item.id)}/delete`, { method: "POST" });
+    if (!result?.ok) throw new Error(result?.error || "永久删除失败");
+    trashNotice.value = `已永久删除：${item.name || item.file_name}`;
+    await loadTrash();
+  } catch (error) {
+    trashError.value = error.message;
+  } finally {
+    trashAction.value = "";
+  }
+}
+
+async function emptyTrash() {
+  if (!trashEntries.value.length || trashAction.value) return;
+  if (!window.confirm(`确定清空回收站中的 ${trashEntries.value.length} 个项目？此操作无法恢复。`)) return;
+  trashAction.value = "empty";
+  trashError.value = "";
+  trashNotice.value = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/trash/empty", { method: "POST" });
+    if (!result?.ok) throw new Error(result?.error || "清空回收站失败");
+    trashNotice.value = `已永久删除 ${result.removed_count || 0} 个项目`;
+    await loadTrash();
+  } catch (error) {
+    trashError.value = error.message;
+  } finally {
+    trashAction.value = "";
+  }
 }
 
 onMounted(() => {
@@ -4685,37 +7809,52 @@ onMounted(() => {
   log("[Mode] zipmod extract mode: Copy");
   log("[Backend] Python backend checking.");
   void (async () => {
-    if (await waitForBackendReady()) {
+    const backendIsReady = await waitForBackendReady();
+    if (backendIsReady) {
       log("[Backend] Python backend is ready.");
-      await measureStep("loadAppSettings", () => loadAppSettings());
-      await measureStep("loadAchievements", () => loadAchievements());
-      log(`[Startup] onMounted startup path completed in ${formatDurationMs(performance.now() - startedAt)}`);
     } else {
       log("[Backend Error] Python backend startup timed out.");
-      log(`[Startup] onMounted startup path failed in ${formatDurationMs(performance.now() - startedAt)}`);
     }
+    await measureStep("loadAppSettings", () => loadAppSettings({ loadBackendData: backendIsReady }));
+    if (backendIsReady) {
+      await measureStep("loadAchievements", () => loadAchievements());
+    }
+    log(`[Startup] onMounted startup path ${backendIsReady ? "completed" : "completed without backend"} in ${formatDurationMs(performance.now() - startedAt)}`);
   })();
+});
+
+onBeforeUnmount(() => {
+  stopCurrentGameStatePolling();
 });
 
 const appCtx = reactive({
   activeAction,
   activeView,
   backendStatus,
+  cardBrowserMode,
   analyzeDuplicateZipmods,
   achievements,
   achievementPreferences,
   achievementUnlockedCount,
   visibleAchievements,
   selectedAchievement,
+  managerSettings,
   formatAchievementProgress,
   loadAchievements,
   resetAchievementHistory,
   updateAchievementPreference,
   updateManagerSetting,
+  wallpaperSource,
+  wallpaperIsVideo,
+  selectWallpaper,
+  clearWallpaper,
   updatePortablePackageCompress,
   blenderExecutablePath,
   selectBlenderExecutable,
   clearBlenderExecutable,
+  sb3utilityExecutablePath,
+  selectSb3UtilityExecutable,
+  resetSb3UtilityExecutable,
   allVisibleCardsSelected,
   allVisibleModsSelected,
   badgeClass,
@@ -4726,6 +7865,7 @@ const appCtx = reactive({
   bulkAuthorSuggestions,
   bulkDeletePrompt,
   cardDeletePrompt,
+  cardSingleDeletePrompt,
   cardMovePrompt,
   cardMoveAvailable,
   cardMoveDestinationReady,
@@ -4740,12 +7880,24 @@ const appCtx = reactive({
   cardRatingNotice,
   cardTagNotice,
   cardTagPrompt,
+  cardTagPromptLibraryTags,
   cardTagFilter,
   cardTagFilterSuggestions,
   cardTagOptions,
   cardDependencyFilter,
   cardDependencyExportPrompt,
   cardDetailTab,
+  cardDependencyRemote,
+  cardDependencyRemoteSummary,
+  cardDependencyRemoteBusy,
+  formatDownloadSpeed,
+  cardDependencyInlineProgress,
+  cardDependencyRemoteFor,
+  normalizeCardDependencyGuid,
+  cancelCardDependency,
+  installCardDependency,
+  installAllCardDependencies,
+  toggleAllCardDependencies,
   coordinateExportDir,
   coordinateExportPrompt,
   coordinateExportNotice,
@@ -4756,8 +7908,28 @@ const appCtx = reactive({
   managerSettings,
   settingsNotice,
   cardFolderDisplay,
+  refreshCurrentCardFolder,
   cardFolders,
   cardLibrary,
+  clothesLibrary,
+  clothesFolders,
+  clothesCards,
+  visibleClothesCards,
+  clothesCardCountText,
+  selectedClothesFolder,
+  selectedClothesCard,
+  selectedClothesDetailPath,
+  clothesDetailTab,
+  clothesSearch,
+  clothesSort,
+  toggleClothesFolder,
+  selectClothesFolder,
+  loadClothesTree,
+  refreshClothesCards,
+  handleClothesCardClick,
+  loadMoreClothesCards,
+  handleClothesCardGridScroll,
+  clothesSideMode,
   cardProfileEditor,
   cards,
   characterSideMode,
@@ -4765,7 +7937,21 @@ const appCtx = reactive({
   cleaningDuplicateZipmods,
   cleanupDuplicateZipmods,
   clearLogs,
+  trashEntries,
+  filteredTrashEntries,
+  trashLoading,
+  trashAction,
+  trashError,
+  trashNotice,
+  trashRoot,
+  trashFilter,
+  loadTrash,
+  restoreTrash,
+  permanentlyDeleteTrash,
+  emptyTrash,
+  formatTrashDate,
   closeModAuthorFilterSoon,
+  closeItemAuthorFilterSoon,
   confirmDeleteSelectedItem,
   confirmDeleteSelectedMod,
   deleteItemPrompt,
@@ -4785,9 +7971,16 @@ const appCtx = reactive({
   exportSelectedCardPortablePackage,
   openCoordinateExportSettings,
   openPortablePackageSettings,
+  CARD_LOAD_OPTIONS,
+  cardLoadPrompt,
+  cardLoadNotice,
+  openCardLoadPrompt,
+  toggleCardLoadOption,
+  loadSelectedCardToGame,
   exitCardBulkMode,
   exitModBulkMode,
   filteredZipmodAuthorOptions,
+  filteredItemAuthorOptions,
   favoritingCardPath,
   ratingCardPath,
   formatBytes,
@@ -4807,18 +8000,24 @@ const appCtx = reactive({
   handleModTableScroll,
   isBusy,
   itemAuthorOptions,
+  itemAuthorFilterOpen,
   itemDatabase,
   itemDatabaseEmpty,
   itemFilterKinds,
   itemFilters,
+  itemViewMode,
   itemKindLabel,
   itemKindOptions,
+  loadItemFilters,
+  workbenchItemCategoryOptions,
+  isMapSceneItem,
   itemRows,
   itemTab,
   launchExecutable,
   libraryMode,
   loadItemRows,
   loadModRows,
+  loadGameSetup,
   locateSourceMod,
   log,
   logs,
@@ -4842,6 +8041,7 @@ const appCtx = reactive({
   openBulkRepairUnity3dPrompt,
   openCardDependencyExportPrompt,
   openCardDeletePrompt,
+  openSelectedCardDeletePrompt,
   openCardMovePrompt,
   openCardDependencyItem,
   openCardProfileEditor,
@@ -4851,19 +8051,31 @@ const appCtx = reactive({
   openManifestAuthorPrompt,
   openManifestEditor,
   openGameDirectory,
+  openClothesDirectory,
   openModItemInItemBrowser,
+  openPackagedMod,
   openSelectedModInFolder,
   openThumbnailToolsPrompt,
   openSummaryCard,
   overviewSummaryCards,
   paths,
+  workbenchAuthorId,
+  workbenchWorkspacePath,
+  workbenchActiveProjectId,
+  workbenchProjects,
+  saveWorkbenchProfile,
+  setWorkbenchActiveProject,
+  createWorkbenchProject,
+  deleteWorkbenchProject,
   personalityOptions,
   recentTasks,
   repairingThumbnailItemId,
-  exportingFbxItemId,
+  openingUnity3dItemId,
+  exportingUnity3dItemId,
   repairingUnity3dPath,
   repairThumbnailItem,
-  exportItemFbx,
+  openItemUnity3d,
+  exportItemUnity3d,
   repairUnity3dIssue,
   replaceSelectedCardCover,
   replacingCardCover,
@@ -4889,10 +8101,44 @@ const appCtx = reactive({
   selectedCardProfileLoading,
   naviActionNotice,
   setSelectedCardAsNavi,
+  submitSelectedCardDelete,
   settingNaviSlot,
   selectedCards,
   selectedCount,
   selectedItem,
+  itemContextMenu,
+  itemAccessoryPrompt,
+  itemFacePrompt,
+  itemBodyPrompt,
+  itemGameApply,
+  itemGameNotice,
+  assemblyMode,
+  assemblyTargetSlot,
+  assemblyContext,
+  assemblyCharacterTarget,
+  currentGameState,
+  gameCurrentGroups: GAME_CURRENT_GROUPS,
+  gameAccessorySlotOptions: GAME_ACCESSORY_SLOT_OPTIONS,
+  itemGameApplySpec,
+  itemGameApplyLabel,
+  gameCurrentSlotLabel,
+  gameCurrentItemName,
+  setAssemblyMode,
+  selectAssemblyCharacter,
+  selectAssemblySlot,
+  applyAssemblyItem,
+  refreshCurrentGameState,
+  openItemContextMenu,
+  closeItemContextMenu,
+  requestItemGameApply,
+  closeItemAccessoryPrompt,
+  confirmItemAccessoryApply,
+  closeItemFacePrompt,
+  confirmItemFaceApply,
+  GAME_BODY_PAINT_SLOT_OPTIONS,
+  closeItemBodyPrompt,
+  confirmItemBodyApply,
+  workbenchTemplateSelection,
   selectedMod,
   selectedModCanDelete,
   selectedModCount,
@@ -4906,6 +8152,10 @@ const appCtx = reactive({
   selectedModItemsError,
   selectedModItemsLoading,
   selectItem,
+  beginWorkbenchTemplateSelection,
+  selectWorkbenchTemplateFromItem,
+  cancelWorkbenchTemplateSelection,
+  consumeWorkbenchTemplateSelection,
   selectBulkAuthorSuggestion,
   selectMod,
   applyFirstCardTagFilterSuggestion,
@@ -4915,6 +8165,8 @@ const appCtx = reactive({
   openCardTagFilter,
   selectCardTagFilter,
   setDependencyUsageFilter,
+  setItemViewMode,
+  setCardBrowserMode,
   setCardDependencyFilter,
   setCardTagScope,
   toggleCardTagPromptTag,
@@ -4922,6 +8174,8 @@ const appCtx = reactive({
   setLibraryMode,
   setModTab,
   setup,
+  setupLanguageOptions,
+  setupQualityOptions,
   someVisibleCardsSelected,
   someVisibleModsSelected,
   stats,
@@ -4953,6 +8207,7 @@ const appCtx = reactive({
   refreshModDatabaseList,
   setAllThumbnailTargets,
   selectModAuthorFilter,
+  selectItemAuthorFilter,
   submitBulkDeleteZipmods,
   submitBulkDeleteCharacterCards,
   submitBulkAddCharacterCardTags,
@@ -4967,7 +8222,11 @@ const appCtx = reactive({
   cancelCardProfileEditor
 });
 
-watch([activeView, backendStatus], ([view, status]) => {
+watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
+  if (assemblyMode.value && view !== "mods") setAssemblyMode(false);
+  if (view === "trash" && status === "ready") {
+    void loadTrash();
+  }
   if (view === "mods" && status === "ready") {
     if (libraryMode.value === "items") {
       ensureItemDatabaseLoaded();
@@ -4976,7 +8235,11 @@ watch([activeView, backendStatus], ([view, status]) => {
     }
   }
   if (view === "characters" && status === "ready") {
-    if (!cardLibrary.checked || (cardLibrary.validGameDir && !cardTree.value)) {
+    if (mode === "clothes") {
+      if (!clothesLibrary.checked || !clothesLibrary.validGameDir || !clothesTree.value) {
+        void ensureClothesLibraryLoaded();
+      }
+    } else if (mode === "character" && (!cardLibrary.checked || (cardLibrary.validGameDir && !cardTree.value))) {
       loadCardTree();
     }
   }
@@ -4985,55 +8248,123 @@ watch([activeView, backendStatus], ([view, status]) => {
 
 <template>
   <div class="app-shell">
+    <div class="wallpaper-layer" aria-hidden="true">
+      <video
+        v-if="wallpaperIsVideo"
+        class="wallpaper-media"
+        :src="wallpaperSource"
+        autoplay
+        muted
+        loop
+        playsinline
+      ></video>
+      <img v-else class="wallpaper-media" :src="wallpaperSource" alt="" />
+      <div class="wallpaper-scrim"></div>
+    </div>
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-mark" :src="appIcon" alt="Star_Manager" />
         <img class="brand-logo" :src="brandLogo" alt="Star Manager" />
       </div>
 
       <nav class="nav" aria-label="Main navigation">
-        <button
+        <div
           v-for="view in views"
           :key="view.id"
-          type="button"
-          :class="{ active: activeView === view.id }"
-          @click="activeView = view.id"
+          class="nav-entry"
+          :class="{ active: activeView === view.id, 'nav-entry--cards': view.id === 'characters' }"
         >
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <g v-if="view.id === 'start'">
-                <path d="M7.5 8h9a4.5 4.5 0 0 1 4.2 6.1l-1.2 3.1a2 2 0 0 1-3.2.8l-2-1.7H9.7l-2 1.7a2 2 0 0 1-3.2-.8l-1.2-3.1A4.5 4.5 0 0 1 7.5 8Z"></path>
-                <path d="M7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"></path>
-              </g>
-              <g v-else-if="view.id === 'overview'">
-                <rect x="4" y="4" width="6" height="6" rx="1"></rect>
-                <rect x="14" y="4" width="6" height="6" rx="1"></rect>
-                <rect x="4" y="14" width="6" height="6" rx="1"></rect>
-                <path d="M14 20v-5M17 20v-8M20 20v-3"></path>
-              </g>
-              <g v-else-if="view.id === 'characters'">
-                <circle cx="12" cy="7" r="3.2"></circle>
-                <path d="M5.5 20a6.5 6.5 0 0 1 13 0M9 13.8l3 2.2 3-2.2"></path>
-              </g>
-              <g v-else-if="view.id === 'mods'">
-                <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
-                <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8M8 6l8 4"></path>
-              </g>
-              <g v-else-if="view.id === 'workbench'">
-                <rect x="3" y="7" width="18" height="13" rx="2"></rect>
-                <path d="M8 7V4h8v3M3 12h18M10 12v3h4v-3"></path>
-              </g>
-              <g v-else-if="view.id === 'plugins'">
-                <path d="M9.5 4H4v5.5a2.5 2.5 0 1 1 0 5V20h5.5a2.5 2.5 0 1 1 5 0H20v-5.5a2.5 2.5 0 1 0 0-5V4h-5.5a2.5 2.5 0 1 0-5 0Z"></path>
-              </g>
-              <g v-else>
-                <path d="M6 3h9l3 3v15H6V3Z"></path>
-                <path d="M15 3v4h4M9 11h6M9 15h6M9 19h4"></path>
-              </g>
-            </svg>
-          </span>
-          <span>{{ view.label }}</span>
-        </button>
+          <button
+            class="nav-main-button"
+            type="button"
+            @click="activeView = view.id"
+          >
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <g v-if="view.id === 'start'">
+                  <path d="M7.5 8h9a4.5 4.5 0 0 1 4.2 6.1l-1.2 3.1a2 2 0 0 1-3.2.8l-2-1.7H9.7l-2 1.7a2 2 0 0 1-3.2-.8l-1.2-3.1A4.5 4.5 0 0 1 7.5 8Z"></path>
+                  <path d="M7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"></path>
+                </g>
+                <g v-else-if="view.id === 'overview'">
+                  <rect x="4" y="4" width="6" height="6" rx="1"></rect>
+                  <rect x="14" y="4" width="6" height="6" rx="1"></rect>
+                  <rect x="4" y="14" width="6" height="6" rx="1"></rect>
+                  <path d="M14 20v-5M17 20v-8M20 20v-3"></path>
+                </g>
+                <g v-else-if="view.id === 'characters'">
+                  <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
+                  <rect x="6.5" y="7" width="5.2" height="6" rx="1"></rect>
+                  <circle cx="9.1" cy="9.3" r="1.1"></circle>
+                  <path d="M7.5 12a2 2 0 0 1 3.2 0M14.5 8h3M14.5 11h3M14.5 14h3M6.5 17h11"></path>
+                </g>
+                <g v-else-if="view.id === 'mods'">
+                  <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
+                  <path d="m4 8 .1 8 7.9 4 7.9-4L20 8M12 12v8M8 6l8 4"></path>
+                </g>
+                <g v-else-if="view.id === 'workbench'">
+                  <rect x="3" y="7" width="18" height="13" rx="2"></rect>
+                  <path d="M8 7V4h8v3M3 12h18M10 12v3h4v-3"></path>
+                </g>
+                <g v-else-if="view.id === 'plugins'">
+                  <path d="M9.5 4H4v5.5a2.5 2.5 0 1 1 0 5V20h5.5a2.5 2.5 0 1 1 5 0H20v-5.5a2.5 2.5 0 1 0 0-5V4h-5.5a2.5 2.5 0 1 0-5 0Z"></path>
+                </g>
+                <g v-else-if="view.id === 'trash'">
+                  <path d="M5 10h14v10H5zM8 10V6h8v4M3 10h18M9 14h6"></path>
+                </g>
+                <g v-else>
+                  <path d="M6 3h9l3 3v15H6V3Z"></path>
+                  <path d="M15 3v4h4M9 11h6M9 15h6M9 19h4"></path>
+                </g>
+              </svg>
+            </span>
+            <span>{{ view.label }}</span>
+          </button>
+          <div v-if="view.id === 'characters'" class="nav-card-type-actions" role="group" aria-label="卡片类型">
+            <button
+              class="nav-card-type-button"
+              :class="{ active: cardBrowserMode === 'character' }"
+              type="button"
+              aria-label="人物卡"
+              title="人物卡"
+              :aria-pressed="cardBrowserMode === 'character'"
+              @click="setCardBrowserMode('character')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
+                <circle cx="12" cy="9" r="2.2"></circle>
+                <path d="M7.5 17a4.5 4.5 0 0 1 9 0M7 7h2"></path>
+              </svg>
+            </button>
+            <button
+              class="nav-card-type-button"
+              :class="{ active: cardBrowserMode === 'clothes' }"
+              type="button"
+              aria-label="服装卡"
+              title="服装卡"
+              :aria-pressed="cardBrowserMode === 'clothes'"
+              @click="setCardBrowserMode('clothes')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m9 4 3 2 3-2 5 4-2.5 4-2-1V20H8.5v-9l-2 1L4 8l5-4Z"></path>
+                <path d="M9 4c.2 2 1.2 3 3 3s2.8-1 3-3M8.5 14h7"></path>
+              </svg>
+            </button>
+            <button
+              class="nav-card-type-button"
+              :class="{ active: cardBrowserMode === 'scene' }"
+              type="button"
+              aria-label="场景卡"
+              title="场景卡"
+              :aria-pressed="cardBrowserMode === 'scene'"
+              @click="setCardBrowserMode('scene')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
+                <circle cx="16.5" cy="8" r="1.5"></circle>
+                <path d="m5.5 17 4.5-5 3 3 2-2 3.5 4M6 17h12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
       </nav>
 
       <nav class="nav nav-secondary" aria-label="Manager navigation">
@@ -5053,8 +8384,84 @@ watch([activeView, backendStatus], ([view, status]) => {
       </nav>
     </aside>
 
-    <main class="main">
-      <header class="topbar">
+    <main class="main" :class="{ 'assembly-mode-main': assemblyMode, 'item-library-main': isItemLibraryView && !assemblyMode, 'character-library-main': activeView === 'characters', 'plugin-library-main': activeView === 'plugins', 'workbench-main': activeView === 'workbench', 'runtime-log-main': activeView === 'logs', 'settings-main': activeView === 'settings', 'trash-main': activeView === 'trash' }">
+      <header v-if="activeView !== 'characters' && activeView !== 'plugins' && activeView !== 'workbench' && activeView !== 'logs' && activeView !== 'settings' && activeView !== 'trash'" class="topbar" :class="{ 'assembly-topbar': assemblyMode, 'topbar-item-library': isItemLibraryView && !assemblyMode }">
+        <template v-if="assemblyMode">
+          <div class="assembly-topbar-context">
+            <div class="assembly-hero">
+              <div class="assembly-hero-copy">
+                <h3>{{ assemblyCharacterTarget.target === 'hscene' ? 'H 场景角色' : '角色编辑器' }}</h3>
+                <small v-if="assemblyContext.scene === 'hscene'">选择一个角色后查看并编辑其当前装配。</small>
+                <small v-else>读取当前角色的实时装配状态。</small>
+              </div>
+              <div v-if="assemblyContext.available" class="assembly-character-picker assembly-character-picker-topbar" aria-label="装配目标角色">
+                <button
+                  type="button"
+                  class="assembly-character-picker-toggle"
+                  :class="{ open: assemblyCharacterPickerOpen }"
+                  aria-haspopup="listbox"
+                  :aria-expanded="assemblyCharacterPickerOpen"
+                  aria-controls="assembly-character-options"
+                  @click="toggleAssemblyCharacterPicker"
+                >
+                  <span class="assembly-character-picker-current">
+                    <strong>{{ selectedAssemblyCharacter.name }}</strong>
+                    <small>{{ selectedAssemblyCharacter.meta }}</small>
+                  </span>
+                  <span class="assembly-character-picker-chevron" :class="{ open: assemblyCharacterPickerOpen }" aria-hidden="true">⌄</span>
+                </button>
+                <div v-if="assemblyCharacterPickerOpen" id="assembly-character-options" class="assembly-character-options" role="listbox" aria-label="可选装配角色">
+                  <button
+                    v-for="option in assemblyCharacterOptions"
+                    :key="option.key"
+                    type="button"
+                    class="assembly-character-option"
+                    :class="{ selected: isAssemblyCharacterSelected(option) }"
+                    role="option"
+                    :aria-selected="isAssemblyCharacterSelected(option)"
+                    @click="handleAssemblyCharacterSelect(option)"
+                  >
+                    <span class="assembly-character-option-copy">
+                      <strong>{{ option.name }}</strong>
+                      <small>{{ option.meta }}</small>
+                    </span>
+                    <span v-if="isAssemblyCharacterSelected(option)" class="assembly-character-option-check" aria-hidden="true">✓</span>
+                  </button>
+                  <div v-if="!assemblyCharacterOptions.length" class="assembly-character-picker-empty">当前没有可用角色。</div>
+                </div>
+              </div>
+              <span class="assembly-sync-state" :class="{ ready: currentGameState.available && !currentGameState.loading, loading: currentGameState.loading }">
+                {{ currentGameState.loading ? '同步中' : currentGameState.available ? '已连接' : '未连接' }}
+              </span>
+            </div>
+          </div>
+          <div v-if="currentGameState.available && assemblyStatusNotice" class="assembly-status-banner assembly-topbar-notice" :class="assemblyStatusNotice.tone" role="status" aria-live="polite">
+            <div class="assembly-status-copy">
+              <strong>{{ assemblyStatusNotice.title }}</strong>
+              <span>{{ assemblyStatusNotice.message }}</span>
+              <small v-if="assemblyStatusNotice.detail">{{ assemblyStatusNotice.detail }}</small>
+            </div>
+            <div class="assembly-status-actions">
+              <button v-if="assemblyStatusNotice.showRetry" type="button" class="assembly-status-retry" @click="refreshCurrentGameState">重试</button>
+              <button v-if="assemblyStatusNotice.showClose" type="button" class="assembly-status-close" aria-label="关闭换装提示" @click="itemGameNotice.message = ''">×</button>
+            </div>
+          </div>
+          <div v-else-if="currentGameState.loading && !currentGameState.available" class="assembly-state-card loading assembly-topbar-state" role="status">
+            <strong>正在读取角色当前装配</strong>
+            <span>等待游戏角色制作器返回实际栏位信息。</span>
+          </div>
+          <div v-else-if="currentGameState.error && !currentGameState.available" class="assembly-state-card error assembly-topbar-state" role="alert">
+            <strong>无法读取游戏角色状态</strong>
+            <span>{{ currentGameState.error }}</span>
+            <button type="button" @click="refreshCurrentGameState">重试</button>
+          </div>
+          <div v-else-if="!currentGameState.available" class="assembly-state-card assembly-topbar-state" role="status">
+            <strong>{{ assemblyContext.scene === 'hscene' ? '当前角色没有可用装配数据' : '当前没有可用的角色编辑器' }}</strong>
+            <span>{{ assemblyContext.scene === 'hscene' ? '请确认 H 场景角色已经完成加载，并确认 Game Item Probe 已加载。' : '请启动 HS2 并进入角色制作器，同时确认 Game Item Probe 已加载。' }}</span>
+            <button type="button" @click="refreshCurrentGameState">重新读取</button>
+          </div>
+        </template>
+        <template v-else-if="!isItemLibraryView">
         <div class="path-box">
           <button type="button" class="primary" @click="selectGameDir">选择 HS2 目录</button>
           <div class="path-value">
@@ -5083,17 +8490,78 @@ watch([activeView, backendStatus], ([view, status]) => {
             @click="buildModDatabase"
           >重建数据库</button>
         </div>
+        </template>
+        <template v-else-if="isItemLibraryView">
+          <div class="topbar-item-kind-filter" aria-label="物品类别筛选">
+            <div class="topbar-item-kind-heading">
+              <button type="button" class="topbar-kind-clear" :class="{ active: !itemFilters.kind }" @click="clearTopbarKindFilter">全部 Kind</button>
+              <div class="item-view-switch" role="group" aria-label="物品视图">
+                <button type="button" :class="{ active: itemViewMode === 'table' }" :aria-pressed="itemViewMode === 'table'" title="表格视图" @click="setItemViewMode('table')">
+                  <span>表格</span>
+                </button>
+                <button type="button" :class="{ active: itemViewMode === 'compact' }" :aria-pressed="itemViewMode === 'compact'" title="紧凑缩略图视图" @click="setItemViewMode('compact')">
+                  <span>紧凑</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="itemKindLevel === 'categories'" class="topbar-kind-groups" role="navigation" aria-label="物品类别分区">
+              <section
+                v-for="group in TOPBAR_KIND_GROUPS"
+                :key="group.key"
+                class="topbar-kind-group"
+                :class="`topbar-kind-group-${group.tone}`"
+              >
+                <div class="topbar-kind-group-title">
+                  <span>{{ group.label }}</span>
+                </div>
+                <div class="topbar-kind-category-row" role="group" :aria-label="`${group.label}一级类别`">
+                  <button
+                    v-for="category in group.categories"
+                    :key="category.key"
+                    type="button"
+                    class="topbar-kind-category"
+                    :class="{ active: (category.kinds.length === 1 && topbarKindFilterIsActive(category.kinds[0])) || (itemKindGroup === group.key && itemKindCategory === category.key && itemKindLevel === 'children') }"
+                    :title="category.kinds.length === 1 ? `筛选${category.label}` : `打开${group.label} / ${category.label}子类`"
+                    @click="openTopbarKindCategory(group, category)"
+                  >{{ category.label }}</button>
+                </div>
+              </section>
+            </div>
+
+            <div v-else class="topbar-kind-subview" :class="`topbar-kind-subview-${activeTopbarKindGroup.tone}`">
+              <button type="button" class="topbar-kind-back" title="返回物品类别分区" @click="resetTopbarKindNavigation">
+                <span aria-hidden="true">‹</span> 返回类别
+              </button>
+              <div class="topbar-kind-breadcrumb" aria-label="当前物品类别路径">
+                <span class="topbar-kind-gender">{{ activeTopbarKindGroup.label }}</span>
+                <span aria-hidden="true">/</span>
+                <strong>{{ activeTopbarKindCategory?.label }}</strong>
+              </div>
+              <div class="topbar-kind-children" role="group" :aria-label="`${activeTopbarKindGroup.label}${activeTopbarKindCategory?.label}子类`">
+                <button
+                  v-for="child in activeTopbarKindChildren"
+                  :key="child.value"
+                  type="button"
+                  class="topbar-kind-child"
+                  :class="{ active: topbarKindFilterIsActive(child.value) }"
+                  :aria-pressed="topbarKindFilterIsActive(child.value)"
+                  :title="`筛选${child.label}`"
+                  @click="selectTopbarKindChild(child.value)"
+                >
+                  <img v-if="topbarKindIcon(child.value)" class="topbar-kind-child-icon" :src="topbarKindIcon(child.value)" alt="" aria-hidden="true">
+                  <span>{{ child.label }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
       </header>
 
-      <section class="workspace">
-        <StartView v-if="activeView === 'start'" :ctx="appCtx" />
-        <OverviewView v-else-if="activeView === 'overview'" :ctx="appCtx" />
-        <CharactersView v-else-if="activeView === 'characters'" :ctx="appCtx" />
-        <ModsView v-else-if="activeView === 'mods'" :ctx="appCtx" />
-        <WorkbenchView v-else-if="activeView === 'workbench'" :ctx="appCtx" />
-        <PluginsView v-show="activeView === 'plugins'" :ctx="appCtx" />
-        <LogsView v-if="activeView === 'logs'" :ctx="appCtx" />
-        <SettingsView v-if="activeView === 'settings'" :ctx="appCtx" />
+      <section class="workspace" :class="{ 'start-workspace': activeView === 'start', 'item-library-workspace': isItemLibraryView && !assemblyMode }">
+        <KeepAlive>
+          <component :is="activePageComponent" :ctx="appCtx" />
+        </KeepAlive>
       </section>
 
       <CardCoverCropper
@@ -5136,6 +8604,7 @@ watch([activeView, backendStatus], ([view, status]) => {
             </div>
             <div class="import-result-metrics">
               <span><strong>{{ importResultData.scanned_count || 0 }}</strong> zipmod</span>
+              <span><strong>{{ importResultData.zip_renamed_count || 0 }}</strong> zip→zipmod</span>
               <span><strong>{{ importResultData.imported_count || 0 }}</strong> 正常</span>
               <span><strong>{{ importResultData.promoted_count || 0 }}</strong> 保留更优</span>
               <span><strong>{{ importResultData.cleaned_count || 0 }}</strong> 清理重复</span>
@@ -5231,16 +8700,14 @@ watch([activeView, backendStatus], ([view, status]) => {
                 <span>导出的模组类型</span>
                 <small>已选 {{ portablePackagePrompt.types.length }} / {{ PORTABLE_PACKAGE_TYPES.length }}</small>
               </legend>
-              <p>按人物卡实际使用部位筛选依赖；关闭的类型不会加入导出包。</p>
               <div class="portable-type-grid">
                 <label
                   v-for="type in PORTABLE_PACKAGE_TYPES"
                   :key="type.key"
                   class="portable-type-option"
-                  :class="[`portable-type-${type.key}`, { selected: portablePackagePrompt.types.includes(type.key) }]"
+                  :class="{ selected: portablePackagePrompt.types.includes(type.key) }"
                 >
                   <input v-model="portablePackagePrompt.types" type="checkbox" :value="type.key">
-                  <span class="portable-type-marker" aria-hidden="true">{{ type.marker }}</span>
                   <span class="portable-type-copy">
                     <strong>{{ type.label }}</strong>
                     <small>{{ type.description }}</small>
@@ -5250,12 +8717,6 @@ watch([activeView, backendStatus], ([view, status]) => {
               </div>
               <small v-if="portablePackagePrompt.types.length === 0" class="portable-type-empty">未选择模组类型时，只导出人物卡与依赖清单。</small>
             </fieldset>
-            <div class="portable-package-structure" aria-label="便携包目录结构">
-              <code>UserData/chara</code>
-              <code>mods</code>
-              <code>abdata</code>
-              <span>+ 依赖清单</span>
-            </div>
             <div v-if="portablePackagePrompt.error" class="prompt-error">{{ portablePackagePrompt.error }}</div>
             <div class="prompt-actions">
               <button type="button" @click="portablePackagePrompt.open = false">取消</button>
@@ -5278,7 +8739,7 @@ watch([activeView, backendStatus], ([view, status]) => {
               >
               <button type="button" :disabled="isBusy" @click="selectCardDependencyExportDir">选择目录</button>
             </div>
-            <div class="export-mode-group" role="radiogroup" aria-label="导出方式">
+            <div class="export-mode-group two-column-grid" role="radiogroup" aria-label="导出方式">
               <label>
                 <input v-model="cardDependencyExportPrompt.mode" type="radio" value="copy" @change="cardDependencyExportPrompt.confirmMove = false">
                 <span>复制</span>
@@ -5307,7 +8768,6 @@ watch([activeView, backendStatus], ([view, status]) => {
               <div>
                 <span class="card-move-kicker">{{ cardMovePrompt.sourceGender }} card library</span>
                 <strong id="card-move-title">移动人物卡</strong>
-                <p class="subtext">选择同一性别下的目标目录，已选 {{ selectedCount }} 张。</p>
               </div>
               <button type="button" :disabled="cardMovePrompt.busy || cardMovePrompt.folderBusy" aria-label="关闭" @click="closeCardMovePrompt">×</button>
             </header>
@@ -5371,9 +8831,9 @@ watch([activeView, backendStatus], ([view, status]) => {
 
         <div v-if="cardDeletePrompt.open" class="prompt-backdrop" @click.self="!cardDeletePrompt.busy && (cardDeletePrompt.open = false)">
           <div class="prompt-panel duplicate-delete-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="card-delete-title">
-            <span class="risk-kicker">不可恢复的文件操作</span>
+            <span class="risk-kicker">文件将进入回收站</span>
             <strong id="card-delete-title">批量删除人物卡</strong>
-            <p class="subtext">将从当前人物卡目录永久删除已选择的 PNG 文件。</p>
+            <p class="subtext">将把已选择的 PNG 文件移入 runtime/trash/cards，原目录不会继续保留。</p>
             <div class="prompt-note">
               <span>将要删除</span>
               <strong>{{ selectedCount }} 张人物卡</strong>
@@ -5384,13 +8844,44 @@ watch([activeView, backendStatus], ([view, status]) => {
             </div>
             <div class="prompt-note">
               <span>可逆性</span>
-              <strong>应用不会保留备份，删除后无法自动恢复</strong>
+              <strong>可在回收站恢复或永久删除</strong>
             </div>
             <div v-if="cardDeletePrompt.error" class="prompt-error">{{ cardDeletePrompt.error }}</div>
             <div class="prompt-actions">
               <button type="button" :disabled="cardDeletePrompt.busy" @click="cardDeletePrompt.open = false">取消</button>
               <button type="button" class="danger-action" :disabled="cardDeletePrompt.busy" @click="submitBulkDeleteCharacterCards">
                 {{ cardDeletePrompt.busy ? "删除中..." : `确认删除 ${selectedCount} 张人物卡` }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="cardSingleDeletePrompt.open" class="prompt-backdrop" @click.self="!cardSingleDeletePrompt.busy && (cardSingleDeletePrompt.open = false)">
+          <div class="prompt-panel duplicate-delete-confirm-panel character-card-delete-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="single-card-delete-title">
+            <span class="risk-kicker">文件将进入回收站</span>
+            <strong id="single-card-delete-title">删除人物卡</strong>
+            <p class="subtext">将把当前人物卡移入 runtime/trash/cards，原目录不会继续保留。</p>
+            <div v-if="cardSingleDeletePrompt.card" class="card-load-target character-card-delete-target">
+              <img :src="cardSingleDeletePrompt.card.coverUrl" :alt="cardSingleDeletePrompt.card.name + ' preview'">
+              <span>
+                <small>当前人物卡</small>
+                <strong>{{ cardSingleDeletePrompt.card.name }}</strong>
+                <small class="mono">{{ cardSingleDeletePrompt.card.relativePath }}</small>
+              </span>
+            </div>
+            <div class="prompt-note">
+              <span>将要删除</span>
+              <strong>1 张人物卡</strong>
+            </div>
+            <div class="prompt-note">
+              <span>可逆性</span>
+              <strong>可在回收站恢复或永久删除</strong>
+            </div>
+            <div v-if="cardSingleDeletePrompt.error" class="prompt-error" role="alert">{{ cardSingleDeletePrompt.error }}</div>
+            <div class="prompt-actions">
+              <button type="button" :disabled="cardSingleDeletePrompt.busy" @click="cardSingleDeletePrompt.open = false">取消</button>
+              <button type="button" class="danger-action" :disabled="cardSingleDeletePrompt.busy" @click="submitSelectedCardDelete">
+                {{ cardSingleDeletePrompt.busy ? "删除中..." : "确认删除人物卡" }}
               </button>
             </div>
           </div>
@@ -5462,7 +8953,13 @@ watch([activeView, backendStatus], ([view, status]) => {
 
         <div v-if="missingItemPrompt.open" class="prompt-backdrop" @click.self="missingItemPrompt.open = false">
           <div class="prompt-panel missing-item-panel">
-            <strong>物品缺失</strong>
+            <div class="missing-item-panel-head">
+              <div>
+                <span class="missing-item-kicker">DEPENDENCY CHECK</span>
+                <strong>物品缺失</strong>
+              </div>
+              <span class="missing-item-alert-mark">!</span>
+            </div>
             <p class="subtext">当前人物卡依赖的物品没有在本地物品数据库中匹配到。</p>
             <div class="prompt-note missing-item-note">
               <span>物品</span>
@@ -5476,6 +8973,58 @@ watch([activeView, backendStatus], ([view, status]) => {
               <span>属性</span>
               <strong>{{ missingItemPrompt.property }}</strong>
             </div>
+            <section v-if="missingItemPrompt.modId" class="missing-item-remote-card">
+              <div class="missing-item-remote-head">
+                <div>
+                  <span class="missing-item-kicker remote-kicker">REMOTE INDEX</span>
+                  <strong>远端模组信息</strong>
+                </div>
+                <span
+                  class="missing-item-remote-status"
+                  :class="missingItemPrompt.remoteLoading ? 'loading' : (missingItemPrompt.remoteCandidate ? 'available' : 'unavailable')"
+                >
+                  {{ missingItemPrompt.remoteLoading ? '查询中' : (missingItemPrompt.remoteCandidate ? '可下载' : '无法获取') }}
+                </span>
+              </div>
+              <div v-if="missingItemPrompt.remoteLoading" class="missing-item-remote-loading">
+                正在从远程索引读取模组信息…
+              </div>
+              <template v-else-if="missingItemPrompt.remoteCandidate">
+                <div class="missing-item-remote-name">
+                  {{ missingItemPrompt.remoteCandidate.name || missingItemPrompt.remoteCandidate.file_name || '未命名模组' }}
+                </div>
+                <div class="missing-item-remote-grid two-column-grid">
+                  <div>
+                    <span>作者</span>
+                    <strong>{{ missingItemPrompt.remoteCandidate.author || '未知作者' }}</strong>
+                  </div>
+                  <div>
+                    <span>版本</span>
+                    <strong>{{ missingItemPrompt.remoteCandidate.version || '未标注' }}</strong>
+                  </div>
+                  <div>
+                    <span>文件大小</span>
+                    <strong>{{ formatBytes(missingItemPrompt.remoteCandidate.file_size) }}</strong>
+                  </div>
+                  <div>
+                    <span>候选版本</span>
+                    <strong>{{ missingItemPrompt.remoteEntry?.candidate_count || missingItemPrompt.remoteEntry?.candidates?.length || 1 }} 个</strong>
+                  </div>
+                </div>
+                <div class="missing-item-remote-file">
+                  <span>文件</span>
+                  <code>{{ missingItemPrompt.remoteCandidate.file_name || '-' }}</code>
+                </div>
+                <div v-if="missingItemPrompt.remoteCandidate.relative_path" class="missing-item-remote-file">
+                  <span>远程路径</span>
+                  <code>{{ missingItemPrompt.remoteCandidate.relative_path }}</code>
+                </div>
+              </template>
+              <div v-else class="missing-item-remote-empty">
+                <strong>{{ missingItemPrompt.remoteError ? '远程索引查询失败' : '远程索引中没有可下载模组' }}</strong>
+                <span>{{ missingItemPrompt.remoteError || missingItemPrompt.remoteEntry?.reason || '该 ModID 暂无有效的 manifest 记录。' }}</span>
+              </div>
+            </section>
             <div class="prompt-actions">
               <button type="button" @click="missingItemPrompt.open = false">确定</button>
             </div>
@@ -5740,14 +9289,14 @@ watch([activeView, backendStatus], ([view, status]) => {
         <div v-if="bulkDeletePrompt.open" class="prompt-backdrop" @click.self="bulkDeletePrompt.open = false">
           <div class="prompt-panel">
             <strong>批量删除模组</strong>
-            <p class="subtext">删除已选 zipmod 文件，并移除相关数据库记录。</p>
+            <p class="subtext">将已选 zipmod 文件移入 runtime/trash/mods，并移除相关数据库记录。</p>
             <div class="prompt-note">
               <span>将要改变</span>
               <strong>删除 {{ selectedModCount }} 个已选 zipmod 文件</strong>
             </div>
             <div class="prompt-note">
               <span>可逆性</span>
-              <strong>删除文件不可由应用自动恢复</strong>
+              <strong>可在回收站恢复或永久删除</strong>
             </div>
             <div class="prompt-note">
               <span>更安全替代</span>
@@ -5801,7 +9350,7 @@ watch([activeView, backendStatus], ([view, status]) => {
               >
               <button type="button" :disabled="bulkActionBusy === 'export'" @click="selectBulkExportDir">选择目录</button>
             </div>
-            <div class="export-mode-group" role="radiogroup" aria-label="导出方式">
+            <div class="export-mode-group two-column-grid" role="radiogroup" aria-label="导出方式">
               <label>
                 <input v-model="bulkExportPrompt.mode" type="radio" value="copy" @change="bulkExportPrompt.confirmMove = false">
                 <span>复制</span>
@@ -5849,7 +9398,7 @@ watch([activeView, backendStatus], ([view, status]) => {
               </button>
             </div>
             <div class="thumbnail-tool-block">
-              <div class="thumbnail-target-head">
+              <div class="thumbnail-target-head flex-between">
                 <span class="drawer-section-title">导入到缺失物品</span>
                 <button type="button" :disabled="Boolean(bulkActionBusy) || missingThumbnailTargetItems.length === 0" @click="setAllThumbnailTargets(selectedThumbnailTargetCount !== missingThumbnailTargetItems.length)">
                   {{ selectedThumbnailTargetCount === missingThumbnailTargetItems.length && missingThumbnailTargetItems.length > 0 ? "清空" : "全选" }}
@@ -5886,7 +9435,10 @@ watch([activeView, backendStatus], ([view, status]) => {
         </datalist>
 
         <button v-if="achievementToast" class="achievement-toast" type="button" @click="activeView = 'overview'; selectedAchievement = achievementToast; achievementToast = null">
-          <span class="achievement-medal">{{ achievementToast.icon }}</span>
+          <span class="achievement-medal">
+            <img v-if="getAchievementIcon(achievementToast)" :src="getAchievementIcon(achievementToast)" :alt="`${achievementToast.title}图标`">
+            <span v-else>{{ achievementToast.icon }}</span>
+          </span>
           <span><small>成就解锁</small><strong>{{ achievementToast.title }}</strong><em>{{ achievementToast.description }}</em></span>
         </button>
 

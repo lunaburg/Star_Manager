@@ -18,14 +18,47 @@ except ImportError:  # pragma: no cover - reported through the API
 
 
 SCAN_AREAS = (("plugin", "Plugins"),)
+PLUGIN_DISABLED_SUFFIX = ".disabled"
+
+
+def _is_plugin_file(path: Path) -> bool:
+    name = path.name.casefold()
+    return name.endswith(".dll") or name.endswith(f".dll{PLUGIN_DISABLED_SUFFIX}")
+
+
+def _iter_plugin_files(folder: Path) -> list[Path]:
+    if not folder.is_dir():
+        return []
+    return [path for path in folder.rglob("*") if path.is_file() and _is_plugin_file(path)]
+
+
+def _plugin_logical_name(path: Path) -> str:
+    name = path.name
+    if name.casefold().endswith(PLUGIN_DISABLED_SUFFIX):
+        return name[: -len(PLUGIN_DISABLED_SUFFIX)]
+    return name
+
+
+def _plugin_is_disabled(path: Path) -> bool:
+    return path.name.casefold().endswith(f".dll{PLUGIN_DISABLED_SUFFIX}")
+
+
+def _plugin_id(game_root: Path, path: Path) -> str:
+    relative = str(path.relative_to(game_root)).replace("\\", "/")
+    if relative.casefold().endswith(PLUGIN_DISABLED_SUFFIX):
+        relative = relative[: -len(PLUGIN_DISABLED_SUFFIX)]
+    return relative.casefold()
 
 
 def _plugin_source_fingerprint(bepinex_root: Path) -> str:
     files: list[Path] = []
-    for folder, pattern in ((bepinex_root / "Plugins", "*.dll"), (bepinex_root / "config", "*.cfg"), (bepinex_root / "Translation", "*.txt")):
+    for _, folder_name in SCAN_AREAS:
+        files.extend(_iter_plugin_files(bepinex_root / folder_name))
+    for folder, pattern in ((bepinex_root / "config", "*.cfg"), (bepinex_root / "Translation", "*.txt")):
         if folder.is_dir():
             files.extend(folder.rglob(pattern))
     digest = hashlib.sha256()
+    digest.update(b"plugin-toggle-v1\0")
     for path in sorted(files, key=lambda item: str(item).casefold()):
         try:
             stat = path.stat()
@@ -339,12 +372,14 @@ def describe_from_support_files(metadata: AssemblyMetadata, path: Path, support_
 
 def _scan_file(game_root: Path, path: Path, category: str, support_index: list[dict[str, Any]]) -> dict[str, Any]:
     stat = path.stat()
+    logical_name = _plugin_logical_name(path)
     record: dict[str, Any] = {
-        "id": str(path.relative_to(game_root)).replace("\\", "/").lower(),
-        "name": path.stem,
+        "id": _plugin_id(game_root, path),
+        "name": Path(logical_name).stem,
         "category": category,
         "relative_path": str(path.relative_to(game_root)).replace("\\", "/"),
         "file_path": str(path),
+        "enabled": not _plugin_is_disabled(path),
         "size": stat.st_size,
         "modified_ns": stat.st_mtime_ns,
         "metadata_status": "ok",
@@ -352,8 +387,9 @@ def _scan_file(game_root: Path, path: Path, category: str, support_index: list[d
     }
     try:
         metadata = read_dotnet_metadata(path)
-        description, description_source = describe_plugin(metadata, path, category)
-        support_description = describe_from_support_files(metadata, path, support_index)
+        logical_path = path.with_name(logical_name)
+        description, description_source = describe_plugin(metadata, logical_path, category)
+        support_description = describe_from_support_files(metadata, logical_path, support_index)
         description_confidence = "high" if description_source in {"assembly", "catalog"} else "low"
         description_evidence: list[str] = []
         if support_description and description_source not in {"assembly", "catalog"}:
@@ -380,6 +416,87 @@ def _scan_file(game_root: Path, path: Path, category: str, support_index: list[d
     return record
 
 
+def set_bepinex_plugin_enabled(game_dir: str, relative_path: str, enabled: bool) -> dict[str, Any]:
+    root = Path(game_dir).expanduser().resolve()
+    if not is_hs2_game_dir(str(root)):
+        return {"ok": False, "error": "请选择有效的 HS2 游戏目录"}
+
+    bepinex_root = root / "BepInEx"
+    if not bepinex_root.is_dir():
+        return {"ok": False, "error": "所选游戏目录中不存在 BepInEx 文件夹"}
+
+    raw_relative_path = str(relative_path or "").strip().replace("\\", "/")
+    if not raw_relative_path:
+        return {"ok": False, "error": "缺少插件相对路径"}
+
+    try:
+        requested_path = root / Path(raw_relative_path)
+        if requested_path.is_symlink():
+            return {"ok": False, "error": "不支持对符号链接插件进行启用或禁用"}
+        plugin_path = requested_path.resolve(strict=False)
+    except (OSError, ValueError) as error:
+        return {"ok": False, "error": f"插件路径无效：{error}"}
+
+    in_scan_area = False
+    for _, folder_name in SCAN_AREAS:
+        area_root = (bepinex_root / folder_name).resolve()
+        try:
+            plugin_path.relative_to(area_root)
+            in_scan_area = True
+            break
+        except ValueError:
+            continue
+    if not in_scan_area:
+        return {"ok": False, "error": "插件必须位于 BepInEx 插件目录内"}
+
+    filename = plugin_path.name
+    lowered_filename = filename.casefold()
+    if lowered_filename.endswith(f".dll{PLUGIN_DISABLED_SUFFIX}"):
+        base_filename = filename[: -len(PLUGIN_DISABLED_SUFFIX)]
+        current_enabled = False
+    elif lowered_filename.endswith(".dll"):
+        base_filename = filename
+        current_enabled = True
+    else:
+        return {"ok": False, "error": "目标文件不是 DLL 插件"}
+
+    if not base_filename.casefold().endswith(".dll"):
+        return {"ok": False, "error": "目标文件不是 DLL 插件"}
+    if not plugin_path.is_file():
+        return {"ok": False, "error": "插件文件不存在，可能已被移动"}
+
+    requested_enabled = bool(enabled)
+    if current_enabled == requested_enabled:
+        return {
+            "ok": True,
+            "data": {
+                "changed": False,
+                "enabled": current_enabled,
+                "relative_path": str(plugin_path.relative_to(root)).replace("\\", "/"),
+            },
+        }
+
+    target_name = base_filename if requested_enabled else f"{base_filename}{PLUGIN_DISABLED_SUFFIX}"
+    target_path = plugin_path.with_name(target_name)
+    if target_path.exists() or target_path.is_symlink():
+        return {"ok": False, "error": "目标文件已存在，未执行覆盖操作"}
+
+    try:
+        plugin_path.rename(target_path)
+    except OSError as error:
+        return {"ok": False, "error": f"修改插件状态失败：{error}"}
+
+    return {
+        "ok": True,
+        "data": {
+            "changed": True,
+            "enabled": requested_enabled,
+            "previous_relative_path": str(plugin_path.relative_to(root)).replace("\\", "/"),
+            "relative_path": str(target_path.relative_to(root)).replace("\\", "/"),
+        },
+    }
+
+
 def scan_bepinex_plugins(game_dir: str, *, search: str = "", category: str = "", offset: int = 0, limit: int = 500, refresh: bool = False, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     root = Path(game_dir).expanduser().resolve()
     if not is_hs2_game_dir(str(root)):
@@ -401,7 +518,7 @@ def scan_bepinex_plugins(game_dir: str, *, search: str = "", category: str = "",
     for area_category, folder_name in SCAN_AREAS:
         folder = bepinex_root / folder_name
         if folder.is_dir():
-            plugins.extend(_scan_file(root, path, area_category, support_index) for path in sorted(folder.rglob("*.dll"), key=lambda item: str(item).lower()))
+            plugins.extend(_scan_file(root, path, area_category, support_index) for path in sorted(_iter_plugin_files(folder), key=lambda item: str(item).lower()))
 
     # A DLL in Plugins is not necessarily a BepInEx plugin. Only assemblies with
     # a successfully parsed BepInPlugin attribute and GUID belong in this library.

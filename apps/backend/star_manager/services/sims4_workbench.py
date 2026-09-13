@@ -170,6 +170,37 @@ def _bake_t_pose_with_blender(
                 "target_arm_drop_degrees": float(
                     processing.get("target_arm_drop_degrees") or 0
                 ),
+                "arm_inward_offset_ratio": float(
+                    processing.get("arm_inward_offset_ratio") or 0
+                ),
+                "arm_inward_offset": float(
+                    processing.get("arm_inward_offset") or 0
+                ),
+                "vertices": int(
+                    processing.get("vertices_after_reverse_cleanup")
+                    or item.get("vertices")
+                    or 0
+                ),
+                "triangles": int(
+                    processing.get("triangles_after_reverse_cleanup")
+                    or item.get("triangles")
+                    or 0
+                ),
+                "reverse_duplicate_groups_detected": int(
+                    processing.get("reverse_duplicate_groups_detected") or 0
+                ),
+                "reverse_duplicate_faces_removed": int(
+                    processing.get("reverse_duplicate_faces_removed") or 0
+                ),
+                "reverse_duplicate_ambiguous_groups": int(
+                    processing.get("reverse_duplicate_ambiguous_groups") or 0
+                ),
+                "reverse_duplicate_material_mismatch_groups": int(
+                    processing.get("reverse_duplicate_material_mismatch_groups") or 0
+                ),
+                "reverse_duplicate_multi_face_groups": int(
+                    processing.get("reverse_duplicate_multi_face_groups") or 0
+                ),
             }
         )
     manifest["rigged_model_count"] = 0
@@ -185,7 +216,8 @@ def _bake_t_pose_with_blender(
         "scale": "HS2-aligned scale and coordinate system",
         "source_rest_pose": "A-pose",
         "export_rest_pose": "T-pose",
-        "pose_reference": "HS2 horizontal shoulder-elbow-wrist alignment",
+        "pose_reference": "HS2 horizontal shoulder-elbow-wrist alignment with 6% upper-arm-length inward offset",
+        "arm_inward_offset_ratio": 0.06,
     }
     manifest["limitations"] = [
         "The final FBX contains a baked T-pose mesh only; skeletons, skin weights, animation, and blend shapes are not included.",
@@ -291,6 +323,25 @@ def export_sims4_package_lod0_fbx(
         int(item.get("removed_untextured_triangles") or 0)
         for item in exports
     )
+    reverse_duplicate_groups_detected = sum(
+        int(item.get("reverse_duplicate_groups_detected") or 0) for item in exports
+    )
+    reverse_duplicate_faces_removed = sum(
+        int(item.get("reverse_duplicate_faces_removed") or 0) for item in exports
+    )
+    reverse_duplicate_ambiguous_groups = sum(
+        int(item.get("reverse_duplicate_ambiguous_groups") or 0) for item in exports
+    )
+    reverse_cleanup_message = (
+        f"，清理 {reverse_duplicate_faces_removed} 个反向重合三角面"
+        if reverse_duplicate_faces_removed
+        else ""
+    )
+    reverse_skip_message = (
+        f"，跳过 {reverse_duplicate_ambiguous_groups} 组无法安全判定的重合面"
+        if reverse_duplicate_ambiguous_groups
+        else ""
+    )
     removal_message = (
         f"，裁剪 {removed_untextured_triangle_count} 个无贴图三角面"
         if removed_untextured_triangle_count
@@ -308,6 +359,7 @@ def export_sims4_package_lod0_fbx(
         "message": (
             f"已导出 {len(exports)} 个 LOD0 FBX 模型和 "
             f"{len(texture_items)} 张贴图{t_pose_message}{removal_message}"
+            f"{reverse_cleanup_message}{reverse_skip_message}"
         ),
         "data": {
             "package_path": str(source),
@@ -321,6 +373,9 @@ def export_sims4_package_lod0_fbx(
             "geom_resource_count": int(manifest.get("geom_resource_count") or 0),
             "skipped_non_lod0_count": int(manifest.get("skipped_non_lod0_count") or 0),
             "removed_untextured_triangle_count": removed_untextured_triangle_count,
+            "reverse_duplicate_groups_detected": reverse_duplicate_groups_detected,
+            "reverse_duplicate_faces_removed": reverse_duplicate_faces_removed,
+            "reverse_duplicate_ambiguous_groups": reverse_duplicate_ambiguous_groups,
             "exports": export_items,
             "textures": texture_items,
         },

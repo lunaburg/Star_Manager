@@ -125,6 +125,14 @@ def make_character_card() -> bytes:
     return make_preview_png() + appended
 
 
+def test_parse_coordinate_payload_parts_keeps_category_source_fields():
+    parsed = converter.parse_coordinate_payload_parts(make_coordinate_payload())
+
+    assert parsed["clothes_parts"][0] == {"slot": 0, "id": 0}
+    assert parsed["clothes_parts"][7] == {"slot": 7, "id": 7}
+    assert parsed["accessory_parts"][0] == {"slot": 0, "type": 350, "id": 0}
+
+
 def read_generated_plugins(card_bytes: bytes) -> dict:
     payload = card_bytes[converter.find_png_end(card_bytes) :]
     _, cursor = converter.read_dotnet_string(payload, 4)

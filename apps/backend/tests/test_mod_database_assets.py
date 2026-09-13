@@ -14,14 +14,19 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
     _duplicate_item_signature,
     _unity3d_average_modified,
     _version_sort_key,
+    DUAL_MAP_SCENE_KIND,
+    GAME_MAP_SCENE_KIND,
     decode_csv_bytes_with_encoding,
+    ensure_mod_item_thumbnail,
     extract_thumbnail_from_zipmod,
     find_zip_directory,
     find_zip_member,
     find_zip_unity3d_or_directory,
     inspect_unity3d_status,
+    iter_open_zip_csv_items,
     normalize_abdata_path,
     preextract_zip_unity_thumbnails,
+    read_kplug_map_items,
     read_manifest,
     read_items_from_csv,
     repair_zipmod_unity3d_from_game,
@@ -31,10 +36,12 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
     thumbnail_csv_reference_for_arcname,
     thumbnail_error_detail,
     unity3d_member_signatures,
+    zipmod_unity3d_diagnostics,
     ZipMemberIndex,
 )
 from star_manager.services import mod_database_assets  # noqa: E402
-from star_manager.services.mod_database import prepare_mod_items, summarize_prepared_unity3d, unity3d_retry_guids  # noqa: E402
+from star_manager.services.mod_database import build_database, prepare_mod_items, summarize_prepared_unity3d, unity3d_retry_guids  # noqa: E402
+from star_manager.services.mod_database_queries import list_zipmods  # noqa: E402
 
 
 class ManifestParsingTests(unittest.TestCase):
@@ -56,6 +63,92 @@ class ManifestParsingTests(unittest.TestCase):
 
 
 class ThumbnailDiagnosticTests(unittest.TestCase):
+    def test_ensure_mod_item_thumbnail_rebuilds_missing_cache_from_zipmod(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "mods" / "sample.zipmod"
+            zipmod_path.parent.mkdir(parents=True)
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>sample.guid</guid><name>Sample</name>"
+                    "<version>1</version><author>Author</author></manifest>",
+                )
+                zf.writestr("abdata/thumbnail/sample.png", b"png-from-zipmod")
+
+            db_path = root / "runtime" / "star_manager.sqlite"
+            db_path.parent.mkdir(parents=True)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+                now = "2026-01-01T00:00:00+00:00"
+                zipmod_id = conn.execute(
+                    """
+                    INSERT INTO zipmods (
+                        guid, name, version, author, file_path, relative_path,
+                        file_name, file_size, scan_status, last_scanned_at,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?)
+                    """,
+                    (
+                        "sample.guid",
+                        "Sample",
+                        "1",
+                        "Author",
+                        str(zipmod_path),
+                        "mods/sample.zipmod",
+                        zipmod_path.name,
+                        zipmod_path.stat().st_size,
+                        now,
+                        now,
+                        now,
+                    ),
+                ).lastrowid
+                item_id = conn.execute(
+                    """
+                    INSERT INTO mod_items (
+                        zipmod_id, zipmod_guid, item_id, kind, name,
+                        thumb_ab, thumb_tex, thumbnail_status, parse_status,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', 'ok', ?, ?)
+                    """,
+                    (
+                        zipmod_id,
+                        "sample.guid",
+                        "1",
+                        "240",
+                        "Sample Item",
+                        "thumbnail/sample.png",
+                        "sample",
+                        now,
+                        now,
+                    ),
+                ).lastrowid
+                conn.commit()
+            finally:
+                conn.close()
+
+            result = ensure_mod_item_thumbnail(
+                item_id,
+                db_path=db_path,
+                thumbnail_dir=root / "runtime" / "thumbnails",
+            )
+
+            self.assertTrue(result["ok"])
+            cache_path = Path(result["thumbnail_cache_path"])
+            self.assertEqual(cache_path.read_bytes(), b"png-from-zipmod")
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    "SELECT thumbnail_status, thumbnail_cache_path FROM mod_items WHERE id = ?",
+                    (item_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(row[0], "ready")
+            self.assertEqual(Path(row[1]).resolve(), cache_path.resolve())
+
     def test_imported_direct_thumbnail_csv_reference_is_split(self):
         thumb_ab, thumb_tex = thumbnail_csv_reference_for_arcname(
             "abdata/thumbnail/star_manager/674_lxdb.png"
@@ -137,6 +230,145 @@ class ThumbnailDiagnosticTests(unittest.TestCase):
 
 
 class CsvEncodingTests(unittest.TestCase):
+    def test_reads_utf16_le_bom_csv_with_metadata_rows(self):
+        csv_bytes = (
+            "247\r\n"
+            "assetboye\r\n"
+            "ID,Kind,Possess,Name,EN_US,MainManifest,MainAB,MainData,StateType,"
+            "MainTex,ColorMaskTex,MainTex02,ColorMask02Tex,ThumbAB,ThumbTex\r\n"
+            "298,0,1,[rz]Boots2,0,abdata,chara/HS_Boots2.unity3d,HS_Boots2,1,"
+            "boots2_c,mc,0,0,chara/thumb,Boots2\r\n"
+        ).encode("utf-16")
+
+        encoding, text = decode_csv_bytes_with_encoding(csv_bytes)
+        items = read_items_from_csv(
+            "abdata/list/characustom/HS_Boots.csv",
+            csv_bytes,
+        )
+
+        self.assertEqual(encoding, "utf-16")
+        self.assertIn("ID,Kind,Possess,Name", text)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].item_id, "298")
+        self.assertEqual(items[0].kind, "247")
+        self.assertEqual(items[0].name, "[rz]Boots2")
+        self.assertEqual(items[0].main_ab, "chara/HS_Boots2.unity3d")
+        self.assertEqual(items[0].thumb_ab, "chara/thumb")
+        self.assertEqual(items[0].thumb_tex, "Boots2")
+        self.assertEqual(items[0].parse_status, "ok")
+
+    def test_reads_legacy_bare_carriage_return_csv(self):
+        csv_bytes = (
+            "\ufeff334\r"
+            "0\r"
+            "Assets/in-house/assetbundle/list/characustom/00/st_nip_00.bytes\r"
+            "ID,Kind,Possess,Name,EN_US,MainAB,AddTex,ThumbAB,ThumbTex\r"
+            "240,0,1,[Praline]Illu_mix01,0,chara/Praline/nip_illu_mix.unity3d,"
+            "c_t_nip_illu_mix01,chara/Praline/nip_illu_mix.unity3d,thumb_c_t_nip_illu_mix\r"
+            "241,0,1,[Praline]Illu_mix02,0,chara/Praline/nip_illu_mix.unity3d,"
+            "c_t_nip_illu_mix02,chara/Praline/nip_illu_mix.unity3d,thumb_c_t_nip_illu_mix\r"
+        ).encode("utf-8")
+
+        items = read_items_from_csv(
+            "abdata/list/characustom/nip_illu_mix.csv",
+            csv_bytes,
+        )
+
+        self.assertEqual(
+            [(item.item_id, item.kind) for item in items],
+            [("240", "334"), ("241", "334")],
+        )
+        self.assertTrue(all(item.parse_status == "ok" for item in items))
+
+    def test_reads_kplug_map_registration_as_map_scene_item(self):
+        csv_bytes = (
+            "MAPMOD,,,\r\n"
+            "MAPMOD,,,\r\n"
+            "0,(Mas75) Crystal Cave Lair,"
+            "_mas75__crystal_cave_lair_bundles/_mas75__crystal_cave_lair/data_scene_000.unity3d,"
+            "(Mas75) Crystal Cave Lair,abdata\r\n"
+        ).encode("utf-8")
+
+        items = read_kplug_map_items(
+            "abdata/studio/info/kPlug/Map_kPlug.csv",
+            csv_bytes,
+            thumbnail_references=[("maps/crystal/data_thumbnail_000.unity3d", "map_thumb_s.psd")],
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, "__map_scene__")
+        self.assertEqual(items[0].name, "(Mas75) Crystal Cave Lair")
+        self.assertEqual(
+            items[0].main_ab,
+            "_mas75__crystal_cave_lair_bundles/_mas75__crystal_cave_lair/data_scene_000.unity3d",
+        )
+        self.assertEqual(items[0].main_manifest, "abdata")
+        self.assertEqual(items[0].thumb_ab, "maps/crystal/data_thumbnail_000.unity3d")
+        self.assertEqual(items[0].thumb_tex, "map_thumb_s.psd")
+
+    def test_classifies_kplug_map_with_mapinfo_as_game_and_studio_map(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "dual-map.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "abdata/studio/info/kPlug/Map_kPlug.csv",
+                    "MAPMOD,,,\n0,Dual Map,maps/dual/data_scene_000.unity3d,scene2,abdata\n",
+                )
+                zf.writestr("abdata/map/list/mapinfo/dual_mapdata_000.unity3d", b"mapinfo")
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source, "Dual Map"))
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, DUAL_MAP_SCENE_KIND)
+        self.assertEqual(items[0].name, "Dual Map")
+        self.assertEqual(items[0].main_ab, "maps/dual/data_scene_000.unity3d")
+
+    def test_classifies_mapinfo_without_kplug_as_game_only_map(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "game-map.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/map/list/mapinfo/game_mapdata_000.unity3d", b"mapinfo")
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source, "Game Map"))
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, GAME_MAP_SCENE_KIND)
+        self.assertEqual(items[0].name, "Game Map")
+        self.assertEqual(items[0].main_ab, "map/list/mapinfo/game_mapdata_000.unity3d")
+
+    def test_prepares_kplug_map_as_ready_scene_item_without_thumbnail(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "map.zipmod"
+            bundle_path = "abdata/maps/crystal/data_scene_000.unity3d"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>map.guid</guid><name>Crystal Cave</name><version>1</version><author>Mas75</author></manifest>",
+                )
+                zf.writestr(
+                    "abdata/studio/info/kPlug/Map_kPlug.csv",
+                    "MAPMOD,,,\n0,Crystal Cave,maps/crystal/data_scene_000.unity3d,Crystal Cave,abdata\n",
+                )
+                zf.writestr(bundle_path, b"bundle")
+
+            prepared = prepare_mod_items(
+                root,
+                ZipmodCandidate(
+                    manifest=ManifestData("map.guid", "Crystal Cave", "1", "Mas75", "ok", ""),
+                    path=zipmod_path,
+                    relative_path="mods/map.zipmod",
+                    file_size=zipmod_path.stat().st_size,
+                    modified_at="",
+                ),
+                root / "thumbs",
+            )
+
+        self.assertEqual(prepared.ok_count, 1)
+        self.assertEqual(prepared.items[0].kind, "__map_scene__")
+        self.assertEqual(prepared.items[0].thumbnail_status, "ready")
+        self.assertEqual(prepared.items[0].unity3d_status, "in_mod")
+
     def test_prefers_gb18030_when_cp932_decodes_chinese_filename_as_mojibake(self):
         csv_bytes = (
             "300,,,,,,,,,,,,,,\r\n"
@@ -192,6 +424,19 @@ class CsvEncodingTests(unittest.TestCase):
         self.assertEqual(items[0].main_ab, "chara/00/st_pattern_Alex7997.unity3d")
         self.assertEqual(items[0].main_data, "pattern_Alex7997_01")
 
+    def test_reads_texab_as_an_additional_unity3d_dependency(self):
+        csv_bytes = (
+            "348\r\n"
+            "ID,Kind,Possess,Name,MainManifest,MainAB,MainData,TexManifest,TexAB,TexD,ThumbAB,ThumbTex\r\n"
+            "171,0,1,hair-01,abdata,chara/hair/main.unity3d,hair,abdata,chara/hair/hair_tex.unity3d,placeholder,,\r\n"
+        ).encode("utf-8")
+
+        items = read_items_from_csv("abdata/list/characustom/hair.csv", csv_bytes)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].main_ab, "chara/hair/main.unity3d")
+        self.assertEqual(items[0].tex_ab, "chara/hair/hair_tex.unity3d")
+
     def test_reads_paint_addtex_as_main_resource_name(self):
         csv_bytes = (
             "313\r\n"
@@ -230,6 +475,186 @@ class AbdataPathTests(unittest.TestCase):
 
 
 class Unity3dDirectoryFallbackTests(unittest.TestCase):
+    def test_missing_texab_unity3d_does_not_mark_item_as_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "sample.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/chara/hair/main.unity3d", b"main-bundle")
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/hair.csv",
+                item_id="171",
+                kind="348",
+                name="hair-01",
+                main_manifest="abdata",
+                main_ab="chara/hair/main.unity3d",
+                main_data="hair",
+                tex_ab="chara/hair/hair_tex.unity3d",
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+            )
+
+            with zipfile.ZipFile(zipmod_path) as zf:
+                status = inspect_unity3d_status(Path(temp_dir), zf, item)
+
+        self.assertEqual(status.status, "in_mod")
+        self.assertEqual(status.error, "")
+
+    def test_texab_in_common_game_chara_slot_is_ignored(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "sample.zipmod"
+            common_tex = root / "abdata" / "chara" / "60" / "hair_tex.unity3d"
+            common_tex.parent.mkdir(parents=True)
+            common_tex.write_bytes(b"common-tex-bundle")
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/chara/hair/main.unity3d", b"main-bundle")
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/hair.csv",
+                item_id="171",
+                kind="348",
+                name="hair-01",
+                main_manifest="abdata",
+                main_ab="chara/hair/main.unity3d",
+                main_data="hair",
+                tex_ab="chara/60/hair_tex.unity3d",
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+            )
+
+            with zipfile.ZipFile(zipmod_path) as zf:
+                status = inspect_unity3d_status(root, zf, item)
+
+        self.assertEqual(status.status, "in_mod")
+        self.assertEqual(status.error, "")
+
+    def test_texab_outside_common_game_chara_slots_is_external_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "sample.zipmod"
+            external_tex = root / "abdata" / "chara" / "shared" / "hair_tex.unity3d"
+            external_tex.parent.mkdir(parents=True)
+            external_tex.write_bytes(b"external-tex-bundle")
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/chara/hair/main.unity3d", b"main-bundle")
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/hair.csv",
+                item_id="171",
+                kind="348",
+                name="hair-01",
+                main_manifest="abdata",
+                main_ab="chara/hair/main.unity3d",
+                main_data="hair",
+                tex_ab="chara/shared/hair_tex.unity3d",
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+            )
+
+            with zipfile.ZipFile(zipmod_path) as zf:
+                status = inspect_unity3d_status(root, zf, item)
+
+        self.assertEqual(status.status, "not_in_mod")
+        self.assertEqual(status.source, "game_abdata")
+        self.assertIn("chara/shared/hair_tex.unity3d", status.error)
+
+    def test_mainab_in_common_game_chara_slot_is_ignored(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "sample.zipmod"
+            common_main = root / "abdata" / "chara" / "00" / "f0_top_00.unity3d"
+            common_main.parent.mkdir(parents=True)
+            common_main.write_bytes(b"common-main-bundle")
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/list/characustom/top.csv", b"csv")
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/top.csv",
+                item_id="171",
+                kind="351",
+                name="top-01",
+                main_manifest="abdata",
+                main_ab="chara/00/f0_top_00.unity3d",
+                main_data="f0_top_00",
+                tex_ab="",
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+            )
+
+            with zipfile.ZipFile(zipmod_path) as zf:
+                status = inspect_unity3d_status(root, zf, item)
+
+        self.assertEqual(status.status, "in_mod")
+        self.assertEqual(status.error, "")
+
+    def test_unity3d_in_other_zipmod_is_not_in_current_mod_and_is_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            mods_dir = game_dir / "mods"
+            mods_dir.mkdir(parents=True)
+            shared_reference = "chara/shared/hair_tex.unity3d"
+            provider_path = mods_dir / "provider.zipmod"
+            with zipfile.ZipFile(provider_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>provider.guid</guid><name>Provider</name><version>1</version><author>A</author></manifest>",
+                )
+                zf.writestr(f"abdata/{shared_reference}", b"shared-tex")
+
+            current_path = mods_dir / "current.zipmod"
+            with zipfile.ZipFile(current_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>current.guid</guid><name>Current</name><version>1</version><author>A</author></manifest>",
+                )
+                zf.writestr(
+                    "abdata/list/characustom/hair.csv",
+                    "348\r\nID,Kind,Possess,Name,MainManifest,MainAB,MainData,TexManifest,TexAB,TexD,ThumbAB,ThumbTex\r\n"
+                    f"171,0,1,hair-01,abdata,chara/current/main.unity3d,hair,abdata,{shared_reference},placeholder,,\r\n"
+                    f"172,0,1,hair-02,abdata,chara/current/main.unity3d,hair,abdata,{shared_reference},placeholder,,\r\n",
+                )
+                zf.writestr("abdata/chara/current/main.unity3d", b"main")
+
+            db_path = root / "star_manager.sqlite"
+            build_database(game_dir, db_path, root / "thumbs")
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                current_id = conn.execute(
+                    "SELECT id FROM zipmods WHERE guid = 'current.guid'"
+                ).fetchone()[0]
+                item = conn.execute(
+                    "SELECT unity3d_status, unity3d_source FROM mod_items WHERE zipmod_guid = 'current.guid'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertEqual((item["unity3d_status"], item["unity3d_source"]), ("not_in_mod", "other_zipmod"))
+            diagnostics = zipmod_unity3d_diagnostics(current_id, db_path)
+            warning_rows = list_zipmods(db_path, status="warning")
+
+        self.assertTrue(diagnostics["ok"])
+        issues = [issue for issue in diagnostics["issues"] if issue["type"] == "unity3d"]
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["status"], "not_in_mod")
+        self.assertEqual(issues[0]["source"], "other_zipmod")
+        self.assertEqual(issues[0]["repair_action"], "")
+        self.assertEqual(issues[0]["other_zipmods"][0]["guid"], "provider.guid")
+        self.assertEqual(issues[0]["affected_count"], 2)
+        self.assertEqual(warning_rows["total"], 1)
+        self.assertEqual(warning_rows["rows"][0]["guid"], "current.guid")
+
     def test_matches_zip_member_names_decoded_with_wrong_legacy_encoding(self):
         with TemporaryDirectory() as temp_dir:
             zipmod_path = Path(temp_dir) / "sample.zipmod"
@@ -382,6 +807,42 @@ class Unity3dDirectoryFallbackTests(unittest.TestCase):
 
 
 class ModItemPreparationTests(unittest.TestCase):
+    def test_build_database_ignores_missing_texab_dependency(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            zipmod_path = game_dir / "mods" / "hair.zipmod"
+            zipmod_path.parent.mkdir(parents=True)
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>hair.guid</guid><name>Hair</name>"
+                    "<version>1</version><author>Author</author></manifest>",
+                )
+                zf.writestr(
+                    "abdata/list/characustom/hair.csv",
+                    "348\r\n"
+                    "ID,Kind,Possess,Name,MainManifest,MainAB,MainData,TexManifest,TexAB,TexD,ThumbAB,ThumbTex\r\n"
+                    "171,0,1,hair-01,abdata,chara/hair/main.unity3d,hair,abdata,"
+                    "chara/hair/hair_tex.unity3d,placeholder,,\r\n",
+                )
+                zf.writestr("abdata/chara/hair/main.unity3d", b"main-bundle")
+
+            db_path = root / "star_manager.sqlite"
+            build_database(game_dir, db_path, root / "thumbs")
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    "SELECT tex_ab, unity3d_status, unity3d_error FROM mod_items"
+                ).fetchone()
+            finally:
+                conn.close()
+
+        self.assertEqual(row[0], "chara/hair/hair_tex.unity3d")
+        self.assertEqual(row[1], "in_mod")
+        self.assertEqual(row[2], "")
+
     def test_duplicate_item_signature_uses_guid_kind_and_item_id_only(self):
         first = PreparedModItem(
             csv_path="abdata/list/first.csv",
@@ -813,6 +1274,99 @@ class ModItemPreparationTests(unittest.TestCase):
             for name in ("first", "second"):
                 with zipfile.ZipFile(root / "mods" / f"{name}.zipmod") as zf:
                     self.assertEqual(zf.read("abdata/chara/shared/main.unity3d"), b"shared-bundle")
+
+    def test_bulk_repair_copies_shared_texab_unity3d_and_preserves_source(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            source = game_dir / "abdata" / "chara" / "shared" / "hair_tex.unity3d"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"shared-tex-bundle")
+
+            for name in ("first", "second"):
+                zipmod_path = game_dir / "mods" / f"{name}.zipmod"
+                zipmod_path.parent.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zipmod_path, "w") as zf:
+                    zf.writestr(
+                        "manifest.xml",
+                        f"<manifest><guid>{name}.guid</guid><name>{name}</name>"
+                        "<version>1</version><author>Author</author></manifest>",
+                    )
+                    zf.writestr(
+                        "abdata/list/characustom/hair.csv",
+                        (
+                            "348\r\n"
+                            "ID,Kind,Possess,Name,MainManifest,MainAB,MainData,"
+                            "TexManifest,TexAB,TexD,ThumbAB,ThumbTex\r\n"
+                            f"171,0,1,{name},abdata,chara/{name}/main.unity3d,{name},"
+                            "abdata,chara/shared/hair_tex.unity3d,placeholder,,\r\n"
+                        ),
+                    )
+                    zf.writestr(
+                        f"abdata/chara/{name}/main.unity3d",
+                        f"main-{name}".encode("utf-8"),
+                    )
+
+            db_path = root / "star_manager.sqlite"
+            thumbnail_dir = root / "thumbs"
+            build_database(game_dir, db_path, thumbnail_dir)
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows_before = conn.execute(
+                    "SELECT zipmod_guid, tex_ab, unity3d_status FROM mod_items ORDER BY zipmod_guid"
+                ).fetchall()
+                zipmod_ids = [
+                    int(row[0])
+                    for row in conn.execute("SELECT id FROM zipmods ORDER BY guid")
+                ]
+            finally:
+                conn.close()
+
+            self.assertEqual(
+                [(row["zipmod_guid"], row["tex_ab"], row["unity3d_status"]) for row in rows_before],
+                [
+                    ("first.guid", "chara/shared/hair_tex.unity3d", "not_in_mod"),
+                    ("second.guid", "chara/shared/hair_tex.unity3d", "not_in_mod"),
+                ],
+            )
+
+            from star_manager.services.mod_database_assets import bulk_repair_zipmods_unity3d_from_game
+
+            result = bulk_repair_zipmods_unity3d_from_game(
+                zipmod_ids,
+                db_path=db_path,
+                thumbnail_dir=thumbnail_dir,
+            )
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["shared_source_count"], 1)
+            self.assertEqual(sum(item["copied_count"] for item in result["repaired"]), 2)
+            self.assertEqual(sum(item["moved_count"] for item in result["repaired"]), 0)
+            self.assertTrue(source.exists())
+            for name in ("first", "second"):
+                with zipfile.ZipFile(game_dir / "mods" / f"{name}.zipmod") as zf:
+                    self.assertEqual(
+                        zf.read("abdata/chara/shared/hair_tex.unity3d"),
+                        b"shared-tex-bundle",
+                    )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                statuses_after = conn.execute(
+                    "SELECT zipmod_guid, tex_ab, unity3d_status FROM mod_items ORDER BY zipmod_guid"
+                ).fetchall()
+            finally:
+                conn.close()
+
+            self.assertEqual(
+                [(row[0], row[1], row[2]) for row in statuses_after],
+                [
+                    ("first.guid", "chara/shared/hair_tex.unity3d", "in_mod"),
+                    ("second.guid", "chara/shared/hair_tex.unity3d", "in_mod"),
+                ],
+            )
 
     def test_thumb_unity3d_found_in_game_is_thumbnail_issue_only(self):
         with TemporaryDirectory() as temp_dir:

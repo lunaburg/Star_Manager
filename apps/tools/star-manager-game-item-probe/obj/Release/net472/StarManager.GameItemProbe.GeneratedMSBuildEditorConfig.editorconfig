@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = StarManager.GameItemProbe
+build_property.ProjectDir = D:\Workspace\code_workspace\Star_Manager\apps\tools\star-manager-game-item-probe\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

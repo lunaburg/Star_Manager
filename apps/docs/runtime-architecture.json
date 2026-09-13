@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Star Manager · Runtime Architecture",
+    "locale": "en",
+    "output": "runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/lunaburg/Star_Manager.git",
+      "revision": "8046d99ca413b0c4a209f3fe8d29a68b96526416"
+    },
+    "viewBox": [1440, 940]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "Operator",
+      "tag": "ACTOR",
+      "pos": [35, 325],
+      "size": [180, 110],
+      "sources": [{ "path": "apps/docs/project-introduction.md", "label": "product scope" }]
+    },
+    {
+      "id": "vueRenderer",
+      "type": "frontend",
+      "label": "Vue renderer",
+      "tag": "UI",
+      "pos": [260, 325],
+      "size": [210, 110],
+      "sources": [
+        { "path": "apps/src/main.js", "label": "renderer entry" },
+        { "path": "apps/src/App.vue", "label": "app shell" }
+      ]
+    },
+    {
+      "id": "preloadBridge",
+      "type": "security",
+      "label": "Preload bridge",
+      "tag": "IPC",
+      "pos": [515, 325],
+      "size": [205, 110],
+      "sources": [{ "path": "apps/electron/preload.cjs", "label": "bridge surface" }]
+    },
+    {
+      "id": "electronMain",
+      "type": "backend",
+      "label": "Electron main",
+      "tag": "DESKTOP",
+      "pos": [765, 325],
+      "size": [220, 110],
+      "sources": [{ "path": "apps/electron/main.cjs", "label": "main process" }]
+    },
+    {
+      "id": "pythonApi",
+      "type": "backend",
+      "label": "Python HTTP backend",
+      "tag": "LOCALHOST",
+      "pos": [1030, 325],
+      "size": [245, 110],
+      "sources": [
+        { "path": "apps/backend/app/server.py", "label": "HTTP entry" },
+        { "path": "apps/backend/star_manager/services/mod_database.py", "label": "mod services" }
+      ]
+    },
+    {
+      "id": "taskBridge",
+      "type": "messagebus",
+      "label": "Task bridge",
+      "tag": "ASYNC",
+      "pos": [35, 650],
+      "size": [220, 115],
+      "sources": [{ "path": "apps/backend/app/bridge.py", "label": "task protocol" }]
+    },
+    {
+      "id": "sqliteIndex",
+      "type": "database",
+      "label": "SQLite indexes",
+      "tag": "INDEX",
+      "pos": [300, 650],
+      "size": [220, 115],
+      "sources": [
+        { "path": "apps/backend/star_manager/services/mod_database_core.py", "label": "schema" },
+        { "path": "apps/backend/star_manager/services/card_database.py", "label": "card index" }
+      ]
+    },
+    {
+      "id": "hs2Install",
+      "type": "external",
+      "label": "HS2 install",
+      "tag": "FILESYSTEM",
+      "pos": [565, 650],
+      "size": [220, 115],
+      "sources": [{ "path": "apps/docs/frontend-ui/start-layout.md", "label": "game directory" }]
+    },
+    {
+      "id": "gameProbe",
+      "type": "external",
+      "label": "HS2 game probe",
+      "tag": "OPTIONAL",
+      "pos": [830, 650],
+      "size": [220, 115],
+      "sources": [
+        { "path": "apps/electron/main.cjs", "label": "game launcher" },
+        { "path": "apps/backend/app/server.py", "label": "probe proxy routes" }
+      ]
+    },
+    {
+      "id": "resourceTools",
+      "type": "external",
+      "label": "Resource toolchain",
+      "tag": "OPTIONAL",
+      "pos": [1095, 650],
+      "size": [270, 115],
+      "sources": [
+        { "path": "apps/docs/assetstudio-helper.md", "label": "AssetStudio" },
+        { "path": "apps/docs/frontend-ui/workbench-layout.md", "label": "workbench" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Privileged local app boundary",
+      "wraps": ["preloadBridge", "electronMain", "pythonApi", "taskBridge", "sqliteIndex"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Game and tooling boundary",
+      "wraps": ["hs2Install", "gameProbe", "resourceTools"],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    {
+      "id": "operator-to-ui",
+      "from": "operator",
+      "to": "vueRenderer",
+      "label": "interacts with",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelDy": -49
+    },
+    {
+      "id": "ui-to-preload",
+      "from": "vueRenderer",
+      "to": "preloadBridge",
+      "label": "contextBridge calls",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelDy": -49
+    },
+    {
+      "id": "preload-to-electron",
+      "from": "preloadBridge",
+      "to": "electronMain",
+      "label": "IPC handlers",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelDy": -49
+    },
+    {
+      "id": "electron-to-python",
+      "from": "electronMain",
+      "to": "pythonApi",
+      "label": "localhost HTTP",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelDy": -49
+    },
+    {
+      "id": "python-to-task",
+      "from": "pythonApi",
+      "to": "taskBridge",
+      "label": "submit / poll batch tasks",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto"
+    },
+    {
+      "id": "python-to-sqlite",
+      "from": "pythonApi",
+      "to": "sqliteIndex",
+      "label": "query / rebuild indexes",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto"
+    },
+    {
+      "id": "python-to-hs2",
+      "from": "pythonApi",
+      "to": "hs2Install",
+      "label": "read / write selected files",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto"
+    },
+    {
+      "id": "python-to-probe",
+      "from": "pythonApi",
+      "to": "gameProbe",
+      "label": "probe requests",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto"
+    },
+    {
+      "id": "python-to-tools",
+      "from": "pythonApi",
+      "to": "resourceTools",
+      "label": "export / repair jobs",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "labelAt": [1290, 495]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Primary request path",
+      "items": [
+        "Vue pages call a constrained preload API.",
+        "Electron owns the desktop lifecycle and starts the local Python service.",
+        "Python routes dispatch into Star Manager domain services."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Persistence and work",
+      "items": [
+        "SQLite stores searchable indexes and cached metadata.",
+        "Single-object mutations use direct HTTP routes; batch mutations use /tasks.",
+        "Task progress is polled and reflected back into the renderer."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "External machine state",
+      "items": [
+        "HS2 UserData, mods, and abdata remain user-selected filesystem state.",
+        "BepInEx probe access is optional and game-side.",
+        "Resource tooling is invoked for specialized export and repair flows."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundaries",
+      "items": [
+        "The renderer is separated from privileged filesystem and process access.",
+        "Preload is the narrow crossing into Electron capabilities.",
+        "Game files and helper tools are outside the core app control plane."
+      ]
+    }
+  ]
+}

@@ -8,13 +8,91 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from star_manager.services.card_library import (  # noqa: E402
+    assess_character_card_folder_changes,
+    get_character_card_detail,
     list_character_card_tags,
     list_character_cards,
 )
-from star_manager.services.mod_database_core import init_db  # noqa: E402
+from star_manager.services.mod_database_core import init_db, timestamp_to_utc  # noqa: E402
 
 
 class CardLibraryListingTests(unittest.TestCase):
+    def test_assesses_direct_folder_changes_using_file_signatures(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game = Path(temp_dir) / "game"
+            folder = game / "UserData" / "chara" / "female"
+            folder.mkdir(parents=True)
+            first = folder / "first.png"
+            second = folder / "second.png"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+
+            db_path = Path(temp_dir) / "cards.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            first_stat = first.stat()
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, modified_at, metadata_file_size,
+                        metadata_modified_ns, parse_status, last_scanned_at
+                    ) VALUES (?, ?, ?, ?, 'ok', '')
+                    """,
+                    (
+                        str(first.resolve()),
+                        timestamp_to_utc(first_stat.st_mtime),
+                        first_stat.st_size,
+                        first_stat.st_mtime_ns,
+                    ),
+                )
+            conn.close()
+
+            with patch("star_manager.services.card_library.is_hs2_game_dir", return_value=True), patch(
+                "star_manager.services.card_library.is_ais_card", return_value=True,
+            ):
+                result = assess_character_card_folder_changes(
+                    str(game), "female", db_path=db_path
+                )
+
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["added"], 1)
+            self.assertEqual(result["removed"], 0)
+            self.assertEqual(result["modified"], 0)
+
+            second_stat = second.stat()
+            conn = sqlite3.connect(db_path)
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, modified_at, metadata_file_size,
+                        metadata_modified_ns, parse_status, last_scanned_at
+                    ) VALUES (?, ?, ?, ?, 'ok', '')
+                    """,
+                    (
+                        str(second.resolve()),
+                        timestamp_to_utc(second_stat.st_mtime),
+                        second_stat.st_size,
+                        second_stat.st_mtime_ns,
+                    ),
+                )
+            conn.close()
+
+            second.unlink()
+            first.write_bytes(b"changed-first")
+            with patch("star_manager.services.card_library.is_hs2_game_dir", return_value=True), patch(
+                "star_manager.services.card_library.is_ais_card", return_value=True,
+            ):
+                result = assess_character_card_folder_changes(
+                    str(game), "female", db_path=db_path
+                )
+
+            self.assertEqual(result["added"], 0)
+            self.assertEqual(result["removed"], 1)
+            self.assertEqual(result["modified"], 1)
+
     def test_uses_indexed_character_name_instead_of_file_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -104,6 +182,86 @@ class CardLibraryListingTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["cards"][0]["dependency_count"], 6)
             self.assertEqual(result["cards"][0]["missing_count"], 2)
+
+    def test_card_detail_reconciles_stale_indexed_dependency_count(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game = root / "game"
+            card = game / "UserData" / "chara" / "female" / "matched.png"
+            card.parent.mkdir(parents=True)
+            card.write_bytes(b"card")
+            db_path = root / "cards.sqlite"
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            with conn:
+                card_cursor = conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, parse_status, dependency_count, missing_count, last_scanned_at
+                    ) VALUES (?, 'ok', 9, 7, '')
+                    """,
+                    (str(card.resolve()),),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO character_card_dependencies (
+                        card_id, mod_id, category_no, slot, resolve_status
+                    ) VALUES (?, 'example.guid', '240', '1', 'missing_zipmod')
+                    """,
+                    (card_cursor.lastrowid,),
+                )
+            conn.close()
+
+            dependencies = [
+                {
+                    "mod_id": "example.guid",
+                    "category_no": "240",
+                    "slot": "1",
+                    "local_slot": "",
+                    "matched": True,
+                    "zipmod": {},
+                    "item": {},
+                }
+            ]
+            with patch(
+                "star_manager.services.card_library.validate_card_root",
+                return_value=(True, game / "UserData" / "chara", ""),
+            ), patch(
+                "star_manager.services.card_library.resolve_card_file",
+                return_value=card,
+            ), patch(
+                "star_manager.services.card_library.is_ais_card",
+                return_value=True,
+            ), patch(
+                "star_manager.services.card_library.extract_character_profile_from_card",
+                return_value={},
+            ), patch(
+                "star_manager.services.card_library.resolve_card_dependencies",
+                return_value=dependencies,
+            ), patch(
+                "star_manager.services.card_library.read_card_metadata",
+                return_value={"favorite": False, "rating": 0, "tags": []},
+            ):
+                result = get_character_card_detail(
+                    str(game), "female/matched.png", db_path=db_path
+                )
+
+            self.assertTrue(result["ok"])
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT dependency_count, missing_count FROM character_cards"
+                ).fetchone()
+                dependency_row = conn.execute(
+                    "SELECT resolve_status FROM character_card_dependencies"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual((row["dependency_count"], row["missing_count"]), (1, 0))
+            self.assertEqual(dependency_row["resolve_status"], "resolved")
 
     def test_unindexed_card_has_unknown_dependency_counts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

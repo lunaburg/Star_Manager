@@ -4,20 +4,21 @@
 
 模组数据库用于把本地游戏目录中的 zipmod 和模组物品整理为可查询的本地索引。
 
-当前阶段按两个核心索引库组织：
+当前阶段按模组、物品和游戏原版资源三个索引域组织：
 
 - `zipmods`：通过读取 zipmod 内的 `manifest.xml` 构建，记录模组级信息。
-- `mod_items`：通过读取 zipmod 或解包目录中的 CSV 构建，记录物品级信息。
+- `mod_items`：通过读取 zipmod 或解包目录中的 CSV 构建，记录物品级信息；也承载可识别的非物品资源登记，例如 kPlug 地图场景。
+- `builtin_items`：通过扫描当前游戏目录 `abdata/list/characustom/*.unity3d` 中的 `ChaListData` 构建，记录原版服装、配饰等可与 Coordinate 匹配的物品及其缩略图/资源状态。
 
 真实数据来源仍然是文件系统、zipmod、`manifest.xml` 和 CSV。数据库只保存扫描后的索引、解析状态和必要的定位信息，方便前端列表、搜索、筛选和详情展示。
 
 ## 存储建议
 
-插件管理复用同一个 SQLite 文件，并使用 `bepinex_plugin_cache` 保存只读扫描缓存。每个游戏目录对应一条记录，包括 DLL/config/translation 文件指纹、完整插件 JSON 和扫描时间。路径、大小或修改时间变化时缓存自动失效；用户点击“重新扫描”时强制覆盖缓存。缓存只记录带有效 `BepInPlugin` GUID 的插件，不记录普通依赖程序集、core 或 patchers。
+插件管理复用同一个 SQLite 文件，并使用 `bepinex_plugin_cache` 保存扫描缓存。每个游戏目录对应一条记录，包括启用/禁用形态 DLL、config/translation 文件指纹、完整插件 JSON 和扫描时间。路径、大小或修改时间变化时缓存自动失效；页面启停插件后先在当前列表更新状态，下一次扫描时通过新的指纹触发重扫。缓存只记录带有效 `BepInPlugin` GUID 的插件，不记录普通依赖程序集、core 或 patchers。
 
 实现上建议使用 SQLite。
 
-初版可以把 `zipmods` 和 `mod_items` 放在同一个 SQLite 文件中的两张核心表，便于事务、关联查询和迁移管理；业务文档和代码模块仍按两个索引库划分职责。
+`zipmods`、`mod_items` 和 `builtin_items` 放在同一个 `star_manager.sqlite` 文件中，便于数据库状态、物品合并查询和迁移管理；服装卡文件有效性另使用 `clothes_card_index.sqlite`，不与模组物品表混用。
 
 推荐运行时位置：
 
@@ -73,9 +74,11 @@ file_name           zipmod 文件名
 item_count          该 zipmod 下解析出的物品总数，可由 mod_items 汇总回填
 file_size           zipmod 文件大小
 modified_at         zipmod 文件最后修改时间
-unity3d_status      missing / in_game / in_mod / ''
-unity3d_in_mod_count    物品引用资源均在 zipmod 内的数量
-unity3d_in_game_count   物品引用资源只在游戏目录 abdata 中的数量
+unity3d_status      missing / not_in_mod / in_mod / ''
+unity3d_not_in_mod_count 物品引用资源不在当前 zipmod 内的数量
+unity3d_in_mod_count    物品引用资源在当前 zipmod 内的数量
+unity3d_in_game_count   需要从游戏目录补入的数量
+unity3d_other_mod_count 由其它 zipmod 提供的数量
 unity3d_missing_count   缺失 unity3d 引用的数量
 unity3d_error       unity3d 诊断摘要
 scan_status         ok / missing_manifest / invalid_manifest / read_error / stale
@@ -172,6 +175,14 @@ zipmod 内的 abdata/list/**/*.csv
 解包模组目录下的 abdata/list/**/*.csv
 ```
 
+此外，扫描器识别 `abdata/studio/info/kPlug/Map_kPlug.csv` 中以 `MAPMOD` 标记的地图登记行，以及 `abdata/map/list/mapinfo/*.unity3d` 本体地图信息包：
+
+- 仅有 kPlug 注册时写入 `kind = __map_scene__`，即“地图 / 工作室”。
+- 仅有 `mapinfo` 信息包时写入 `kind = __game_map_scene__`，即“地图 / 游戏本体”。
+- 两类特征同时存在时只写入一条 `kind = __game_studio_map_scene__`，即“地图 / 本体 + 工作室”。
+
+地图条目的 `MainAB` 保存场景或地图信息 `.unity3d` 路径，缩略图状态为 `ready`（前端使用地图占位图）。解析器版本写入数据库元数据；版本升级后的下一次增量建库会自动重解析一次全部 zipmod，保证新增识别规则能应用到未改动的旧文件。
+
 CSV 通常结构：
 
 ```csv
@@ -182,9 +193,17 @@ ID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex
 100001,0,1,物品名称,abdata,作者/主资源.unity3d,资源名,作者/缩略图资源.unity3d,thumb
 ```
 
+扫描器同时兼容部分作者工具生成的 UTF-16 LE（带 BOM）CSV。此类文件可能在表头前使用“类别编号 + 作者”等无列名元信息行，例如 `247`、`assetboye`，随后才是 `ID,Kind,Possess,Name,...` 表头。建库时会自动识别 UTF-16；前置元信息不计入物品数，第一行类别编号作为 `mod_items.kind`，数据行的 `Kind` 列不替代该类别编号。解析器版本变化后，增量建库会自动重解析已有 zipmod。
+
 每一条实际数据行表示一个物品。一个模组内可能有多个 CSV，一个 CSV 可能有多条实际数据行。一个模组的物品总数等于该模组下所有 CSV 实际数据行数量之和。
 
 元信息行和字段表头行不计入物品总数。
+
+### builtin_items 原版资源索引
+
+原版索引按选定游戏目录建立独立 `game_dir_key`，从 `abdata/list/characustom/*.unity3d` 读取 `ChaListData` 的类别、local item ID、名称、主资源和缩略图引用。缩略图写入同一运行时缩略图目录；原版行在物品查询中以 `source_type = builtin`、作者/来源 `游戏本体` 返回，不拥有 zipmod GUID 或 `zipmod_id`。
+
+人物卡和服装卡的 Coordinate 依赖会按 `CategoryNo + ID` 查询该表；`id = 0` 空槽位及当前游戏目录没有索引记录的 ID 不显示为原版依赖。原版条目不会参与 zipmod 使用状态筛选或远程模组补全。
 
 ### 建议字段
 
@@ -200,12 +219,14 @@ name                CSV 的 Name 字段 （物品在游戏中的名字）
 main_manifest       CSV 的 MainManifest 字段 （unity3d文件根路径）
 main_ab             CSV 的 MainAB 字段 （unity3d文件路径）
 main_data           CSV 的 MainData 字段 （unity3d中该物品模型的名字，用以索引）
+tex_ab              CSV 的 TexAB 字段 （附加贴图 Unity3D 文件路径）
 thumb_ab            CSV 的 ThumbAB 字段 （缩略根路径）
 thumb_tex           CSV 的 ThumbTex 字段 （缩略图路径或资源索引）
 thumbnail_cache_path 提取后的缩略图缓存路径
 thumbnail_status    ready / missing / error，表示缩略图缓存状态
 thumbnail_error     缩略图提取失败或缺失原因
-unity3d_status      in_mod / in_game / missing
+unity3d_status      in_mod / not_in_mod / missing
+unity3d_source      game_abdata / other_zipmod / ''
 unity3d_error       unity3d 文件定位失败或回退说明
 parse_status        ok / missing_header / short_row / parse_error
 parse_error         解析失败原因
@@ -400,13 +421,13 @@ CSV 前几行可能是元信息，不能假设第一行就是表头。
 数据库状态：
 
 ```text
-GET /mods/database
+GET /mods/database?game_dir=
 ```
 
-返回数据库是否存在、数据库路径、`zipmods` 总数和 `mod_items` 总数。前端进入模组管理或刷新列表时必须先调用该接口：
+返回数据库是否存在、数据库路径、`zipmods` 总数、`mod_items` 总数和当前所选游戏目录的 `builtin_items` 总数。前端进入模组管理或刷新列表时必须先调用该接口；传入 `game_dir` 才会把该游戏目录的原版物品计入统计：
 
 - 数据库不存在时，不加载列表，提示用户创建数据库。
-- 数据库存在但对应表计数为 0 时，提示数据库为空，要求选择有效 HS2 目录后重建。
+- 数据库存在但对应模组/物品表计数为 0 时，提示数据库为空，要求选择有效 HS2 目录后重建；原版索引为空并不阻止模组物品列表显示。
 
 Zipmod 列表：
 
@@ -425,16 +446,16 @@ GET /mods/zipmods/authors
 物品列表：
 
 ```text
-GET /mods/items?offset=0&limit=500&search=&kind=&author=&status=
+GET /mods/items?offset=0&limit=500&search=&kind=&author=&status=&source=&game_dir=
 GET /mods/items?zipmod_id=<zipmod_id>&offset=0&limit=1000
 ```
 
-物品浏览首批加载 500 条 `mod_items`，滚动接近底部后继续分页加载。模组详情的“物品” tab 使用 `zipmod_id` 查询当前模组的关联物品，并展示缩略图、物品名、Kind 映射和状态。`search` 同时匹配 `name`、`item_id` 和 `zipmod_guid`；`status` 当前支持 `ready`、`error` 和 `thumb`。
+接口默认 `limit=500`，但当前前端每次请求 96 条，并使用表格/紧凑网格虚拟渲染可见窗口。首次请求带 `include_total=1`，后续分页带 `include_total=0`，依靠 `has_more` 判断是否继续加载；后续响应可以不计算 `total`，以避免每次滚动重复执行总数查询。`source=mod` 只返回 `mod_items`，`source=builtin` 返回当前 `game_dir` 的原版条目，`source=all` 合并两类来源。模组详情的“物品” tab 使用 `zipmod_id` 查询当前模组的关联物品，并展示缩略图、物品名、Kind 映射和状态。`search` 同时匹配名称、物品 ID、GUID、类别和来源路径；`status` 当前支持 `ready`、`error` 和 `thumb`。
 
 筛选项：
 
 ```text
-GET /mods/items/filters
+GET /mods/items/filters?game_dir=
 ```
 
 缩略图：
@@ -477,13 +498,14 @@ POST /mods/items/<id>/delete
 ```text
 GET  /plugins?game_dir=&search=&category=&offset=&limit=&refresh=
 POST /mods/items/<id>/model-preview
-POST /mods/items/<id>/export-fbx
+POST /mods/items/<id>/open-unity3d
+POST /mods/items/<id>/export-unity3d
 POST /mods/items/<id>/export-thumbnail
 GET  /mods/models/<file.glb>
 GET  /mods/mannequin/body.fbx
 ```
 
-这些资源预览和导出接口不改变数据库源记录；模型缓存、缩略图缓存和插件扫描缓存都属于可重建运行时数据。完整 HTTP/task payload 以 `apps/docs/backend-interface.md` 为准。
+这些资源预览和导出接口不改变数据库源记录；Unity3D 导出使用复制模式，模型缓存、缩略图缓存和插件扫描缓存都属于可重建运行时数据。完整 HTTP/task payload 以 `apps/docs/backend-interface.md` 为准。
 
 ## 当前后端模块
 
@@ -497,15 +519,19 @@ apps/backend/star_manager/
 |   `-- zipmod_utils.py
 |-- services/
 |   |-- achievements.py
+|   |-- builtin_database.py
 |   |-- card_database.py
 |   |-- card_library.py
+|   |-- game_item_probe.py
 |   |-- model_preview.py
 |   |-- mod_database.py
 |   |-- mod_database_assets.py
 |   |-- mod_database_core.py
 |   |-- mod_database_queries.py
 |   |-- plugin_library.py
+|   |-- remote_mod_completion.py
 |   |-- sims4_workbench.py
+|   |-- trash.py
 |   `-- mod_workflow.py
 |-- tools/
 |   `-- mod_sorter.py
@@ -519,12 +545,16 @@ apps/backend/star_manager/
 - `mod_database_core.py`：共享常量、数据模型、SQLite schema、迁移辅助、时间戳和 metadata 工具。
 - `mod_database_queries.py`：数据库状态、zipmod/物品列表、筛选项、GUID 查找和 zipmod 导出等读写边界较轻的查询/导出接口。
 - `mod_database_assets.py`：zipmod 扫描、manifest/CSV 解析、Unity3D 引用诊断、缩略图提取、CSV/zip 写回、模组修复和删除类操作。
+- `builtin_database.py`：扫描和刷新当前游戏目录的 `builtin_items` 原版资源索引，提取原版缩略图并执行资源可用性检查。
 - `card_library.py`：读取 `UserData/chara` 目录树、过滤 AIS PNG、生成标准化人物卡预览。
+- `game_item_probe.py`：向游戏侧探针发送状态查询和物品装配请求，并校验 mod/native 的类别与槽位映射。
 - `plugin_library.py`：扫描 BepInEx DLL 元数据，并将带有效 GUID 的结果缓存到同一个 SQLite 文件。
-- `model_preview.py`：读取 item 的 MainAB，生成运行时 GLB 或静态 FBX。
+- `model_preview.py`：读取 item 的 MainAB 生成运行时 GLB，或准备可供外部工具打开的 Unity3D 文件。
 - `achievements.py`：维护本地成就表，不参与资源索引。
 - `sims4_workbench.py`：调度 Sims 4 Package 的 LOD0 FBX/PNG 导出和可选 Blender T-Pose 固化。
 - `mod_workflow.py`：执行人物卡依赖搜索、模组提取和整理任务。
+- `remote_mod_completion.py`：查询远程索引、并发下载候选 zipmod、校验后原子安装并触发单文件索引。
+- `trash.py`：管理人物卡和模组的 runtime/trash 清单、恢复和永久删除。
 - `bridge.py`：管理异步任务状态，把 HTTP `POST /tasks` 映射到业务服务。
 
 ## 当前实现边界
@@ -533,8 +563,10 @@ apps/backend/star_manager/
 
 - 从 `manifest.xml` 建立 zipmod 主索引，并把重复 GUID 放入 `duplicate_zipmods`。
 - 从 CSV 实际数据行建立 `mod_items`，记录解析、缩略图和 MainAB Unity3D 状态。
+- 从游戏原版 `ChaListData` 建立按游戏目录隔离的 `builtin_items`，并将原版资源合并到物品浏览和 Coordinate 依赖匹配。
 - 统计 zipmod 物品数、Unity3D 汇总、缩略图问题和角色卡依赖使用关系。
 - 支持 GUID、名称、作者、物品名称、Kind、状态和使用关系查询。
+- 物品浏览支持 `mod`、`builtin` 和 `all` 来源；当前前端以 96 条分页请求配合 `include_total`/`has_more` 增量加载。
 - 单个坏 zipmod、坏 CSV 或不可读资源只记录错误，不中断整个扫描。
 - 角色卡数据库、BepInEx 插件缓存和本地成就复用同一 SQLite 文件。
 
@@ -546,21 +578,22 @@ apps/backend/star_manager/
 
 ## Unity3D resource status
 
-`mod_items` stores the resolved state of item main `.unity3d` resources:
+`mod_items` stores the resolved state of item main and texture `.unity3d` resources:
 
 ```text
-unity3d_status      in_mod / in_game / missing / error
-unity3d_error       diagnostic details, such as the missing main resource path or game abdata fallback path
+unity3d_status      in_mod / not_in_mod / missing / error
+unity3d_source      game_abdata / other_zipmod / ''
+unity3d_error       diagnostic details, such as the missing main resource path or provider information
 ```
 
 Status meanings:
 
-- `in_mod`: the item main resource referenced by `MainAB` can be found inside the current zipmod under `abdata/`, or the item uses a direct resource-image fallback inside the zipmod.
-- `in_game`: the item main resource referenced by `MainAB` is absent from the zipmod but found under the selected game directory's `abdata/`, and the main resource is not missing.
-- `missing`: the item main resource referenced by `MainAB` cannot be found in either the zipmod or the selected game directory's `abdata/`.
+- `in_mod`: the required `MainAB` resource can be found inside the current zipmod under `abdata/`; an absent `TexAB` is tolerated, and a `MainAB` or `TexAB` found in the game's shared `abdata/chara/00` through `abdata/chara/60` directories does not change this status. Direct resource-image fallbacks inside the zipmod remain supported.
+- `not_in_mod`: the resource is absent from the current zipmod. `unity3d_source = game_abdata` means it is found in the selected game's `abdata/` outside the shared `chara/00`–`60` range and remains eligible for “补入 Unity3D”; `unity3d_source = other_zipmod` means another zipmod provides it, so it is usable without a repair action and the provider is shown in diagnostics.
+- `missing`: a required `MainAB` resource cannot be found in either the zipmod or the selected game directory's `abdata/`. A missing `TexAB` alone does not produce this status.
 - `error`: the item main resource exists but is not a usable Unity resource. The current implemented trigger is thumbnail extraction proving that the same `.unity3d` path is both `ThumbAB` and `MainAB`, and UnityPy cannot load usable resources from that file.
 
-The item error/missing check uses `.unity3d` references from `MainAB` only. `MainManifest` is treated as the root for `MainAB`; if empty or `abdata`, the path resolves under `abdata/`. A missing or unreadable `ThumbAB` that is not also the `MainAB` path is a thumbnail issue only and must not set `unity3d_status = missing/error`.
+The resource check runs in three stages: current zipmod, selected game directory, then the indexed contents of other zipmods. `MainAB` is required. A missing `TexAB` is treated as an optional compatibility reference and does not set `unity3d_status = missing/error`. If an external `MainAB` or `TexAB` is under `abdata/chara/00` through `abdata/chara/60`, it is treated as a shared game resource and does not create a diagnostic. Otherwise, a game-directory hit and an other-zipmod hit both use `unity3d_status = not_in_mod`, with `unity3d_source` distinguishing the source. A missing or unreadable `ThumbAB` that is not also the `MainAB` path is a thumbnail issue only and must not set `unity3d_status = missing/error`.
 
 ### Item display status
 
@@ -577,31 +610,45 @@ This means a missing `ThumbAB` bundle, missing `ThumbTex` asset, or unreadable t
 The same status is also summarized onto `zipmods` so the mod library can filter or apply actions without querying every item row:
 
 ```text
-zipmods.unity3d_status          error / missing / in_game / in_mod / ''
+zipmods.unity3d_status          error / missing / not_in_mod / in_mod / ''
+zipmods.unity3d_not_in_mod_count number of item rows whose resource is outside the current zipmod
 zipmods.unity3d_in_mod_count    number of item rows whose unity3d_status is in_mod
-zipmods.unity3d_in_game_count   number of item rows whose unity3d_status is in_game
+zipmods.unity3d_in_game_count   number of external game-directory resources that require attention
+zipmods.unity3d_other_mod_count number of item rows provided by other zipmods
 zipmods.unity3d_missing_count   number of item rows whose unity3d_status is missing
 zipmods.unity3d_error           first missing-resource diagnostics, joined for display
 ```
 
-Summary priority is `error` > `missing` > `in_game` > `in_mod` > empty. This means a zipmod with any item main Unity3D error is marked `error`; otherwise, any missing `MainAB` resource marks it `missing`; otherwise, if any item depends on a main resource in game-directory `abdata`, it is marked `in_game`; otherwise it is `in_mod` when all item main resources are inside the zipmod.
+Summary priority is `error` > `missing` > `not_in_mod` > `in_mod` > empty. An external game-directory resource increments `unity3d_in_game_count`, and a resource supplied by another zipmod increments `unity3d_other_mod_count`; both sources are counted as zipmod warnings.
 
-`unity3d_missing_count` counts item rows whose main `MainAB` resource is missing. It does not count missing thumbnail-only `ThumbAB` resources; those are represented by thumbnail issue counts.
+`unity3d_missing_count` counts item rows with a missing required `MainAB` resource. It does not count missing `TexAB` references or missing thumbnail-only `ThumbAB` resources; thumbnail problems are represented by thumbnail issue counts.
+
+### TexAB dependency compatibility
+
+**问题背景**：部分发型模组（例如 Sakuraba 风格的 CSV）除了 `MainAB` 主 Mesh 包，还通过 `TexAB` 引用外部贴图 Unity3D 包。实际资源中，`TexAB` 可能只是公共头发资源、兼容占位包或由 `MainAB` 自带纹理替代；把所有缺失 `TexAB` 都判为错误会把仍能正常显示的发型模组误报为异常。
+
+**解决方案**：CSV 解析器继续保存 `TexAB` 引用，但状态判定将缺失 `TexAB` 视为可选依赖；资源检查按“当前 zipmod → 游戏目录 → 其它 zipmod”三步执行。位于游戏公共 `abdata/chara/00`–`60` 目录的外部 `MainAB` 与 `TexAB` 不产生异常；其它游戏目录位置的外部资源和其它 zipmod 提供的资源统一标记为 `not_in_mod`，再用 `unity3d_source` 区分是否需要补入。`MainAB` 仍按必需主资源处理，但公共目录中的本体资源视为正常。解析器版本升级后，旧数据库会在下一次增量建库时重新解析。
+
+批量补入任务会按诊断结果处理仅存在于游戏 `abdata` 且不在公共 `chara/00`–`60` 范围内的 `MainAB` 或 `TexAB`；同一个外部资源源文件被多个选中 zipmod 共用时，会分别复制到各 zipmod，并保留游戏目录中的源文件。
+
+**验证结果**：回归测试覆盖 `TexAB` 字段解析、缺失 `TexAB` 不产生错误、公共 `chara/60` 路径豁免、公共目录外游戏资源的 `not_in_mod/game_abdata` 状态，以及其它 zipmod 提供资源的 `not_in_mod/other_zipmod` 状态和提供者展示。
+
+**适用边界**：当前只把字段值以 `.unity3d` 结尾的 `TexAB` 作为外部贴图引用；缺失 `TexAB` 不作为错误，公共目录范围仅按 `chara/00`–`chara/60` 的目录名识别，且该范围对 `MainAB` 和 `TexAB` 均适用。`ThumbAB` 仍属于缩略图依赖，只有与 `MainAB` 共用且主资源不可读时才升级为主 Unity3D 错误。扫描仍按 CSV 引用定位，不会把 mod 内未被引用的孤立 `.unity3d` 自动计入。
 
 ### Zipmod display and filter status
 
 The renderer maps each zipmod row to a display state:
 
 - `错误`: `scan_status` is `missing_manifest`, `invalid`, or `invalid_manifest`; or `unity3d_status` is `missing` / `error`; or `unity3d_missing_count > 0`.
-- `警告`: author is empty; or `unity3d_status` is `in_game`; or `unity3d_in_game_count > 0`; or there are duplicate zipmods for the same GUID; or `thumbnail_issue_count > 0`.
+- `警告`: author is empty; or `unity3d_not_in_mod_count > 0` (including `game_abdata` and `other_zipmod`); or there are duplicate zipmods for the same GUID; or `thumbnail_issue_count > 0`.
 - `正常`: `scan_status = ok` and no earlier error/warning condition matched.
 - `读取失败`: `scan_status = error`.
 - `已失效`: `scan_status = stale`.
 
 Backend zipmod list filters use similar but not identical query groups:
 
-- `status=normal`: `scan_status = ok`, author is present, no duplicate GUID, no thumbnail issue items, and `unity3d_status` is not `missing` / `in_game` / `error`.
-- `status=abnormal`: any non-`ok` scan status, empty author, `unity3d_status` in `missing` / `in_game` / `error`, duplicate GUID, or thumbnail issue item.
-- `status=warning`: empty author, `unity3d_status = in_game`, `unity3d_in_game_count > 0`, duplicate GUID, or thumbnail issue item.
+- `status=normal`: `scan_status = ok`, author is present, no duplicate GUID, no thumbnail issue items, no missing/error Unity3D, and no `in_game`/`not_in_mod` Unity3D references.
+- `status=abnormal`: any non-`ok` scan status, empty author, missing/error Unity3D, any Unity3D resource outside the current zipmod, duplicate GUID, or thumbnail issue item.
+- `status=warning`: empty author, any Unity3D resource outside the current zipmod, duplicate GUID, or thumbnail issue item.
 - `status=error`: `scan_status = missing_manifest`, `unity3d_status = missing/error`, or `unity3d_missing_count > 0`.
 - `status=read_error`: the zipmod scan cannot read a manifest GUID, including missing `manifest.xml`, invalid manifest XML, missing/empty `<guid>`, or unreadable/bad zip files. This replaces the older separate `missing_manifest` and `read_error` filter entries in the UI.

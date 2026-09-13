@@ -1,0 +1,8234 @@
+{
+  "version": 7400,
+  "rows": [
+    {
+      "id": "P",
+      "props": [
+        "DocumentUrl",
+        "KString",
+        "Url",
+        "",
+        "/foobar.fbx"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SrcDocumentUrl",
+        "KString",
+        "Url",
+        "",
+        "/foobar.fbx"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original",
+        "Compound",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|ApplicationVendor",
+        "KString",
+        "",
+        "",
+        "Blender Foundation"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|ApplicationName",
+        "KString",
+        "",
+        "",
+        "Blender (stable FBX IO)"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|ApplicationVersion",
+        "KString",
+        "",
+        "",
+        "5.2.0 LTS"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|DateTime_GMT",
+        "DateTime",
+        "",
+        "",
+        "01/01/1970 00:00:00.000"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|FileName",
+        "KString",
+        "",
+        "",
+        "/foobar.fbx"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastSaved",
+        "Compound",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastSaved|ApplicationVendor",
+        "KString",
+        "",
+        "",
+        "Blender Foundation"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastSaved|ApplicationName",
+        "KString",
+        "",
+        "",
+        "Blender (stable FBX IO)"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastSaved|ApplicationVersion",
+        "KString",
+        "",
+        "",
+        "5.2.0 LTS"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastSaved|DateTime_GMT",
+        "DateTime",
+        "",
+        "",
+        "01/01/1970 00:00:00.000"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Original|ApplicationNativeFile",
+        "KString",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UpAxis",
+        "int",
+        "Integer",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UpAxisSign",
+        "int",
+        "Integer",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "FrontAxis",
+        "int",
+        "Integer",
+        "",
+        2
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "FrontAxisSign",
+        "int",
+        "Integer",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "CoordAxis",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "CoordAxisSign",
+        "int",
+        "Integer",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "OriginalUpAxis",
+        "int",
+        "Integer",
+        "",
+        -1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "OriginalUpAxisSign",
+        "int",
+        "Integer",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UnitScaleFactor",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "OriginalUnitScaleFactor",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AmbientColor",
+        "ColorRGB",
+        "Color",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultCamera",
+        "KString",
+        "",
+        "",
+        "Producer Perspective"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TimeMode",
+        "enum",
+        "",
+        "",
+        11
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TimeSpanStart",
+        "KTime",
+        "Time",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TimeSpanStop",
+        "KTime",
+        "Time",
+        "",
+        46186158000
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "CustomFrameRate",
+        "double",
+        "Number",
+        "",
+        24.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SourceObject",
+        "object",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ActiveAnimStackName",
+        "KString",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Color",
+        "ColorRGB",
+        "Color",
+        "",
+        0.8,
+        0.8,
+        0.8
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "BBoxMin",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "BBoxMax",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Primary Visibility",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Casts Shadows",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Receive Shadows",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "QuaternionInterpolate",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationOffset",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationPivot",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingOffset",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingPivot",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationActive",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMin",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMax",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMinX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMinY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMinZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMaxX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMaxY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TranslationMaxZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationOrder",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationSpaceForLimitOnly",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationStiffnessX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationStiffnessY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationStiffnessZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AxisLen",
+        "double",
+        "Number",
+        "",
+        10.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PreRotation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PostRotation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationActive",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMin",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMax",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMinX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMinY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMinZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMaxX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMaxY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "RotationMaxZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingActive",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMin",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMax",
+        "Vector3D",
+        "Vector",
+        "",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMinX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMinY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMinZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMaxX",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMaxY",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ScalingMaxZ",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "GeometricTranslation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "GeometricRotation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "GeometricScaling",
+        "Vector3D",
+        "Vector",
+        "",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampRangeX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampRangeY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampRangeZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampRangeX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampRangeY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampRangeZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampStrengthX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampStrengthY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MinDampStrengthZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampStrengthX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampStrengthY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MaxDampStrengthZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PreferedAngleX",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PreferedAngleY",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PreferedAngleZ",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LookAtProperty",
+        "object",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UpVectorProperty",
+        "object",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Show",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "NegativePercentShapeSupport",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        -1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Freeze",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LODBox",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Visibility",
+        "Visibility",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Visibility Inheritance",
+        "Visibility Inheritance",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ShadingModel",
+        "KString",
+        "",
+        "",
+        "Phong"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "MultiLayer",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "EmissiveColor",
+        "Color",
+        "",
+        "A",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "EmissiveFactor",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AmbientColor",
+        "Color",
+        "",
+        "A",
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AmbientFactor",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DiffuseColor",
+        "Color",
+        "",
+        "A",
+        0.8,
+        0.8,
+        0.8
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DiffuseFactor",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TransparentColor",
+        "Color",
+        "",
+        "A",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TransparencyFactor",
+        "Number",
+        "",
+        "A",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Opacity",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "NormalMap",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Bump",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "BumpFactor",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DisplacementColor",
+        "ColorRGB",
+        "Color",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DisplacementFactor",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "VectorDisplacementColor",
+        "ColorRGB",
+        "Color",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "VectorDisplacementFactor",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SpecularColor",
+        "Color",
+        "",
+        "A",
+        0.2,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SpecularFactor",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Shininess",
+        "Number",
+        "",
+        "A",
+        20.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ShininessExponent",
+        "Number",
+        "",
+        "A",
+        20.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ReflectionColor",
+        "Color",
+        "",
+        "A",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ReflectionFactor",
+        "Number",
+        "",
+        "A",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TextureTypeUse",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AlphaSource",
+        "enum",
+        "",
+        "",
+        2
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Texture alpha",
+        "double",
+        "Number",
+        "",
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PremultiplyAlpha",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "CurrentTextureBlendMode",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "CurrentMappingType",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UVSet",
+        "KString",
+        "",
+        "",
+        "default"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "WrapModeU",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "WrapModeV",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UVSwap",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Translation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Rotation",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Scaling",
+        "Vector3D",
+        "Vector",
+        "",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TextureRotationPivot",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "TextureScalingPivot",
+        "Vector3D",
+        "Vector",
+        "",
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UseMaterial",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UseMipMap",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Width",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Height",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Path",
+        "KString",
+        "Url",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AccessMode",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "StartFrame",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "StopFrame",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Offset",
+        "KTime",
+        "Time",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "PlaySpeed",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "FreeRunning",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Loop",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InterlaceMode",
+        "enum",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ImageSequence",
+        "bool",
+        "",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ImageSequenceOffset",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "FrameRate",
+        "double",
+        "Number",
+        "",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "LastFrame",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Color",
+        "ColorRGB",
+        "Color",
+        "",
+        0.8,
+        0.8,
+        0.8
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        100.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Look",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "LayerElementUV",
+      "props": [
+        0
+      ]
+    },
+    {
+      "id": "LayerElementUV",
+      "props": [
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -4.325710697414086e-06,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.3701308532176881e-08,
+        -1.1101365089416504e-06,
+        -2.2380845621228218e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.4279318340799452e-06,
+        -4.168799486910281e-10,
+        -8.001116584436283e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999997019767761,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.5166065654219079e-21,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -2.0355549961366507e-13,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999999403953552,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        11.4350004196167,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        6.066427346449243e-21,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999999403953552,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.657988909670621e-09,
+        -0.09999465942382812,
+        1.0164395367051604e-19
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.0355632464768583e-13,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.109381445185136e-08,
+        5.7220458984375e-06,
+        1.3868458451275777e-21
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        1.6260129613700159e-12,
+        3.610475004404035e-27,
+        -2.5444435025137487e-13
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.51545712157044e-14,
+        0.7292966842651367,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.426570649309934e-19,
+        5.17254644302753e-34,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        5.2562327823579835e-08,
+        -0.9999942779541016,
+        -0.20000000298023224
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.3141581051921216e-26,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        9.326727479219699e-08,
+        5.7220458984375e-06,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.988750573481566e-15,
+        -3.534326898569053e-30,
+        -2.0355547534795857e-13
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.000000238418579,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.3319545486245527e-14,
+        -0.8988828659057617,
+        -0.35475417971611023
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        25.0000342774518,
+        1.8056424790554096e-05,
+        8.41983386025171e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999998211860657,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -5.506706202140776e-13,
+        0.871281623840332,
+        5.811453434034775e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        7.683962816264344e-05,
+        -1.6284581680819126e-12,
+        2.1042437956187107e-11
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        0.9999999403953552
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        8.579752576801103e-15,
+        -0.75,
+        0.20000000298023224
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        3.285205983547296e-05,
+        9.96153145966767e-06,
+        -2.9564087107307845e-14
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -3.0616592025306186e-14,
+        0.871281623840332,
+        1.3909276291509953e-12
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -2.2798215956730488e-11,
+        -6.976040969496462e-31,
+        -3.506394588252854e-18
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.879999577999115,
+        -0.5,
+        -0.09999994933605194
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.1199989454513526,
+        -1.477916435166762e-06,
+        5.7801613309186973e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999986886978149,
+        0.9999987483024597,
+        0.9999983310699463
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.883281583076496e-09,
+        -4.049996852874756,
+        0.30000028014183044
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.000683659143015548,
+        -1.2625056410485049e-13,
+        1.6285553163231718e-10
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0000003576278687
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.750438075187049e-08,
+        2.0727943592646625e-06,
+        -5.996511731609644e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.0006976383316075124,
+        1.0467059151181087e-08,
+        -1.0697483722299381e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000001311302185,
+        1.000002145767212,
+        1.0000019073486328
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.8807874369031197e-08,
+        0.01000042911618948,
+        1.4701303285846734e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00020293125840566584,
+        3.3386018886950534e-06,
+        -0.0003415178482441096
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.000000238418579,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        3.576343488020939e-06,
+        -4.200000286102295,
+        7.521480824834725e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        3.499996824597396,
+        2.5320435576064574e-08,
+        9.297536676815888e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000003576278687,
+        1.0000008344650269,
+        1.0000009536743164
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.999124350504644e-07,
+        -4.860557510255603e-06,
+        3.7389330032056023e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -3.2016483236664824e-06,
+        -2.1860343931493906e-09,
+        -1.052431422433492e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000009536743164,
+        1.0000009536743164,
+        1.0000008344650269
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -6.429048937661719e-08,
+        2.1098580360412598,
+        1.6231862076665493e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        1.2806604693773908e-06,
+        3.3623252898419654e-08,
+        1.6186353698271867e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.9280084870842984e-06,
+        -4.0000104904174805,
+        4.782014002557844e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.00017043453807787047,
+        -4.034837674464019e-07,
+        -1.9423773847662958e-05
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.368654226207582e-08,
+        1.5771480832427187e-07,
+        -4.2085325446805655e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        3.1162721803743204e-05,
+        2.715048189395767e-07,
+        1.3071746316906687e-05
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000009536743164,
+        1.0000004768371582,
+        1.0000004768371582
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.875962637626799e-08,
+        0.010001257061958313,
+        6.788235751287175e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.0003129079631858973,
+        1.4187401441409247e-05,
+        0.0006829433050896106
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.963578597496962e-06,
+        -2.3295743465423584,
+        4.036955942865461e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -7.257077621582545e-06,
+        -4.123038908557556e-08,
+        -1.984907538055776e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999998211860657,
+        0.9999998211860657
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        5.1810466175084e-06,
+        -2.3500049114227295,
+        0.0004996068892069161
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -2.379993930442929,
+        3.037679585173434e-07,
+        -1.8528539610139054e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000009536743164,
+        1.000000238418579,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.7668510281509953e-06,
+        -0.5000013113021851,
+        -1.4554336402738954e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        1.3513628259467025e-06,
+        1.6724373830614187e-13,
+        2.411709071427235e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.715973485261202e-05,
+        -0.1499997228384018,
+        1.1000007390975952
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.126017884954052e-12,
+        1.2825993355112109e-06,
+        -9.228479252238955e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -3.7119072260338726e-08,
+        1.1101815700531006,
+        8.608114221431151e-10
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -3.076159411487152e-06,
+        7.672522171426783e-15,
+        -1.5538393346596343e-11
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        4.1868460698424315e-07,
+        -3.0586961656808853e-06,
+        2.9875417340008426e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        6.189855678436062e-06,
+        1.5562759389650407e-08,
+        7.491795025521067e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000009536743164,
+        1.0000005960464478,
+        1.0000004768371582
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.6410162945467164e-08,
+        1.1750030517578125,
+        6.057464929654088e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        6.403302346886954e-07,
+        1.6538885556895612e-13,
+        -1.2070205016154047e-12
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.1834933860986894e-09,
+        2.6487032300792634e-06,
+        1.1139824351857897e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -5.4961763156534194e-05,
+        -0.05120978352920695,
+        3.828917750500154e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999995231628418,
+        1.0,
+        0.9999991059303284
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.22415279597044e-07,
+        1.9829744815069716e-06,
+        -1.461012288928032e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.6840095379259267e-05,
+        -2.411619805979545e-08,
+        -7.982919486103945e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000016689300537,
+        1.0000022649765015,
+        1.0000028610229492
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        4.889443516731262e-08,
+        0.010000168345868587,
+        -1.2689270079135895e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.0011320211039194665,
+        1.3343404158693097e-05,
+        -0.0013651247589397072
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999998807907104,
+        0.9999997615814209,
+        0.9999999403953552
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.1745964201281822e-09,
+        -2.0000061988830566,
+        7.090113385288532e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -8.580498750497179e-05,
+        -0.18299967094677813,
+        2.739787307041314e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999995231628418,
+        1.0,
+        0.9999994039535522
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.5669578462839127e-07,
+        -5.322269771568244e-07,
+        2.1420419216156006e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        5.784266948657042e-05,
+        5.567987800340139e-08,
+        -4.1752212514388303e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000001072883606,
+        1.0000022649765015,
+        1.000002145767212
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.1245796233415604e-08,
+        0.009999907575547695,
+        -1.6298145055770874e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.0008005195150666507,
+        -3.327405025827773e-08,
+        -2.5562387685959273e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999999403953552,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.007302033594897e-08,
+        -3.399998903274536,
+        5.179359519047466e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -8.569752974250373e-05,
+        1.8751357693903345e-12,
+        9.540261941537245e-15
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -5.9136262109404925e-08,
+        -4.4747872607331374e-07,
+        -3.604387899258654e-10
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.452342162073212e-05,
+        2.1122699750535506e-09,
+        -2.162771076730203e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000001311302185,
+        1.0000020265579224,
+        1.0000020265579224
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.5304892403710255e-08,
+        0.45000165700912476,
+        1.4573204865087064e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00020458583567183758,
+        6.675230103265853e-06,
+        -0.0006827867139148678
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999986886978149,
+        0.9999980926513672,
+        0.9999982118606567
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        9.806686875890591e-07,
+        5.166857590666041e-07,
+        8.725779565565972e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.000263335287913647,
+        -6.679089515538528e-06,
+        0.0006835745160379167
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000001311302185,
+        1.0000020265579224,
+        1.000002145767212
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        9.968246672542591e-09,
+        0.010000894777476788,
+        -7.8752702137308e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.532400377226867e-05,
+        1.9720209703912025e-12,
+        -1.0345549240130455e-10
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -0.8799996376037598,
+        -0.5,
+        -0.09999994933605194
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.1199990521730583,
+        8.534375252328568e-07,
+        -1.6684838407665306e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999963045120239,
+        0.9999969601631165,
+        0.9999964833259583
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.8167880000419245e-07,
+        -4.050002098083496,
+        0.30000028014183044
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00017043453807787047,
+        -4.703042131250828e-14,
+        2.0356590474860932e-11
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -3.0088602898104e-07,
+        1.82969984052761e-06,
+        2.4142497778711913e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.00015554626085396745,
+        4.658882063378452e-09,
+        -4.7683506806549844e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000003695487976,
+        1.0000040531158447,
+        1.0000039339065552
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        8.464917655714999e-09,
+        0.010000417940318584,
+        9.169812464904226e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.0002243292339934379,
+        1.668663795278186e-05,
+        -0.0017075890848899243
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.168603133322904e-07,
+        -4.2000041007995605,
+        6.139541142147209e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        3.4999995993617463,
+        4.4716944932942686e-08,
+        4.34859644223565e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000003457069397,
+        1.0000030994415283,
+        1.0000033378601074
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -4.716342871802226e-08,
+        -2.7802991553471657e-06,
+        2.6527322916081175e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -5.9764143024281596e-06,
+        5.385289742216575e-09,
+        2.5927126063498273e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000000238418579,
+        1.000000238418579,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        8.60761417698086e-08,
+        2.1098601818084717,
+        2.6771949990234134e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.7075472925031877e-06,
+        -3.362277581521744e-08,
+        -1.6186364893824345e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.1270030242371831e-08,
+        -4.000002384185791,
+        3.759595529118087e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.00017182194630813326,
+        -2.0175743027448393e-07,
+        -9.711867382503515e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999997615814209,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        9.238677023404307e-08,
+        1.2111977412132546e-06,
+        -9.670668532635318e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.913501590767166e-05,
+        1.0533397252394243e-07,
+        5.070882599289799e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000000238418579,
+        1.0000004768371582,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.7182464340237402e-09,
+        0.010000573471188545,
+        1.3434219070518338e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00036947096229704044,
+        -2.836868319027811e-05,
+        -0.0013659839520475804
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999998807907104,
+        0.9999997615814209
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        7.32262151359464e-07,
+        -2.3295750617980957,
+        3.546802247456071e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -9.818399374559324e-06,
+        3.975911537880544e-08,
+        1.914024831313807e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999998211860657,
+        0.9999997615814209
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        4.0946440549305407e-07,
+        -2.350003719329834,
+        -2.9413092761387816e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -2.3799913691219907,
+        6.945316191261997e-08,
+        1.2718038713669501e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000000238418579,
+        1.000000238418579,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.034253611782333e-06,
+        -0.5000008940696716,
+        -1.8841383564449643e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.0521174380753379e-07,
+        2.510385370165359e-13,
+        -1.8883112934916096e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.2110557463529403e-06,
+        -0.14999982714653015,
+        1.1000007390975952
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.021506830397771e-13,
+        8.937640258436334e-14,
+        -6.152323301195295e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.4484727134677087e-08,
+        1.110181212425232,
+        6.33440180308753e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.0304997167941794e-12,
+        4.8690603603826695e-15,
+        -6.70495733581903e-13
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.3032409046663815e-07,
+        -5.203842761147826e-07,
+        -3.1648266940464964e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        2.8814848347661317e-06,
+        5.732661973139317e-09,
+        2.7596594126910983e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000000238418579,
+        1.0000005960464478,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        3.758817612720122e-08,
+        1.1750046014785767,
+        -3.34486678355006e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -5.2293635832910126e-06,
+        -1.207480791488906e-07,
+        -5.812905904697488e-06
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.7720934408771427e-07,
+        -3.0635856091976166e-06,
+        7.629655840446503e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.2010476053951038,
+        -0.1993712742015417,
+        3.3311984530408046e-05
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999995231628418,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        4.366738721728325e-07,
+        1.54811186803272e-06,
+        -7.869675755500793e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -2.8310629161788293e-05,
+        2.6845049411231116e-07,
+        -1.6834928948472414e-05
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000033378601074,
+        1.0000032186508179,
+        1.0000029802322388
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -6.868503987789154e-08,
+        0.010000282898545265,
+        -3.282912075519562e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.0006358869535915924,
+        7.872977125207608e-06,
+        -0.0006851053576154272
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.7720934408771427e-07,
+        -2.000007152557373,
+        1.0609888079216034e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.2010213251750551,
+        -0.3490490268489796,
+        -0.0002822501730122758
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999995231628418,
+        0.9999997019767761
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.2508826330304146e-07,
+        5.147339834365994e-06,
+        1.494772732257843e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -5.4584475480666265e-05,
+        -1.8162149888609436e-06,
+        0.00014162358578247177
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0000038146972656,
+        1.0000040531158447,
+        1.0000027418136597
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -4.7730281949043274e-08,
+        0.009999738074839115,
+        -9.778887033462524e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -5.485616833399861e-05,
+        -1.578726461772881e-05,
+        0.0013663923918571092
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000003576278687,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -1.7720934408771427e-07,
+        -3.40000319480896,
+        4.64942395694834e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -8.548406678961287e-05,
+        -1.0808962405128507e-13,
+        -6.398237835117995e-13
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.000000238418579,
+        1.000000238418579
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.964187046927691e-07,
+        3.585592978083696e-08,
+        4.6494243122197076e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.382957420252899e-05,
+        4.661364883876669e-09,
+        -4.7681990318077724e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000003695487976,
+        1.0000039339065552,
+        1.000003695487976
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.349177539277662e-08,
+        0.45000118017196655,
+        9.16980180676319e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00020431891415941615,
+        8.317893266045186e-05,
+        -0.0006846988458835907
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        0.9999963045120239,
+        0.9999964833259583,
+        0.9999967217445374
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.0886935203634494e-07,
+        -2.8452950573409908e-06,
+        4.2968508751073387e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.00019898242501623247,
+        -6.691084226908763e-06,
+        0.0006845032241631299
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.000003695487976,
+        1.0000035762786865,
+        1.0000033378601074
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.441234745580005e-08,
+        0.010003960691392422,
+        -1.0721691978687886e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.0004266733276040261,
+        3.763506249227658e-11,
+        -5.459359990523504e-10
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000001192092896,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.8800000548362732,
+        -0.149993896484375,
+        -0.09999997913837433
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        7.6615410965597e-05,
+        7.557682683858016e-06,
+        2.0271313405469406e-11
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000004768371582,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.687118261235355e-08,
+        0.0001144585621659644,
+        -0.3999999463558197
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.5448672043175555e-31,
+        5.699553989182622e-12,
+        -3.1060104311167156e-18
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.6871118663507332e-08,
+        1.9249896467954386e-06,
+        2.6860881519041868e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -3.415101098782363e-06,
+        2.891378792786003e-19,
+        -4.5047245785093507e-13
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -2.0522605836958974e-08,
+        2.2815945612819633e-06,
+        -0.4999997317790985
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.335101847982526e-06,
+        -7.159057516790684e-13,
+        -5.455171363011444e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.000000238418579,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -3.0471269951704016e-09,
+        0.4999992549419403,
+        5.0053891698098596e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        1.3660394624465471e-05,
+        6.502919971600693e-14,
+        1.8932884591036924e-12
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -0.8799999952316284,
+        -0.149993896484375,
+        -0.09999997913837433
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        1.0177774980683254e-12,
+        1.706662487635242e-07,
+        1.5158211980149582e-21
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000004768371582,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.085081440839076e-09,
+        0.00010967254638671875,
+        -0.4000000059604645
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.0,
+        1.2722218725854067e-14,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.085081662883681e-09,
+        1.9073486328125e-06,
+        -2.6214264092772055e-09
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -7.279711947929802e-19,
+        0.0,
+        2.259920024601681e-28
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        3.5744245341362557e-09,
+        1.9073486328125e-06,
+        -0.4999995827674866
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        8.196219838861715e-05,
+        4.549609126548142e-06,
+        -5.267313045750487e-07
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.000000238418579,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        6.306848376880225e-10,
+        0.5000001788139343,
+        2.0319362192822155e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        5.464150033255003e-05,
+        4.7610571889771926e-14,
+        4.3372477195609294e-12
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.8999995589256287,
+        5.7220458984375e-06,
+        -0.30000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.8252382898380441,
+        -0.0014495307892895902,
+        -0.201276163268248
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000007152557373,
+        1.0000005960464478
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -3.552099769876804e-07,
+        8.374918252229691e-07,
+        -1.4775650925002992e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -1.6515239336775164e-05,
+        -9.947645310595025e-07,
+        0.00013429625220153055
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        0.9999999403953552,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -6.708523869747296e-08,
+        0.010000288486480713,
+        -1.3704266166314483e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00017054172877552305,
+        2.9796614333404237e-07,
+        -4.0018559585281785e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000005960464478,
+        1.0000004768371582
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        -0.8999995589256287,
+        5.7220458984375e-06,
+        -0.30000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -0.8252447998620969,
+        0.0014492091650864245,
+        0.2012299260892182
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0000005960464478,
+        1.0000005960464478
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        2.6039197109639645e-07,
+        1.4528632164001465e-07,
+        6.957816367503256e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        -9.898471594331353e-06,
+        6.580920804739846e-07,
+        -8.905722466273526e-05
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Scaling",
+        "Lcl Scaling",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0000001192092896
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        1.0430085239931941e-07,
+        0.010000270791351795,
+        -1.3835233403369784e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Rotation",
+        "Lcl Rotation",
+        "",
+        "A",
+        0.00017043508523505345,
+        -2.985915930510428e-07,
+        6.00321426684067e-08
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        3.300000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.7292985916137695,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.8712841868400574,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.871281623840332,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.009999754838645458,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        2.1098575592041016,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010001104325056076,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        1.110181212425232,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        1.1750028133392334,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.009999281726777554,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.009999752976000309,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010000709444284439,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.009999755769968033,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        2.109860897064209,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010000393725931644,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        1.1101813316345215,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        1.1750037670135498,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010000977665185928,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.009999549016356468,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010003572329878807,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.4999990463256836,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.5,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010000373236835003,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Size",
+        "double",
+        "Number",
+        "",
+        330.0000049173832
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Lcl Translation",
+        "Lcl Translation",
+        "",
+        "A",
+        0.0,
+        0.010000373236835003,
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DefaultAttributeIndex",
+        "int",
+        "Integer",
+        "",
+        0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "InheritType",
+        "enum",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "Material",
+      "props": [
+        851470081,
+        "SEOULSOUL_2026__155_Jeans_model01_lod0_4EFDA4DF2E0D40DB\u0000\u0001Material",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "DiffuseColor",
+        "Color",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AmbientColor",
+        "Color",
+        "",
+        "A",
+        0.05087608844041824,
+        0.05087608844041824,
+        0.05087608844041824
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "AmbientFactor",
+        "Number",
+        "",
+        "A",
+        0.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SpecularColor",
+        "Color",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "SpecularFactor",
+        "Number",
+        "",
+        "A",
+        0.5
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Shininess",
+        "Number",
+        "",
+        "A",
+        2.000000605892538
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ShininessExponent",
+        "Number",
+        "",
+        "A",
+        2.000000605892538
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ReflectionColor",
+        "Color",
+        "",
+        "A",
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "ReflectionFactor",
+        "Number",
+        "",
+        "A",
+        0.0
+      ]
+    },
+    {
+      "id": "Texture",
+      "props": [
+        321801487,
+        "base_color_texture\u0000\u0001Texture",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UseMaterial",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "Texture",
+      "props": [
+        90236723,
+        "alpha_texture\u0000\u0001Texture",
+        ""
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "UseMaterial",
+        "bool",
+        "",
+        "",
+        1
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Path",
+        "KString",
+        "Url",
+        "",
+        "D:\\Workspace\\Star_workspace\\B040\\SEOULSOUL_2026__155_Jeans_lod0_fbx\\textures\\texture_01_r0006_64B6A1DCB937403A.png"
+      ]
+    },
+    {
+      "id": "P",
+      "props": [
+        "Path",
+        "KString",
+        "Url",
+        "",
+        "D:\\Workspace\\Star_workspace\\B040\\SEOULSOUL_2026__155_Jeans_lod0_fbx\\textures\\texture_01_r0006_64B6A1DCB937403A.png"
+      ]
+    }
+  ]
+}

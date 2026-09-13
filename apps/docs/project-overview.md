@@ -12,9 +12,11 @@ Star_Manager 是面向 HS2 / AIS 本地游戏目录的桌面资源管理器。�
 
 - `zipmod`：HS2 模组压缩包，通常包含 `manifest.xml`、`abdata/list/**/*.csv` 和 `.unity3d` 资源。
 - `png` 角色卡：位于 `UserData/chara`，包含 AIS/HS2 角色数据和 UniversalAutoResolver 依赖记录。
+- `png` 服装卡：位于 `UserData/coordinate`，使用独立的服装卡有效性索引和按需详情解析。
+- 游戏原版物品：从 `abdata/list/characustom/*.unity3d` 的 `ChaListData` 建立 `builtin_items`，用于物品浏览和 Coordinate 依赖匹配。
 - `.unity3d`：作为 zipmod 内部资源或游戏目录 `abdata` 回退资源参与诊断、修复和导出。
 
-当前应用定位已经从“单页任务控制台”转向“资源库浏览器”：用户选择 HS2 游戏目录后，应用建立本地 SQLite 索引，前端围绕角色卡、zipmod、物品、诊断和批量维护工作流浏览数据。
+当前应用定位已经从“单页任务控制台”转向“资源库浏览器”：用户选择 HS2 游戏目录后，应用建立本地 SQLite 索引，前端围绕角色卡、服装卡、zipmod、原版/模组物品、诊断、装配和批量维护工作流浏览数据。
 
 ## 目录分工
 
@@ -67,18 +69,19 @@ Electron hardware acceleration is enabled by default so the Three.js model previ
 
 ## Frontend Shape
 
-The renderer is a Vue app with a persistent shell and eight main views:
+The renderer is a Vue app with a persistent shell. It has eight main navigation items plus a settings page fixed at the bottom of the sidebar:
 
 - Start: game launch, path setup, setup/configuration surfaces.
 - Overview: game directory summary, health cards, suggested actions, recent tasks.
 - Characters: `UserData/chara` directory tree, card grid, card detail, dependency views.
 - Mods: item/zipmod browsing modes, filters, detail drawer, diagnostics, direct and batch maintenance actions.
 - Plugins: BepInEx plugin inventory, metadata, dependencies, and diagnostics.
-- Workbench: standalone mod-making helpers, currently including Sims 4 Package to HS2-aligned T-pose LOD0 FBX pure meshes with no final skeleton/skinning, plus RLE2 PNG texture extraction.
+- Workbench: standalone mod-making workspace with local project/manifest files, CSV-backed items, Unity3D database-template selection, MainData preprocessing, resource write-back, and a modal Sims 4 Package → FBX tool in the project-level toolbar.
 - Logs: task and runtime message review.
+- Trash: recoverable character-card and zipmod entries, with restore and permanent-delete actions.
 - Settings: manager startup behavior, local achievement preferences, persistent default export locations, and Blender executable integration for Workbench FBX imports.
 
-The Start page's `setup.xml` panel is currently a renderer-side placeholder. The three Electron launch helpers and directory shortcuts are connected, but setup values are not yet read from or written back to the game's XML file.
+The Start page reads and writes the game's UTF-16 `UserData/setup.xml` through Electron IPC. Saving creates a `.bak` copy, atomically replaces the XML, and synchronizes the Unity display values in the Windows registry. Launching checks for IPA/BepInEx conflicts and uses `IPA.exe --launch` when IPA is present.
 
 Important frontend files:
 
@@ -87,6 +90,7 @@ Important frontend files:
 - `apps/src/components/ModelPreview.vue`: Three.js GLB viewer, mannequin overlay, camera/light/background controls, and screenshot capture.
 - `apps/src/components/CardCoverCropper.vue`: native-resolution `63:88` cover crop UI.
 - `apps/src/components/LazyThumbnail.vue`: thumbnail display helper.
+- `apps/src/components/VirtualItemTable.vue` / `VirtualItemGrid.vue`: virtualized item table and compact item grid.
 - `apps/src/styles.css`: global visual system and layout styles.
 
 ## Backend Modules
@@ -103,15 +107,19 @@ Business modules:
 - `star_manager/core/zipmod_utils.py`: HS2 directory checks and zipmod helper logic.
 - `star_manager/services/card_library.py`: card folder tree, card listing, normalized preview images, card detail, coordinate export, and portable dependency package generation.
 - `star_manager/services/card_database.py`: character-card indexing and dependency association with zipmods/items.
-- `star_manager/services/plugin_library.py`: read-only BepInEx plugin metadata scan and cache.
+- `star_manager/services/builtin_database.py`: scans game-original `ChaListData` resources into the `builtin_items` index and prepares original-item thumbnails.
+- `star_manager/services/game_item_probe.py`: communicates with the optional BepInEx game-side item probe and resolves current-character/H-scene item state.
+- `star_manager/services/plugin_library.py`: BepInEx plugin metadata scan/cache and safe single-plugin enable/disable.
 - `star_manager/services/achievements.py`: local achievement milestones, event deduplication, preferences, and reset.
 - `star_manager/services/mod_database.py`: compatibility facade plus database build orchestration.
 - `star_manager/services/mod_database_core.py`: dataclasses, SQLite schema, migrations, metadata.
 - `star_manager/services/mod_database_queries.py`: database status, lists, filters, exports, duplicate analysis queries.
 - `star_manager/services/mod_database_assets.py`: zipmod scanning, manifest/CSV parsing, thumbnails, Unity3D diagnostics, write-back repair/delete operations.
-- `star_manager/services/model_preview.py`: selected item MainAB mesh/material conversion to runtime GLB or static FBX.
+- `star_manager/services/model_preview.py`: selected item MainAB mesh/material conversion to runtime GLB and preparation of the source Unity3D file for external tools.
 - `star_manager/services/mod_workflow.py`: legacy card search, dependency extraction, zipmod sorting workflows.
-- `star_manager/services/sims4_workbench.py`: validates one Sims 4 Package export request and invokes collision-safe LOD0 FBX plus RLE2 PNG texture extraction.
+- `star_manager/services/remote_mod_completion.py`: reads the remote missing-mod index and downloads, validates, installs, and relinks selected zipmods.
+- `star_manager/services/trash.py`: validates runtime recycle-bin entries and handles recover/erase operations.
+- `star_manager/services/sims4_workbench.py`: Sims 4 Package export request handler for collision-safe LOD0 FBX plus RLE2 PNG texture extraction, exposed from the Workbench project-level Package → FBX modal.
 - `star_manager/core/card_metadata.py`: read/write of registered Star Manager favorite, rating, and tag metadata.
 - `star_manager/core/character_profile.py`: atomic character parameter and cover replacement logic.
 - `star_manager/core/coordinate_card.py`: coordinate block extraction and coordinate-scoped plugin conversion.
@@ -127,11 +135,14 @@ Core tables:
 - `zipmods`: one primary row per manifest GUID, plus file metadata, scan status, item count, Unity3D summary and diagnostics.
 - `duplicate_zipmods`: duplicate files for GUIDs whose primary zipmod is already represented in `zipmods`.
 - `mod_items`: item rows parsed from `abdata/list/**/*.csv`, linked to `zipmods`.
+- `builtin_items`: game-original clothing and accessory rows indexed by game directory, `CategoryNo`, and local item ID, including thumbnail and resource status.
 - `character_cards`: indexed character cards under `UserData/chara`, including signature-validated browser caches for name, favorite, rating, and tags.
 - `character_card_dependencies`: dependencies parsed from cards and linked to `zipmods` / `mod_items` when possible.
 - `database_metadata`: build metadata such as last build time.
 - `bepinex_plugin_cache`: per-game-directory plugin scan payload and source fingerprint.
 - `achievement_progress`, `achievement_events`, `achievement_preferences`: local achievement state; these tables do not replace resource indexes.
+
+The clothes-card browser has a separate `apps/backend/runtime/clothes_card_index.sqlite` index. It stores file signatures, parser version, lightweight `AIS_Clothes` validity, and display names; full card parsing remains on demand.
 
 Important design rule: the file system, zipmod archive contents, `manifest.xml`, CSV rows, and card PNG payloads are the source of truth. SQLite is a local index and cache that can be rebuilt.
 
@@ -145,13 +156,16 @@ Examples of direct mutations:
 - update one zipmod manifest author or editable manifest fields;
 - cleanup, promote, merge, or delete one duplicate/zipmod target;
 - import/export one item thumbnail;
-- generate one item model preview or static FBX;
+- generate one item model preview or prepare its source Unity3D file for an external tool;
 - update one character-card profile, cover, favorite, rating, tags, navi slot, or coordinate card;
+- send one validated item to the connected game character or load one selected character-card section;
 - delete one item.
 
 Examples of task mutations:
 
 - rebuild mod/card database;
+- index one newly packaged zipmod;
+- download and install selected remote missing-mod candidates;
 - import external zipmods and related loose cards/resources;
 - export or organize selected zipmods;
 - organize all zipmods by author;
@@ -162,6 +176,8 @@ Examples of task mutations:
 - bulk update manifest authors;
 - apply one thumbnail to many target items;
 - delete filtered error items.
+
+Recycle-bin restore and permanent deletion are direct routes; deleted character cards and zipmods are first moved into the runtime trash area, so the original source is not immediately removed.
 
 Do not add new bulk direct-HTTP mutation endpoints. Add or extend a task in `apps/backend/app/bridge.py`.
 
@@ -177,6 +193,7 @@ Validate HS2 directory
 -> parse manifest.xml and choose primary zipmod per GUID
 -> parse abdata/list/**/*.csv from primary zipmods
 -> extract/cache thumbnails and diagnose MainAB/ThumbAB resources
+-> scan game-original ChaListData into builtin_items
 -> build character-card index and dependency links
 -> update SQLite metadata
 ```
@@ -200,22 +217,45 @@ Read AIS PNG payload
 -> expose card detail and dependency status in UI
 ```
 
+Original-resource and game-state flow:
+
+```text
+Scan game abdata/list/characustom/*.unity3d
+-> index builtin_items and cache thumbnails
+-> match character/coordinate dependencies by CategoryNo + item ID
+-> optionally read current editor or H-scene state from the game-side probe
+-> display original items or apply a validated item to the connected game
+```
+
 Plugin inventory flow:
 
 ```text
 Scan BepInEx Plugins/patchers/core DLL metadata without executing DLLs
 -> correlate assembly/config/translation descriptions
 -> cache by file fingerprint in SQLite
--> display read-only plugin, dependency, process, and diagnostic data
+-> display plugin, dependency, process, and diagnostic data
+-> allow safe single-plugin enable/disable by reversible DLL rename
 ```
 
-Workbench flow:
+Workbench project flow:
+
+```text
+Register author ID and workspace
+-> create or select a Star_Manager mod project
+-> scan abdata/list/**/*.csv as the item source
+-> select one item and choose a usable database Unity3D template
+-> inspect MainData candidates and preprocess a runtime copy
+-> copy the prepared Unity3D into the project and atomically update the item CSV
+-> package the project into a strict-content zipmod and replace older archives with the same manifest GUID
+```
+
+The retained Sims 4 extraction flow is separate from the current page flow:
 
 ```text
 Select one Sims 4 Package
 -> select highest-vertex LOD0 GEOM per model family
 -> decode RLE2 textures and remove fully transparent triangles
--> optionally use Blender plus the bundled 165-bone TS4 template to bake HS2-aligned T-Pose
+-> optionally use Blender plus the bundled 165-bone TS4 template to bake HS2-aligned T-Pose and translate both level arm chains slightly toward the torso
 -> remove skeleton/weights and export collision-safe static FBX + textures
 ```
 
@@ -264,7 +304,7 @@ Use the existing tests as the first safety net when changing backend database, p
 
 - Documentation index and task-oriented map: `apps/docs/README.md`.
 - Frontend/backend contract: `apps/docs/backend-interface.md`.
-- Frontend layout and visual rules: `apps/docs/frontend-ui/frontend-ui-architecture.md`.
+- Frontend layout and visual rules: `apps/docs/frontend-ui/README.md`.
 - Plugin inventory page: `apps/docs/frontend-ui/plugins-layout.md`.
 - Manager settings and persistence: `apps/docs/frontend-ui/settings-layout.md`.
 - Mod database schema and scanning: `apps/docs/mod_manage/mod_database_design.md`.

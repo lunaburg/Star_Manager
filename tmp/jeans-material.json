@@ -1,0 +1,949 @@
+{
+  "objects": [
+    {
+      "name": "SEOULSOUL_2026__155_Jeans_model01_lod0_4EFDA4DF2E0D40DB",
+      "vertices": 6071,
+      "edges": 16236,
+      "faces": 10218,
+      "loops": 30654,
+      "uv_layers": [
+        "UVChannel_1",
+        "UVChannel_2"
+      ],
+      "nonmanifold_edges": 1818,
+      "boundary_edges": 1818,
+      "vertex_groups": [
+        "cf_J_Ana",
+        "cf_J_Foot01_L",
+        "cf_J_Foot01_R",
+        "cf_J_Foot02_L",
+        "cf_J_Foot02_R",
+        "cf_J_Hips",
+        "cf_J_Kokan",
+        "cf_J_Kosi01_s",
+        "cf_J_Kosi02_s",
+        "cf_J_LegKnee_back_s_L",
+        "cf_J_LegKnee_back_s_R",
+        "cf_J_LegKnee_low_s_L",
+        "cf_J_LegKnee_low_s_R",
+        "cf_J_LegLow01_s_L",
+        "cf_J_LegLow01_s_R",
+        "cf_J_LegLow02_s_L",
+        "cf_J_LegLow02_s_R",
+        "cf_J_LegLow03_s_L",
+        "cf_J_LegLow03_s_R",
+        "cf_J_LegUp01_s_L",
+        "cf_J_LegUp01_s_R",
+        "cf_J_LegUp02_s_L",
+        "cf_J_LegUp02_s_R",
+        "cf_J_LegUp03_s_L",
+        "cf_J_LegUp03_s_R",
+        "cf_J_LegUpDam_s_L",
+        "cf_J_LegUpDam_s_R",
+        "cf_J_Siri_s_L",
+        "cf_J_Siri_s_R"
+      ],
+      "modifiers": [
+        [
+          "Armature",
+          "ARMATURE",
+          true,
+          true
+        ]
+      ],
+      "materials": [
+        "SEOULSOUL_2026__155_Jeans_model01_lod0_4EFDA4DF2E0D40DB"
+      ],
+      "face_material_counts": {
+        "0": 10218
+      },
+      "sample_faces": {
+        "4876": {
+          "center": [
+            1.7055135,
+            0.9875282,
+            -0.8507783
+          ],
+          "normal": [
+            -0.5114118,
+            -0.1371559,
+            0.8483197
+          ],
+          "area": 0.020211560651659966,
+          "vertices": [
+            5673,
+            5721,
+            5722
+          ],
+          "loops": [
+            {
+              "loop": 14628,
+              "vertex": 5673,
+              "normal": [
+                -0.5232664,
+                0.0170963,
+                0.8519976
+              ],
+              "UVChannel_1": [
+                0.2943747639656067,
+                0.11029964685440063
+              ],
+              "UVChannel_2": [
+                0.7788369655609131,
+                0.032480597496032715
+              ]
+            },
+            {
+              "loop": 14629,
+              "vertex": 5721,
+              "normal": [
+                -0.3737337,
+                -0.3079151,
+                0.8749352
+              ],
+              "UVChannel_1": [
+                0.2859431505203247,
+                0.1071506142616272
+              ],
+              "UVChannel_2": [
+                0.7550400495529175,
+                0.031840503215789795
+              ]
+            },
+            {
+              "loop": 14630,
+              "vertex": 5722,
+              "normal": [
+                -0.4708166,
+                -0.0546434,
+                0.8805372
+              ],
+              "UVChannel_1": [
+                0.2859431505203247,
+                0.11029964685440063
+              ],
+              "UVChannel_2": [
+                0.7477352023124695,
+                0.03370058536529541
+              ]
+            }
+          ],
+          "alpha": {
+            "UVChannel_1": {
+              "center": [
+                1.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ]
+              ]
+            },
+            "UVChannel_2": {
+              "center": [
+                0.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ]
+              ]
+            }
+          }
+        },
+        "4877": {
+          "center": [
+            1.7666143,
+            0.5698189,
+            -0.9854141
+          ],
+          "normal": [
+            -0.7659144,
+            0.6247257,
+            0.1519638
+          ],
+          "area": 0.007635568268597126,
+          "vertices": [
+            5723,
+            5719,
+            5720
+          ],
+          "loops": [
+            {
+              "loop": 14631,
+              "vertex": 5723,
+              "normal": [
+                -0.9920439,
+                0.0866029,
+                0.0913715
+              ],
+              "UVChannel_1": [
+                0.281727135181427,
+                0.09770387411117554
+              ],
+              "UVChannel_2": [
+                0.7654080390930176,
+                0.03060394525527954
+              ]
+            },
+            {
+              "loop": 14632,
+              "vertex": 5719,
+              "normal": [
+                -0.5996546,
+                -0.1115077,
+                0.7924521
+              ],
+              "UVChannel_1": [
+                0.2859431505203247,
+                0.10085272789001465
+              ],
+              "UVChannel_2": [
+                0.7669466733932495,
+                0.03060394525527954
+              ]
+            },
+            {
+              "loop": 14633,
+              "vertex": 5720,
+              "normal": [
+                -0.6004403,
+                -0.6236278,
+                0.5005596
+              ],
+              "UVChannel_1": [
+                0.2859431505203247,
+                0.09770387411117554
+              ],
+              "UVChannel_2": [
+                0.77940833568573,
+                0.03060394525527954
+              ]
+            }
+          ],
+          "alpha": {
+            "UVChannel_1": {
+              "center": [
+                1.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ]
+              ]
+            },
+            "UVChannel_2": {
+              "center": [
+                0.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ]
+              ]
+            }
+          }
+        },
+        "4878": {
+          "center": [
+            1.8746059,
+            0.7183119,
+            -0.8916311
+          ],
+          "normal": [
+            -0.2739922,
+            -0.5491579,
+            0.7895277
+          ],
+          "area": 0.005723487585783005,
+          "vertices": [
+            5682,
+            5699,
+            5695
+          ],
+          "loops": [
+            {
+              "loop": 14634,
+              "vertex": 5682,
+              "normal": [
+                -0.3361428,
+                -0.5681514,
+                0.7511405
+              ],
+              "UVChannel_1": [
+                0.2859431505203247,
+                0.10400176048278809
+              ],
+              "UVChannel_2": [
+                0.7563172578811646,
+                0.03084474802017212
+              ]
+            },
+            {
+              "loop": 14635,
+              "vertex": 5699,
+              "normal": [
+                -0.8675398,
+                0.1707411,
+                0.4671426
+              ],
+              "UVChannel_1": [
+                0.281727135181427,
+                0.10085272789001465
+              ],
+              "UVChannel_2": [
+                0.7557597160339355,
+                0.03060394525527954
+              ]
+            },
+            {
+              "loop": 14636,
+              "vertex": 5695,
+              "normal": [
+                -0.8188416,
+                -0.2144233,
+                0.5324669
+              ],
+              "UVChannel_1": [
+                0.281727135181427,
+                0.10400176048278809
+              ],
+              "UVChannel_2": [
+                0.7550400495529175,
+                0.030819296836853027
+              ]
+            }
+          ],
+          "alpha": {
+            "UVChannel_1": {
+              "center": [
+                1.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0
+                ]
+              ]
+            },
+            "UVChannel_2": {
+              "center": [
+                0.0,
+                0.0
+              ],
+              "corners": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0
+                ]
+              ]
+            }
+          }
+        }
+      },
+      "alpha_scan": {
+        "UVChannel_1": {
+          "flip_v_false": {
+            "min": 1.0,
+            "max": 1.0,
+            "lt_0_5": 0,
+            "sample_transparent_faces": []
+          },
+          "flip_v_true": {
+            "min": 0.0,
+            "max": 0.0,
+            "lt_0_5": 10218,
+            "sample_transparent_faces": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69,
+              70,
+              71,
+              72,
+              73,
+              74,
+              75,
+              76,
+              77,
+              78,
+              79,
+              80,
+              81,
+              82,
+              83,
+              84,
+              85,
+              86,
+              87,
+              88,
+              89,
+              90,
+              91,
+              92,
+              93,
+              94,
+              95,
+              96,
+              97,
+              98,
+              99
+            ]
+          }
+        },
+        "UVChannel_2": {
+          "flip_v_false": {
+            "min": 0.0,
+            "max": 1.0,
+            "lt_0_5": 7942,
+            "sample_transparent_faces": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69,
+              70,
+              71,
+              72,
+              73,
+              74,
+              75,
+              76,
+              77,
+              78,
+              79,
+              80,
+              81,
+              82,
+              83,
+              84,
+              85,
+              86,
+              87,
+              88,
+              89,
+              90,
+              91,
+              92,
+              93,
+              94,
+              95,
+              96,
+              97,
+              98,
+              99
+            ]
+          },
+          "flip_v_true": {
+            "min": 0.0,
+            "max": 0.0,
+            "lt_0_5": 10218,
+            "sample_transparent_faces": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69,
+              70,
+              71,
+              72,
+              73,
+              74,
+              75,
+              76,
+              77,
+              78,
+              79,
+              80,
+              81,
+              82,
+              83,
+              84,
+              85,
+              86,
+              87,
+              88,
+              89,
+              90,
+              91,
+              92,
+              93,
+              94,
+              95,
+              96,
+              97,
+              98,
+              99
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "SEOULSOUL_2026__155_Jeans_model01_lod0_4EFDA4DF2E0D40DB",
+      "blend_method": "DITHERED",
+      "surface_render_method": "DITHERED",
+      "use_nodes": true,
+      "nodes": [
+        {
+          "name": "Principled BSDF",
+          "type": "ShaderNodeBsdfPrincipled",
+          "label": "",
+          "inputs": {
+            "Base Color": {
+              "linked": true
+            },
+            "Metallic": 0.0,
+            "Roughness": 0.858578622341156,
+            "IOR": 1.5,
+            "Alpha": {
+              "linked": true
+            },
+            "Thin Wall": false,
+            "Normal": {
+              "linked": true
+            },
+            "Weight": 0.0,
+            "Diffuse Roughness": 0.0,
+            "Subsurface Weight": 0.0,
+            "Subsurface Radius": [
+              1.0,
+              0.20000000298023224,
+              0.10000000149011612
+            ],
+            "Subsurface Scale": 0.004999999888241291,
+            "Subsurface IOR": 1.399999976158142,
+            "Subsurface Anisotropy": 0.0,
+            "Specular IOR Level": 1.0,
+            "Specular Tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "Anisotropic": 0.0,
+            "Anisotropic Rotation": 0.0,
+            "Tangent": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "Transmission Weight": 0.0,
+            "Coat Weight": 0.0,
+            "Coat Roughness": 0.029999999329447746,
+            "Coat IOR": 1.5,
+            "Coat Tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "Coat Normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "Sheen Weight": 0.0,
+            "Sheen Roughness": 0.5,
+            "Sheen Tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "Emission Color": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "Emission Strength": 1.0,
+            "Thin Film Thickness": 0.0,
+            "Thin Film IOR": 1.3300000429153442
+          }
+        },
+        {
+          "name": "Material Output",
+          "type": "ShaderNodeOutputMaterial",
+          "label": "",
+          "inputs": {
+            "Surface": {
+              "linked": true
+            },
+            "Displacement": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "Thickness": 0.0
+          }
+        },
+        {
+          "name": "Normal Map",
+          "type": "ShaderNodeNormalMap",
+          "label": "Normal/Map",
+          "inputs": {
+            "Strength": 1.0,
+            "Color": [
+              0.5,
+              0.5,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "name": "Image Texture",
+          "type": "ShaderNodeTexImage",
+          "label": "",
+          "inputs": {
+            "Vector": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "image": "base_color_texture"
+        },
+        {
+          "name": "Image Texture.001",
+          "type": "ShaderNodeTexImage",
+          "label": "",
+          "inputs": {
+            "Vector": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "image": "base_color_texture.002"
+        }
+      ],
+      "links": [
+        [
+          "Principled BSDF",
+          "BSDF",
+          "Material Output",
+          "Surface"
+        ],
+        [
+          "Normal Map",
+          "Normal",
+          "Principled BSDF",
+          "Normal"
+        ],
+        [
+          "Image Texture",
+          "Color",
+          "Principled BSDF",
+          "Base Color"
+        ],
+        [
+          "Image Texture.001",
+          "Alpha",
+          "Principled BSDF",
+          "Alpha"
+        ]
+      ]
+    }
+  ],
+  "images": [
+    {
+      "name": "base_color_texture",
+      "filepath": "D:\\Workspace\\Star_workspace\\B040\\SEOULSOUL_2026__155_Jeans_lod0_fbx\\textures\\texture_01_r0006_64B6A1DCB937403A.png",
+      "size": [
+        2048,
+        4096
+      ],
+      "channels": 4,
+      "has_alpha": true,
+      "alpha_min": 0.0,
+      "alpha_max": 1.0,
+      "alpha_lt_1_count": 7339104,
+      "alpha_eq_0_count": 7298801
+    },
+    {
+      "name": "base_color_texture.001",
+      "filepath": "D:\\Workspace\\Star_workspace\\B040\\SEOULSOUL_2026__155_Jeans_lod0_fbx\\textures\\texture_01_r0006_64B6A1DCB937403A.png",
+      "size": [
+        2048,
+        4096
+      ],
+      "channels": 4,
+      "has_alpha": true,
+      "alpha_min": 0.0,
+      "alpha_max": 1.0,
+      "alpha_lt_1_count": 7339104,
+      "alpha_eq_0_count": 7298801
+    },
+    {
+      "name": "base_color_texture.002",
+      "filepath": "D:\\Workspace\\Star_workspace\\B040\\SEOULSOUL_2026__155_Jeans_lod0_fbx\\textures\\texture_01_r0006_64B6A1DCB937403A.png",
+      "size": [
+        2048,
+        4096
+      ],
+      "channels": 4,
+      "has_alpha": true,
+      "alpha_min": 0.0,
+      "alpha_max": 1.0,
+      "alpha_lt_1_count": 7339104,
+      "alpha_eq_0_count": 7298801
+    }
+  ]
+}

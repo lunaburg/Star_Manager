@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +32,17 @@ from star_manager.services.mod_database_core import (
     timestamp_to_utc,
     utc_now,
 )
+
+
+CARD_DATABASE_MAX_WORKERS = 4
+_CACHE_UNSET = object()
+
+
+def choose_card_database_worker_count(card_count: int) -> int:
+    """Choose a conservative worker count for filesystem/card parsing work."""
+    if card_count <= 1:
+        return 1
+    return min(CARD_DATABASE_MAX_WORKERS, max(1, os.cpu_count() or 1))
 
 
 def build_card_database(
@@ -70,6 +83,7 @@ def build_card_database(
         "changed_cards": 0,
         "relinked_cards": 0,
         "untouched_cards": 0,
+        "worker_count": choose_card_database_worker_count(len(card_paths)),
     }
 
     conn = sqlite3.connect(db_path)
@@ -77,24 +91,57 @@ def build_card_database(
     try:
         init_db(conn)
         resolver = DependencyResolver.load(conn)
+        cached_cards = load_cached_card_records(conn)
+        cached_dependencies = load_cached_card_dependencies_by_card(conn)
         tag_cache_key = str(root.resolve())
         refresh_tag_cache = force_full or get_database_metadata(
             conn, "character_card_tags_cache_root"
         ) != tag_cache_key
         affected_card_ids = find_affected_card_ids(conn, affected_mod_guids)
+
+        def prepare(card_path: Path) -> dict:
+            cache_key = str(card_path.resolve())
+            cached = cached_cards.get(cache_key)
+            return prepare_card_record(
+                card_path,
+                root,
+                preview_dir,
+                None,
+                now,
+                force_full,
+                resolver,
+                affected_card_ids,
+                refresh_tag_cache,
+                cached_record=cached,
+                cached_dependencies=(
+                    cached_dependencies.get(int(cached["id"]), [])
+                    if cached is not None
+                    else []
+                ),
+            )
+
+        prepared_by_path: dict[str, dict] = {}
+        worker_count = int(stats["worker_count"])
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="character-card-db",
+        ) as executor:
+            future_to_path = {
+                executor.submit(prepare, card_path): card_path for card_path in card_paths
+            }
+            for completed_count, future in enumerate(
+                as_completed(future_to_path), start=1
+            ):
+                prepared = future.result()
+                prepared_by_path[prepared["file_path"]] = prepared
+                report(
+                    5 + round(completed_count / total * 70),
+                    f"Prepared {completed_count}/{len(card_paths)} character cards",
+                )
+
         with conn:
             for index, card_path in enumerate(card_paths, start=1):
-                prepared = prepare_card_record(
-                    card_path,
-                    root,
-                    preview_dir,
-                    conn,
-                    now,
-                    force_full,
-                    resolver,
-                    affected_card_ids,
-                    refresh_tag_cache,
-                )
+                prepared = prepared_by_path[str(card_path.resolve())]
                 seen_paths.add(prepared["file_path"])
                 card_id = upsert_character_card(conn, prepared)
                 if prepared["replace_dependencies"]:
@@ -114,7 +161,7 @@ def build_card_database(
                 stats["missing_dependencies"] += int(prepared["missing_count"])
                 if index == total or index % 25 == 0:
                     report(
-                        5 + round(index / total * 90),
+                        75 + round(index / total * 25),
                         f"Indexed {index}/{total} character cards",
                     )
 
@@ -152,6 +199,8 @@ def prepare_card_record(
     resolver: "DependencyResolver | None" = None,
     affected_card_ids: set[int] | None = None,
     refresh_tag_cache: bool = False,
+    cached_record: object = _CACHE_UNSET,
+    cached_dependencies: object = _CACHE_UNSET,
 ) -> dict:
     stat = card_path.stat()
     card_uid = ""
@@ -167,7 +216,18 @@ def prepare_card_record(
     parse_status = "ok"
     dependencies: list[dict[str, str | int | None]] = []
     modified_at = timestamp_to_utc(stat.st_mtime)
-    cached = None if force_full else load_cached_card(conn, card_path, modified_at)
+    if force_full:
+        cached = None
+    elif cached_record is _CACHE_UNSET:
+        cached = load_cached_card(conn, card_path, modified_at)
+    else:
+        cached = cached_record
+    if cached is not None and (
+        str(cached["modified_at"] or "") != modified_at
+        or int(cached["metadata_file_size"] or 0) != stat.st_size
+        or int(cached["metadata_modified_ns"] or 0) != stat.st_mtime_ns
+    ):
+        cached = None
     if cached is not None:
         if refresh_tag_cache:
             metadata = read_card_metadata(card_path)
@@ -182,8 +242,11 @@ def prepare_card_record(
             metadata_modified_ns = int(cached["metadata_modified_ns"] or 0)
         should_relink = affected_card_ids is None or int(cached["id"]) in affected_card_ids
         if should_relink:
-            raw_dependencies = load_cached_card_dependencies(conn, int(cached["id"]))
-            dependencies = resolve_cached_dependencies(conn, raw_dependencies, resolver)
+            if cached_dependencies is _CACHE_UNSET:
+                raw_dependencies = load_cached_card_dependencies(conn, int(cached["id"]))
+            else:
+                raw_dependencies = list(cached_dependencies or [])
+            dependencies = resolve_cached_dependencies(None, raw_dependencies, resolver)
             dependency_count = len(dependencies)
             missing_count = sum(
                 1 for item in dependencies if item["resolve_status"] != "resolved"
@@ -228,7 +291,7 @@ def prepare_card_record(
             favorite = bool(metadata["favorite"])
             rating = int(metadata["rating"])
             records = extract_auto_resolver_records_from_card(str(card_path))
-            dependencies = resolve_dependency_records(conn, records, resolver)
+            dependencies = resolve_dependency_records(None, records, resolver)
             dependency_count = len(dependencies)
             missing_count = sum(
                 1 for item in dependencies if item["resolve_status"] != "resolved"
@@ -305,6 +368,20 @@ def load_cached_card(
     ).fetchone()
 
 
+def load_cached_card_records(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Load reusable card rows once before worker threads start."""
+    return {
+        str(row["file_path"]): dict(row)
+        for row in conn.execute(
+            """
+            SELECT *
+            FROM character_cards
+            WHERE parse_status != 'stale'
+            """
+        )
+    }
+
+
 def load_cached_card_dependencies(
     conn: sqlite3.Connection,
     card_id: int,
@@ -325,6 +402,31 @@ def load_cached_card_dependencies(
             (card_id,),
         )
     ]
+
+
+def load_cached_card_dependencies_by_card(
+    conn: sqlite3.Connection,
+) -> dict[int, list[dict[str, str]]]:
+    """Load dependency keys once so worker threads never touch SQLite."""
+    dependencies_by_card: dict[int, list[dict[str, str]]] = {}
+    for row in conn.execute(
+        """
+        SELECT ccd.card_id, ccd.mod_id, ccd.category_no, ccd.slot, ccd.local_slot
+        FROM character_card_dependencies ccd
+        INNER JOIN character_cards cc ON cc.id = ccd.card_id
+        WHERE cc.parse_status != 'stale'
+        ORDER BY ccd.id
+        """
+    ):
+        dependencies_by_card.setdefault(int(row["card_id"]), []).append(
+            {
+                "mod_id": str(row["mod_id"] or ""),
+                "category_no": str(row["category_no"] or ""),
+                "slot": str(row["slot"] or ""),
+                "local_slot": str(row["local_slot"] or ""),
+            }
+        )
+    return dependencies_by_card
 
 
 def normalized_item_keys(value: object) -> tuple[str, ...]:

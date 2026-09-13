@@ -1,0 +1,6 @@
+interface:
+  display_name: "Mod Unity3D Decryption"
+  short_description: "Recover and validate protected Unity3D mod assets"
+  default_prompt: "Use $mod-unity3d-decryption to diagnose and safely recover this Unity3D mod resource."
+policy:
+  allow_implicit_invocation: true

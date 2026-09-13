@@ -4,6 +4,17 @@ This directory contains the maintained Star_Manager desktop application: an Elec
 
 Star_Manager is an HS2 / AIS resource manager. It indexes a selected game directory, then presents the data as a local resource library for character cards, zipmods, mod items, thumbnails, diagnostics, and maintenance workflows.
 
+## Documentation Map
+
+按层级阅读项目文档：
+
+- [文档总索引](docs/README.md)：统一入口、专题地图和按任务阅读路径。
+- [项目总览](docs/project-overview.md)：架构、数据模型、工作流、测试和开发规则。
+- [前端 UI 专题索引](docs/frontend-ui/README.md)：页面布局、应用外壳和视觉规范。
+- [模组与资源专题索引](docs/mod_manage/README.md)：模组数据库、角色卡解析和异常诊断。
+- [前后端接口](docs/backend-interface.md)：Electron preload、HTTP 路由和任务协议。
+- [Windows 打包指南](docs/packaging-windows.md)：开发构建、后端打包和产物验证。
+
 ## Product Scope
 
 Main managed resources:
@@ -18,12 +29,12 @@ Current app views:
 - Overview: selected-directory status, library health, suggested actions, and recent tasks.
 - Characters: card-folder tree, AIS card previews, card detail, and parsed dependency information.
 - Mods: item browsing, zipmod browsing, filters, detail drawer, diagnostics, and direct/batch maintenance actions.
-- Plugins: read-only BepInEx plugin inventory, metadata, dependencies, process restrictions, and diagnostics.
-- Workbench: Sims 4 Package to LOD0 FBX/PNG extraction, with optional Blender-based A-Pose to HS2-aligned T-Pose baking and final static-mesh cleanup.
+- Plugins: BepInEx plugin inventory, metadata, dependencies, process restrictions, diagnostics, and single-plugin enable/disable.
+- Workbench: standalone mod projects, CSV-backed items, Unity3D database-template selection, MainData preprocessing, project resource write-back, and a project-level modal for Sims 4 Package to LOD0 FBX/PNG conversion.
 - Logs: task progress and runtime messages.
 - Settings: manager startup behavior, automatic database-change checks, local achievements, export defaults, portable dependency-package preferences, favorite-card themes, and Blender path.
 
-The Start page's `setup.xml` controls are currently a renderer-side placeholder: the launch buttons work, but the displayed setup values are not yet read from or written back to the game's XML file.
+The Start page reads and writes the game's UTF-16 `UserData/setup.xml` through Electron IPC. Saving creates a `.bak` backup, atomically replaces the XML, and synchronizes Unity display values in the Windows registry. Launching uses `IPA.exe <target.exe> --launch` when IPA is present and blocks when IPA and BepInEx are detected together.
 
 ## Structure
 
@@ -131,9 +142,9 @@ Examples of task operations:
 - `backend/star_manager/services/mod_database_assets.py`: zipmod scanning, manifest/CSV parsing, thumbnail handling, Unity3D diagnostics, and repair/delete write-back helpers.
 - `backend/star_manager/services/card_library.py`: card folder tree, card listing, normalized preview images, and card detail.
 - `backend/star_manager/services/card_database.py`: character-card indexing and dependency association with zipmods/items.
-- `backend/star_manager/services/plugin_library.py`: read-only BepInEx DLL metadata scan and SQLite cache.
+- `backend/star_manager/services/plugin_library.py`: BepInEx DLL metadata scan, SQLite cache, and safe single-plugin enable/disable.
 - `backend/star_manager/services/achievements.py`: local achievement progress, events, preferences, and reset.
-- `backend/star_manager/services/model_preview.py`: on-demand Unity3D mesh/material conversion to runtime GLB and static FBX export.
+- `backend/star_manager/services/model_preview.py`: on-demand Unity3D mesh/material conversion to runtime GLB and preparation of item Unity3D files for external tools.
 - `backend/star_manager/core/card_parser.py`: AIS card PNG payload parsing and dependency extraction.
 - `backend/star_manager/core/card_metadata.py`: registered Star Manager card favorite/rating/tag metadata access.
 - `backend/star_manager/core/character_profile.py`: atomic character profile and cover updates.
@@ -185,12 +196,16 @@ Read and file routes:
 - `GET /mods/zipmods/:id/diagnostics`
 - `GET /mods/zipmods/:id/duplicate-analysis`
 - `GET /mods/zipmods/:id/manifest`
-- `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=&usage=`
-- `GET /mods/items/filters`
+- `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=&usage=&source=&game_dir=`
+- `GET /mods/items/filters?game_dir=`
+- `GET /workbench/template-items?offset=&limit=&search=&author=&kind=`
+- `POST /workbench/unity3d/thumbnail`
 - `GET /mods/thumbnails?path=`
+- `GET /mods/items/:id/thumbnail`
 - `GET /mods/models/:file.glb`
 - `GET /mods/mannequin/body.fbx`
 - `GET /plugins?game_dir=&search=&category=&offset=&limit=&refresh=`
+- `POST /plugins/toggle`
 - `GET /library/cards/tree?game_dir=`
 - `GET /library/cards?game_dir=&path=`
 - `GET /library/cards/detail?game_dir=&path=`
@@ -213,10 +228,12 @@ Mutation and task routes:
 - `POST /mods/items/:id/import-thumbnail`
 - `POST /mods/items/:id/export-thumbnail`
 - `POST /mods/items/:id/model-preview`
-- `POST /mods/items/:id/export-fbx`
+- `POST /mods/items/:id/open-unity3d`
 - `POST /mods/items/:id/delete`
 - `POST /library/cards/folders/create`
 - `POST /library/cards/folders/rename`
+- `POST /game-card-loader/load`
+  - Validates one AIS character card and forwards only the selected native sections to the current character maker character through `StarManager.GameItemProbe`.
 - `POST /library/cards/set-navi`
 - `POST /library/cards/set-favorite`
 - `POST /library/cards/set-rating`
@@ -260,8 +277,10 @@ The preload bridge exposes:
 - a PNG picker dedicated to cover-crop input;
 - a native text prompt;
 - `showItemInFolder` for file-location actions;
+- `loadGameSetup` and `saveGameSetup` for `UserData/setup.xml`, display enumeration, XML backup, and Unity registry synchronization;
 - game launch helpers for `HoneySelect2.exe`, `StudioNEOV2.exe`, and `HoneySelect2VR.exe`;
 - a Workbench helper that launches Blender and imports one exported FBX while preserving its external texture working directory;
+- Workbench thumbnail loading and screenshot write-back helpers; generated thumbnails are stored under the project `abdata/thumbnail/star_manager/` directory and referenced by the current item CSV;
 - persisted settings for `gameDir`, `inputDir`, `outputDir`, `coordinateExportDir`, `portablePackageDir`, `portablePackageCompress`, `portablePackageTypes`, `startupView`, `favoriteCardTheme`, `checkDatabaseChangesOnStartup`, and `blenderExecutablePath`;
 - `backendRequest` for local HTTP API calls.
 
@@ -273,13 +292,18 @@ Packaged builds can use a PyInstaller backend executable from `build/backend/sta
 - `docs/README.md`: canonical documentation index and task-oriented reading map.
 - `docs/project-overview.md`: product map, runtime architecture, directory responsibilities, data model, workflows, commands, tests, and development rules.
 - `docs/backend-interface.md`: frontend/backend contract, direct routes, task protocol, and mutation boundaries.
-- `docs/frontend-ui/frontend-ui-architecture.md`: UI documentation index and high-level layout assumptions.
+- `docs/frontend-ui/README.md`: frontend UI sub-index for the app shell, pages, visual rules, and UI change paths.
+- `docs/frontend-ui/frontend-ui-architecture.md`: high-level UI architecture and implementation assumptions.
+- `docs/frontend-ui/workbench-layout.md`: Workbench project lifecycle, CSV item model, Unity3D template flow, MainData preprocessing, resource write-back, and retained Sims 4 tool boundary.
+- `docs/sb3utility-script.md`: SB3UtilityScript command-line grammar, Unity3D/Animator/MonoBehaviour script APIs, MainData modification, save verification, and GUI-script compatibility.
 - `docs/frontend-ui/plugins-layout.md`: current BepInEx plugin inventory page and scan/cache boundary.
 - `docs/frontend-ui/settings-layout.md`: manager settings, persistence fields, achievements, export defaults, and Blender integration.
 - `docs/mod_manage/mod_database_design.md`: SQLite schema and mod database build rules.
 - `docs/mod_manage/mod_database_change_detection.md`: incremental rebuild behavior and dependency relinking.
 - `docs/mod_manage/character_card_parsing.md`: AIS card PNG payload and dependency parsing notes.
 - `docs/card-metadata-plugin.md`: companion BepInEx plugin for persistent registered `KKEx` metadata.
+- `docs/game-item-probe.md`: BepInEx runtime probe for `ChaListControl`, UniversalAutoResolver, local IDs, and exact game-item mapping.
+- `docs/game-card-loading.md`: selective character-card loading through the existing BepInEx probe, native copy boundaries, and verification limits.
 - `docs/packaging-windows.md`: Windows packaging flow and verification commands.
 
 ## Development Notes

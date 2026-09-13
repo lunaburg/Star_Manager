@@ -9,8 +9,18 @@ from pathlib import Path
 import sys
 import traceback
 
+import bmesh
 import bpy
 from mathutils import Matrix, Vector
+
+
+# Move each complete arm chain toward the torso by a small amount while
+# preserving the horizontal T-pose direction.  Scaling the offset from the
+# upper-arm length keeps the adjustment consistent across different bodies.
+ARM_INWARD_OFFSET_RATIO = 0.06
+REVERSE_FACE_POSITION_TOLERANCE = 1.0e-6
+REVERSE_FACE_NORMAL_DOT = -0.999
+REVERSE_FACE_SCORE_EPSILON = 1.0e-6
 
 
 def fnv32_lower(value: str) -> int:
@@ -175,6 +185,7 @@ def convert_to_t_pose(
         raise RuntimeError(f"骨架模板缺少 T-Pose 手臂骨骼：{', '.join(missing)}")
 
     source_angles = {}
+    inward_offsets = {}
     for upper_arm_name, forearm_name, side in arm_chains:
         upper_arm = armature.data.bones[upper_arm_name]
         forearm = armature.data.bones[forearm_name]
@@ -182,13 +193,19 @@ def convert_to_t_pose(
         target_direction = Vector((side * current_direction.length, 0.0, 0.0))
         rotation = current_direction.rotation_difference(target_direction)
         pivot = Matrix.Translation(upper_arm.head_local)
+        inward_offset = current_direction.length * ARM_INWARD_OFFSET_RATIO
+        inward_translation = Matrix.Translation(
+            Vector((-side * inward_offset, 0.0, 0.0))
+        )
         pose_bone = armature.pose.bones[upper_arm_name]
         pose_bone.matrix = (
-            pivot
+            inward_translation
+            @ pivot
             @ rotation.to_matrix().to_4x4()
             @ pivot.inverted()
             @ pose_bone.matrix
         )
+        inward_offsets[upper_arm_name] = inward_offset
         source_angles[upper_arm_name] = _arm_drop_angle_degrees(
             armature, upper_arm_name, forearm_name
         )
@@ -235,7 +252,14 @@ def convert_to_t_pose(
     }
     return {
         "rest_pose": "T-pose",
-        "pose_reference": "HS2 horizontal shoulder-elbow-wrist alignment",
+        "pose_reference": (
+            "HS2 horizontal shoulder-elbow-wrist alignment with "
+            f"{ARM_INWARD_OFFSET_RATIO:.0%} upper-arm-length inward offset"
+        ),
+        "arm_inward_offset_ratio": ARM_INWARD_OFFSET_RATIO,
+        "arm_inward_offset": round(
+            sum(inward_offsets.values()) / len(inward_offsets), 6
+        ),
         "source_arm_drop_degrees": round(
             sum(source_angles.values()) / len(source_angles), 3
         ),
@@ -275,6 +299,124 @@ def remove_rigging_data(
     }
 
 
+def _position_key(co: Vector) -> tuple[int, int, int]:
+    return tuple(
+        round(float(axis) / REVERSE_FACE_POSITION_TOLERANCE) for axis in co
+    )
+
+
+def _face_key(face: bmesh.types.BMFace) -> tuple:
+    return (
+        len(face.verts),
+        tuple(sorted(_position_key(vertex.co) for vertex in face.verts)),
+    )
+
+
+def _mesh_center(bm: bmesh.types.BMesh) -> Vector:
+    if not bm.verts:
+        return Vector((0.0, 0.0, 0.0))
+    minimum = Vector((float("inf"),) * 3)
+    maximum = Vector((float("-inf"),) * 3)
+    for vertex in bm.verts:
+        for axis in range(3):
+            minimum[axis] = min(minimum[axis], vertex.co[axis])
+            maximum[axis] = max(maximum[axis], vertex.co[axis])
+    return (minimum + maximum) * 0.5
+
+
+def _corner_normal_alignment(mesh: bpy.types.Mesh) -> dict[int, float]:
+    """Measure whether each face winding agrees with imported split normals."""
+
+    try:
+        corner_normals = mesh.corner_normals
+        if len(corner_normals) != len(mesh.loops):
+            return {}
+        result = {}
+        for polygon in mesh.polygons:
+            average = Vector((0.0, 0.0, 0.0))
+            for loop_index in polygon.loop_indices:
+                average += corner_normals[loop_index].vector
+            result[polygon.index] = (
+                polygon.normal.dot(average.normalized())
+                if average.length_squared > 0.0
+                else 0.0
+            )
+        return result
+    except (AttributeError, RuntimeError):
+        return {}
+
+
+def cleanup_reverse_duplicate_triangles(mesh_object: bpy.types.Object) -> dict:
+    """Remove only unambiguous, coincident, opposite-facing triangle copies."""
+
+    mesh = mesh_object.data
+    custom_alignment = _corner_normal_alignment(mesh)
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        bm.verts.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.normal_update()
+        center = _mesh_center(bm)
+        groups = defaultdict(list)
+        for face in bm.faces:
+            groups[_face_key(face)].append(face)
+
+        removal = set()
+        statistics = {
+            "reverse_duplicate_groups_detected": 0,
+            "reverse_duplicate_faces_removed": 0,
+            "reverse_duplicate_ambiguous_groups": 0,
+            "reverse_duplicate_material_mismatch_groups": 0,
+            "reverse_duplicate_multi_face_groups": 0,
+            "reverse_duplicate_custom_normal_decisions": 0,
+            "reverse_duplicate_center_direction_decisions": 0,
+        }
+        for faces in groups.values():
+            if len(faces) < 2:
+                continue
+            if len(faces) != 2:
+                statistics["reverse_duplicate_multi_face_groups"] += 1
+                continue
+            first, second = faces
+            if len(first.verts) != 3 or len(second.verts) != 3:
+                continue
+            if first.normal.dot(second.normal) > REVERSE_FACE_NORMAL_DOT:
+                continue
+            statistics["reverse_duplicate_groups_detected"] += 1
+            if first.material_index != second.material_index:
+                statistics["reverse_duplicate_material_mismatch_groups"] += 1
+                continue
+
+            first_alignment = custom_alignment.get(first.index, 0.0)
+            second_alignment = custom_alignment.get(second.index, 0.0)
+            if abs(first_alignment - second_alignment) > REVERSE_FACE_SCORE_EPSILON:
+                removal.add(second if first_alignment > second_alignment else first)
+                statistics["reverse_duplicate_custom_normal_decisions"] += 1
+                continue
+
+            first_outward = first.normal.dot(first.calc_center_median() - center)
+            second_outward = second.normal.dot(second.calc_center_median() - center)
+            if abs(first_outward - second_outward) > REVERSE_FACE_SCORE_EPSILON:
+                removal.add(second if first_outward > second_outward else first)
+                statistics["reverse_duplicate_center_direction_decisions"] += 1
+            else:
+                statistics["reverse_duplicate_ambiguous_groups"] += 1
+
+        statistics["reverse_duplicate_faces_removed"] = len(removal)
+        if removal:
+            # FACES also removes edges/vertices used only by the rejected copy.
+            bmesh.ops.delete(bm, geom=list(removal), context="FACES")
+            bm.normal_update()
+            bm.to_mesh(mesh)
+            mesh.update(calc_edges=True)
+        statistics["vertices_after_reverse_cleanup"] = len(mesh.vertices)
+        statistics["triangles_after_reverse_cleanup"] = len(mesh.polygons)
+        return statistics
+    finally:
+        bm.free()
+
+
 def export_static_fbx(output_path: Path) -> None:
     temporary_path = output_path.with_name(f"{output_path.stem}.tpose.tmp.fbx")
     bpy.ops.export_scene.fbx(
@@ -306,6 +448,7 @@ def process_job(ts4_template_path: Path, job: dict) -> dict:
     statistics = apply_skin(mesh, ts4_armature, skin_data)
     statistics.update(convert_to_t_pose(mesh, ts4_armature))
     statistics.update(remove_rigging_data(mesh, ts4_armature))
+    statistics.update(cleanup_reverse_duplicate_triangles(mesh))
     export_static_fbx(fbx_path)
     return {
         "ok": True,

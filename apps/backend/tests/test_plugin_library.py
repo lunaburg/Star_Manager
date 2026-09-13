@@ -120,3 +120,57 @@ def test_sqlite_cache_skips_unchanged_dll_and_invalidates_on_change(tmp_path, mo
     third = plugin_library.scan_bepinex_plugins(str(game), db_path=db_path)
     assert third["data"]["cached"] is False
     assert len(calls) == 2
+
+
+def test_plugin_toggle_renames_dll_and_preserves_stable_scan_identity(tmp_path, monkeypatch):
+    game = _game(tmp_path)
+    dll = game / "BepInEx" / "Plugins" / "Pack" / "Toggle.dll"
+    dll.write_bytes(b"plugin")
+
+    disabled = plugin_library.set_bepinex_plugin_enabled(
+        str(game), "BepInEx/Plugins/Pack/Toggle.dll", False
+    )
+    assert disabled["ok"] is True
+    assert disabled["data"]["enabled"] is False
+    assert not dll.exists()
+    assert (dll.parent / "Toggle.dll.disabled").exists()
+
+    def fake_metadata(path):
+        return plugin_library.AssemblyMetadata(
+            assembly_name="Toggle.Assembly",
+            plugin_guid="example.toggle",
+            plugin_name="Toggle",
+            plugin_version="1.0",
+        )
+
+    monkeypatch.setattr(plugin_library, "read_dotnet_metadata", fake_metadata)
+    scanned = plugin_library.scan_bepinex_plugins(str(game), db_path=tmp_path / "cache.sqlite")
+    item = scanned["data"]["items"][0]
+    assert item["id"] == "bepinex/plugins/pack/toggle.dll"
+    assert item["enabled"] is False
+    assert item["relative_path"].endswith("Toggle.dll.disabled")
+
+    enabled = plugin_library.set_bepinex_plugin_enabled(
+        str(game), "BepInEx/Plugins/Pack/Toggle.dll.disabled", True
+    )
+    assert enabled["ok"] is True
+    assert enabled["data"]["enabled"] is True
+    assert dll.exists()
+
+
+def test_plugin_toggle_rejects_paths_outside_plugin_area_and_existing_target(tmp_path):
+    game = _game(tmp_path)
+    outside = tmp_path / "outside.dll"
+    outside.write_bytes(b"outside")
+    rejected = plugin_library.set_bepinex_plugin_enabled(str(game), "../outside.dll", False)
+    assert rejected["ok"] is False
+    assert outside.exists()
+
+    dll = game / "BepInEx" / "Plugins" / "Pack" / "Conflict.dll"
+    dll.write_bytes(b"active")
+    (dll.parent / "Conflict.dll.disabled").write_bytes(b"disabled")
+    conflict = plugin_library.set_bepinex_plugin_enabled(
+        str(game), "BepInEx/Plugins/Pack/Conflict.dll", False
+    )
+    assert conflict["ok"] is False
+    assert dll.read_bytes() == b"active"

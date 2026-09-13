@@ -296,7 +296,7 @@ def parse_geom(raw: bytes) -> dict[str, Any]:
     cursor += 20
     if tag != struct.unpack("<I", b"GEOM")[0]:
         raise GeomFormatError("Invalid GEOM chunk tag.")
-    if version not in (0x05, 0x0C, 0x0D, 0x0E):
+    if version not in (0x05, 0x0C, 0x0D, 0x0E, 0x0F):
         raise GeomFormatError(f"Unsupported GEOM version 0x{version:X}.")
 
     if shader:
@@ -425,9 +425,12 @@ def parse_geom(raw: bytes) -> dict[str, Any]:
         ]
         minimum_palette_size = max(used_bone_indices, default=-1) + 1
         tgi_table_start = geom_start + 12 + tgi_offset
-        if 4 <= tgi_table_start <= len(raw):
+        # GEOM 0x0F adds a four-byte field between the bone-hash palette and
+        # the TGI table. Older versions place the palette directly before TGI.
+        bone_palette_end = tgi_table_start - (4 if version == 0x0F else 0)
+        if 4 <= bone_palette_end <= len(raw):
             for bone_count in range(max(1, minimum_palette_size), 257):
-                palette_start = tgi_table_start - 4 - bone_count * 4
+                palette_start = bone_palette_end - 4 - bone_count * 4
                 if palette_start < 0:
                     continue
                 if struct.unpack_from("<I", raw, palette_start)[0] != bone_count:

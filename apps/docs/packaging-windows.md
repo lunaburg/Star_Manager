@@ -31,8 +31,15 @@ apps/release/win-unpacked/runtime/
 |-- star_manager.sqlite
 |-- ais_card_cache.json
 |-- thumbnails/
-`-- card_previews/
+|-- card_previews/
+|-- model_previews/          # normal app exit clears this preview cache
+|-- unity3d_open/            # extracted copies for external tools
+`-- unity3d_preprocessed/    # workbench-derived Unity3D outputs
 ```
+
+The complete cache, temporary-file, and cleanup registry is maintained in [缓存与运行时文件登记](runtime-cache-registry.md). In particular, `star_manager.sqlite` also contains local achievement state and must not be treated as a disposable image cache.
+
+The packaged output includes the empty `runtime/` directory beside `Star_Manager.exe`; the application fills its cache subdirectories on first use.
 
 ## Prerequisites
 

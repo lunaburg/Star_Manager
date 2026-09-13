@@ -1,12 +1,15 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { cloneMannequinModel } from "../modelPreviewAssets.js";
+import LoadingAnimation from "./LoadingAnimation.vue";
 
 const props = defineProps({
   itemId: { type: [Number, String], default: null },
   modelUrl: { type: String, default: "" },
   textureUrl: { type: String, default: "" },
   mannequinUrl: { type: String, default: "" },
+  previewKey: { type: [Number, String], default: "" },
+  previewLoader: { type: Function, default: null },
   autoLoad: { type: Boolean, default: false },
 });
 const emit = defineEmits(["ready-change"]);
@@ -358,13 +361,19 @@ function prepareWorkbenchModelVisibility(object, url) {
     child.renderOrder = 10;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.filter(Boolean).forEach((material) => {
-      // Workbench FBX clothing is exported on the same body surface as the
-      // mannequin.  Draw it above the mannequin so the garment remains visible
-      // instead of being swallowed by the mannequin's depth buffer.
-      material.depthTest = false;
-      material.depthWrite = false;
+      // Keep the garment depth-aware so rear faces cannot draw through its
+      // visible surface.  A small forward polygon offset still prevents a
+      // coplanar mannequin from swallowing the garment in the preview.
+      material.depthTest = true;
+      material.depthWrite = true;
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -1;
+      material.polygonOffsetUnits = -1;
       material.visible = true;
-      material.side = threeApi?.DoubleSide ?? material.side;
+      // Workbench clothing is an outward-facing surface.  Rendering both
+      // sides makes reversed/overlapping faces appear as triangular z-fighting
+      // patterns, so discard back-facing polygons in the preview.
+      material.side = threeApi?.FrontSide ?? material.side;
       if (!material.alphaMap) material.alphaTest = 0;
       material.blending = threeApi?.NormalBlending ?? material.blending;
       // Some Sims 4 FBX exporters leave an alpha flag on an otherwise opaque
@@ -376,22 +385,6 @@ function prepareWorkbenchModelVisibility(object, url) {
       }
       material.needsUpdate = true;
     });
-    if (!child.userData.starManagerPreviewEdges && child.geometry) {
-      const edges = new threeApi.EdgesGeometry(child.geometry, 28);
-      const edgeMaterial = new threeApi.LineBasicMaterial({
-        color: 0x2b7896,
-        transparent: true,
-        opacity: 0.48,
-        depthTest: false,
-        depthWrite: false,
-      });
-      const outline = new threeApi.LineSegments(edges, edgeMaterial);
-      outline.name = "StarManagerWorkbenchMeshEdges";
-      outline.renderOrder = 11;
-      outline.frustumCulled = false;
-      child.add(outline);
-      child.userData.starManagerPreviewEdges = true;
-    }
   });
 }
 
@@ -548,8 +541,8 @@ async function renderModel(url, generation = previewGeneration) {
     try {
       await applyWorkbenchTexture(clothingObject);
     } catch {
-      // The mesh and outline remain useful even when a particular PNG cannot
-      // be decoded by the browser.
+      // The mesh remains useful even when a particular PNG cannot be decoded
+      // by the browser.
     }
   }
   scene.add(clothingObject);
@@ -613,7 +606,7 @@ async function captureScreenshot() {
 }
 
 async function loadPreview() {
-  if ((!props.itemId && !props.modelUrl) || state.value === "loading") return;
+  if ((!props.itemId && !props.modelUrl && typeof props.previewLoader !== "function") || state.value === "loading") return;
   const generation = ++previewGeneration;
   state.value = "loading";
   message.value = "正在解析 Unity 网格…";
@@ -623,7 +616,9 @@ async function loadPreview() {
       modelUrls.value = { default: url, half: "" };
       mannequinUrl.value = props.mannequinUrl || "";
     } else {
-      const result = await window.desktopApi.backendRequest(`/mods/items/${props.itemId}/model-preview`, { method: "POST", body: {} });
+      const result = typeof props.previewLoader === "function"
+        ? await props.previewLoader()
+        : await window.desktopApi.backendRequest(`/mods/items/${props.itemId}/model-preview`, { method: "POST", body: {} });
       if (!isCurrentPreview(generation)) return;
       if (!result?.ok) throw new Error(result?.error || "模型生成失败");
       url = `${window.desktopApi.backendBaseUrl}${result.url}`;
@@ -655,7 +650,7 @@ async function loadPreview() {
   }
 }
 
-watch(() => [props.itemId, props.modelUrl, props.textureUrl, props.mannequinUrl], async () => {
+watch(() => [props.itemId, props.modelUrl, props.textureUrl, props.mannequinUrl, props.previewKey], async () => {
   previewGeneration += 1;
   switchingVariant.value = false;
   setExpanded(false);
@@ -702,7 +697,7 @@ defineExpose({ captureScreenshot, loadPreview });
         </svg>
       </button>
       <div v-if="state !== 'ready'" class="model-preview-placeholder">
-        <span class="model-preview-orbit" aria-hidden="true"><i></i></span>
+        <LoadingAnimation v-if="state === 'loading'" class="model-preview-loading-animation" />
         <strong>{{ state === "error" ? "暂时无法显示" : "3D 模型预览" }}</strong>
         <p v-if="message">{{ message }}</p>
         <button type="button" :disabled="state === 'loading'" @click="loadPreview">
@@ -821,6 +816,11 @@ defineExpose({ captureScreenshot, loadPreview });
         </div>
       </div>
     </div>
-    <div v-if="state === 'ready'" class="model-preview-hint"><span>3D</span>{{ message }}</div>
+    <div v-if="state === 'ready'" class="model-preview-hint">
+      <div class="model-preview-hint-copy">
+        <span class="model-preview-hint-label">3D</span>
+        <span class="model-preview-hint-message">{{ message }}</span>
+      </div>
+    </div>
   </section>
 </template>

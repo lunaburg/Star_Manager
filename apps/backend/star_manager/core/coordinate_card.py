@@ -153,6 +153,41 @@ def validate_coordinate_payload(payload: bytes) -> dict[str, int]:
     }
 
 
+def parse_coordinate_payload_parts(payload: bytes) -> dict[str, list[dict[str, Any]]]:
+    """Return the clothing and accessory IDs from a validated Coordinate block."""
+    validate_coordinate_payload(payload)
+    cursor = 0
+    objects: list[dict[str, Any]] = []
+    for _ in range(2):
+        size = int.from_bytes(payload[cursor : cursor + 4], "little")
+        start = cursor + 4
+        end = start + size
+        decoded = try_unpack_msgpack(payload, start)
+        if not decoded or decoded[1] != end or not isinstance(decoded[0], dict):
+            raise CoordinateExtractionError("Coordinate MessagePack is invalid.")
+        objects.append(decoded[0])
+        cursor = end
+
+    clothes_parts = [
+        {"slot": index, "id": part.get("id")}
+        for index, part in enumerate(objects[0].get("parts", []))
+        if isinstance(part, dict)
+    ]
+    accessory_parts = [
+        {
+            "slot": index,
+            "type": part.get("type"),
+            "id": part.get("id"),
+        }
+        for index, part in enumerate(objects[1].get("parts", []))
+        if isinstance(part, dict)
+    ]
+    return {
+        "clothes_parts": clothes_parts,
+        "accessory_parts": accessory_parts,
+    }
+
+
 def normalize_coordinate_property(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -491,7 +526,6 @@ def inspect_clothes_card(file_bytes: bytes) -> dict[str, Any]:
     decoded = try_unpack_msgpack(payload, extension_start)
     if not decoded or decoded[1] != extension_end or not isinstance(decoded[0], dict):
         raise CoordinateExtractionError("Generated KKEx MessagePack is invalid.")
-
     return {
         "marker": marker,
         "version": version,
@@ -505,6 +539,60 @@ def inspect_clothes_card(file_bytes: bytes) -> dict[str, Any]:
         "plugins": [str(item) for item in decoded[0]],
         **coordinate_summary,
     }
+
+
+def inspect_clothes_card_listing_payload(payload: bytes, png_size: int = 0) -> dict[str, Any]:
+    """Validate a clothes-card payload when the PNG image was streamed separately."""
+    if len(payload) < 4 or int.from_bytes(payload[:4], "little") != CARD_ENVELOPE_VERSION:
+        raise CoordinateExtractionError("Clothes-card envelope version is invalid.")
+    marker, cursor = read_dotnet_string(payload, 4)
+    version, cursor = read_dotnet_string(payload, cursor)
+    if marker != CLOTHES_MARKER or version != "0.0.0":
+        raise CoordinateExtractionError("Generated clothes-card header is invalid.")
+    if cursor + 4 > len(payload):
+        raise CoordinateExtractionError("Generated clothes-card header is truncated.")
+    cursor += 4  # envelope reserved field
+    name, cursor = read_dotnet_string(payload, cursor)
+    if cursor + 4 > len(payload):
+        raise CoordinateExtractionError("Generated coordinate length is missing.")
+    coordinate_size = int.from_bytes(payload[cursor : cursor + 4], "little")
+    coordinate_start = cursor + 4
+    coordinate_end = coordinate_start + coordinate_size
+    if coordinate_end > len(payload):
+        raise CoordinateExtractionError("Generated coordinate payload is truncated.")
+    coordinate_summary = validate_coordinate_payload(payload[coordinate_start:coordinate_end])
+
+    extension_name, cursor = read_dotnet_string(payload, coordinate_end)
+    if extension_name != KKEX_NAME or cursor + 8 > len(payload):
+        raise CoordinateExtractionError("Generated KKEx header is invalid.")
+    extension_version = int.from_bytes(payload[cursor : cursor + 4], "little")
+    extension_size = int.from_bytes(payload[cursor + 4 : cursor + 8], "little")
+    extension_end = cursor + 8 + extension_size
+    if extension_end != len(payload):
+        raise CoordinateExtractionError("Generated KKEx length does not consume the file.")
+
+    return {
+        "marker": marker,
+        "version": version,
+        "name": name,
+        "png_size": png_size,
+        "coordinate_size": coordinate_size,
+        "extension_name": extension_name,
+        "extension_version": extension_version,
+        "extension_size": extension_size,
+        **coordinate_summary,
+    }
+
+
+def inspect_clothes_card_listing(file_bytes: bytes) -> dict[str, Any]:
+    """Validate only the envelope and coordinate block needed by a card list.
+
+    The KKEx payload can contain a large UniversalAutoResolver record set. The
+    browser list only needs the card name and file identity; full KKEx/UAR
+    decoding remains reserved for the single-card detail endpoint.
+    """
+    png_end = find_png_end(file_bytes)
+    return inspect_clothes_card_listing_payload(file_bytes[png_end:], png_end)
 
 
 def atomic_write(path: Path, data: bytes, overwrite: bool) -> None:

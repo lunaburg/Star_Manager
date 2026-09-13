@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
-from time import time
+from time import sleep, time
 from uuid import uuid4
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,7 @@ from star_manager.services.mod_database import (
     analyze_duplicate_zipmods,
     bulk_repair_zipmods_unity3d_from_game,
     build_database,
+    index_single_zipmod,
     cleanup_duplicate_zipmods,
     delete_mod_item,
     delete_primary_and_promote_duplicate,
@@ -46,11 +47,13 @@ from star_manager.services.mod_database import (
 )
 from star_manager.services.mod_database_assets import (
     find_zip_member,
+    inspect_zipmod_archive,
     iter_zip_csv_items,
     normalize_zip_path,
     read_manifest,
     unity3d_reference_paths,
 )
+from star_manager.services.remote_mod_completion import RemoteDownloadCancelled, download_card_missing_mods
 from star_manager.services.mod_database_core import init_db
 from star_manager.services.mod_workflow import ExtractOptions, WorkflowReporter, extract_mods, search_ais_cards, sort_mods
 
@@ -67,17 +70,35 @@ class TaskState:
     data: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time)
     updated_at: float = field(default_factory=time)
+    pause_requested: bool = False
+    cancel_requested: bool = False
+    phase: str = ""
+    phase_progress: float = 0
+    download_speed_bps: float = 0
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
+    current_file: str = ""
+    phase_message: str = ""
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "task_type": self.task_type,
             "status": self.status,
+            "paused": self.status == "paused",
             "progress": self.progress,
             "title": self.title,
             "messages": list(self.messages),
             "error": self.error,
             "data": self.data,
+            "phase": self.phase,
+            "phase_progress": self.phase_progress,
+            "download_speed_bps": self.download_speed_bps,
+            "downloaded_bytes": self.downloaded_bytes,
+            "total_bytes": self.total_bytes,
+            "current_file": self.current_file,
+            "phase_message": self.phase_message,
+            "cancel_requested": self.cancel_requested,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -108,6 +129,37 @@ class TaskStore:
         with self._lock:
             return [task.to_dict() for task in self._tasks.values()]
 
+    def control_task(self, task_id: str, action: str) -> TaskState | None:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            if task.task_type != "download_card_missing_mods":
+                raise ValueError("Only remote mod download tasks can be controlled.")
+            if task.status in {"completed", "failed", "cancelled"}:
+                raise ValueError("This download task has already finished.")
+            if action == "pause":
+                task.pause_requested = True
+                task.status = "paused"
+                task.download_speed_bps = 0
+                task.messages.append("Download paused")
+            elif action == "resume":
+                if task.cancel_requested:
+                    raise ValueError("This download task is being cancelled.")
+                task.pause_requested = False
+                task.status = "running"
+                task.messages.append("Download resumed")
+            elif action == "cancel":
+                task.cancel_requested = True
+                task.pause_requested = False
+                task.download_speed_bps = 0
+                task.phase_message = "正在取消下载"
+                task.messages.append("Download cancellation requested")
+            else:
+                raise ValueError("Unsupported task control action.")
+            task.updated_at = time()
+            return task
+
 
 task_store = TaskStore()
 SUPPORTED_TASK_TYPES = {
@@ -117,6 +169,8 @@ SUPPORTED_TASK_TYPES = {
     "sort_mods",
     "build_card_database",
     "build_mod_database",
+    "index_single_zipmod",
+    "download_card_missing_mods",
     "import_external_zipmods",
     "export_character_dependency_package",
     "bulk_export_zipmods",
@@ -135,22 +189,37 @@ SUPPORTED_TASK_TYPES = {
 
 SUPPORTED_API_ROUTES = {
     "/library/cards",
+    "/trash",
+    "/trash/empty",
+    "/trash/<kind>/<id>/restore",
+    "/trash/<kind>/<id>/delete",
     "/library/cards/detail",
     "/library/cards/image",
     "/library/cards/replace-cover",
     "/library/cards/export-coordinate",
     "/library/cards/set-navi",
+    "/library/cards/delete",
     "/library/cards/set-favorite",
     "/library/cards/set-rating",
     "/library/cards/set-tags",
     "/library/cards/tags",
     "/library/cards/update-profile",
     "/library/cards/tree",
+    "/library/cards/changes",
     "/library/cards/folders/create",
     "/library/cards/folders/rename",
+    "/library/clothes/tree",
+    "/library/clothes",
+    "/library/clothes/detail",
+    "/library/clothes/image",
     "/cards/database",
     "/plugins",
     "/tools/sims4/package-fbx",
+    "/workbench/unity3d/assets",
+    "/workbench/unity3d/duplicate",
+    "/workbench/unity3d/import-texture",
+    "/workbench/unity3d/model-preview",
+    "/workbench/template-items",
     "/mods/database",
     "/mods/items",
     "/mods/items/filters",
@@ -163,13 +232,22 @@ SUPPORTED_API_ROUTES = {
     "/mods/zipmods/<id>/delete",
     "/mods/items/<id>/import-thumbnail",
     "/mods/items/<id>/export-thumbnail",
-    "/mods/items/<id>/export-fbx",
+    "/mods/items/<id>/open-unity3d",
+    "/mods/items/<id>/export-unity3d",
     "/mods/items/<id>/model-preview",
     "/mods/items/<id>/delete",
     "/mods/zipmods",
+    "/library/cards/missing-mods",
+    "/game-item-probe/status",
+    "/game-item-probe/current",
+    "/game-item-probe/context",
+    "/game-item-probe/command",
+    "/game-item-probe/apply",
+    "/game-card-loader/load",
+    "/tasks/<task_id>/control",
 }
 
-BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1"
 
 
 def _safe_author_directory(author: str) -> str:
@@ -323,8 +401,53 @@ def set_step_progress(task: TaskState, index: int, total: int, start: int = 5, e
     task.updated_at = time()
 
 
+def wait_for_task_resume(task: TaskState) -> None:
+    if task.cancel_requested:
+        raise RemoteDownloadCancelled("Download cancelled by user.")
+    while task.pause_requested:
+        if task.cancel_requested:
+            raise RemoteDownloadCancelled("Download cancelled by user.")
+        task.status = "paused"
+        task.updated_at = time()
+        sleep(0.1)
+    if task.status == "paused":
+        task.status = "running"
+        task.updated_at = time()
+
+
 def should_report_step(index: int, total: int) -> bool:
     return index == total or index % 10 == 0
+
+
+def rebuild_affected_character_cards(
+    game_dir: str,
+    db_path: Path,
+    preview_dir: Path,
+    affected_mod_guids,
+    reporter: WorkflowReporter,
+) -> dict | None:
+    guids = sorted(
+        {
+            str(guid or "").strip()
+            for guid in affected_mod_guids or []
+            if str(guid or "").strip()
+        },
+        key=str.casefold,
+    )
+    if not guids:
+        return None
+
+    reporter.message(
+        f"Refreshing character card dependencies for {len(guids)} changed mod(s)"
+    )
+    return build_card_database(
+        Path(game_dir),
+        db_path,
+        preview_dir,
+        lambda _value, message: reporter.message(message),
+        mode="incremental",
+        affected_mod_guids=guids,
+    )
 
 
 def parse_item_ids(raw_ids) -> list[int]:
@@ -522,13 +645,20 @@ def choose_safe_duplicate_cleanup_action(analysis: dict) -> tuple[str, list[int]
     return "promote", cleanup_ids, promote_duplicate_id, ""
 
 
-def _unique_import_target(import_dir: Path, source_path: Path, used_targets: set[Path]) -> Path:
+def _unique_import_target(
+    import_dir: Path,
+    source_path: Path,
+    used_targets: set[Path],
+    *,
+    suffix: str | None = None,
+) -> Path:
     stem = source_path.stem
-    suffix = source_path.suffix or ".zipmod"
-    target = import_dir / source_path.name
+    target_suffix = suffix if suffix is not None else (source_path.suffix or ".zipmod")
+    target_name = f"{stem}{target_suffix}" if suffix is not None else source_path.name
+    target = import_dir / target_name
     index = 1
     while target.exists() or target in used_targets:
-        target = import_dir / f"{stem} ({index}){suffix}"
+        target = import_dir / f"{stem} ({index}){target_suffix}"
         index += 1
     used_targets.add(target)
     return target
@@ -668,14 +798,43 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         raise ValueError("Please select a valid HS2 game directory before importing zipmods.")
     if not source_dir.is_dir():
         raise ValueError(f"Import folder not found: {source_dir}")
-    zipmod_paths = sorted(path for path in source_dir.rglob("*.zipmod") if path.is_file())
+    archive_paths = sorted(
+        path
+        for path in source_dir.rglob("*")
+        if path.is_file() and path.suffix.casefold() in {".zipmod", ".zip"}
+    )
+    zipmod_paths = [path for path in archive_paths if path.suffix.casefold() == ".zipmod"]
+    zip_paths = [path for path in archive_paths if path.suffix.casefold() == ".zip"]
+    invalid: list[dict] = []
+    recognized_zip_paths: list[Path] = []
+    for source_path in zip_paths:
+        is_zipmod, error = inspect_zipmod_archive(source_path)
+        if is_zipmod:
+            recognized_zip_paths.append(source_path)
+        else:
+            invalid.append(
+                {
+                    "source_path": str(source_path),
+                    "status": "invalid_zipmod_structure",
+                    "error": error,
+                }
+            )
+    recognized_zip_path_set = set(recognized_zip_paths)
+    candidate_paths = [
+        path
+        for path in archive_paths
+        if path.suffix.casefold() == ".zipmod" or path in recognized_zip_path_set
+    ]
     png_paths = sorted(path for path in source_dir.rglob("*.png") if path.is_file())
-    if zipmod_paths and not db_path.exists():
+    if candidate_paths and not db_path.exists():
         raise ValueError("Mod database not found. Rebuild the database before importing external zipmods.")
 
     task.title = "Import external zipmods"
     reporter.message(f"Scanning external folder: {source_dir}")
-    card_import_dir = get_card_root(str(game_dir)) / "female"
+    reporter.message(
+        f"Found {len(zipmod_paths)} zipmod file(s); recognized {len(recognized_zip_paths)} zip archive(s) as zipmod"
+    )
+    card_import_dir = get_card_root(str(game_dir)) / "female" / "imported"
     card_import_dir.mkdir(parents=True, exist_ok=True)
     coordinate_import_dir = game_dir / "UserData" / "coordinate" / "female" / "imoprted"
     coordinate_import_dir.mkdir(parents=True, exist_ok=True)
@@ -689,7 +848,6 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
     imported_cards: list[dict] = []
     imported_coordinates: list[dict] = []
     non_card_pngs: list[str] = []
-    invalid: list[dict] = []
     failures: list[dict] = []
 
     card_total = max(len(png_paths), 1)
@@ -716,8 +874,8 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
                 f"Imported {len(imported_cards)} character and {len(imported_coordinates)} clothes card PNG files"
             )
 
-    total = max(len(zipmod_paths), 1)
-    for index, source_path in enumerate(zipmod_paths, start=1):
+    total = max(len(candidate_paths), 1)
+    for index, source_path in enumerate(candidate_paths, start=1):
         manifest = read_manifest(source_path)
         if manifest.scan_status != "ok" or not manifest.guid:
             invalid.append(
@@ -730,10 +888,21 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
             set_step_progress(task, index, total, start=14, end=25)
             continue
         try:
-            target_path = _unique_import_target(import_dir, source_path, used_targets)
+            is_zip_source = source_path.suffix.casefold() == ".zip"
+            target_path = _unique_import_target(
+                import_dir,
+                source_path,
+                used_targets,
+                suffix=".zipmod" if is_zip_source else None,
+            )
             shutil.copy2(source_path, target_path)
             repair_result = _repair_imported_zipmod_unity3d(target_path, source_dir)
-            copied_item = {"guid": manifest.guid, "source_path": str(source_path), "target_path": str(target_path)}
+            copied_item = {
+                "guid": manifest.guid,
+                "source_path": str(source_path),
+                "target_path": str(target_path),
+                "source_extension": source_path.suffix.casefold(),
+            }
             if repair_result.get("repaired_count"):
                 copied_item["unity3d_repair"] = repair_result
                 unity3d_repaired.append({"guid": manifest.guid, "zipmod_path": str(target_path), **repair_result})
@@ -742,7 +911,7 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
             failures.append({"source_path": str(source_path), "error": str(exc)})
         set_step_progress(task, index, total, start=14, end=25)
         if should_report_step(index, total):
-            reporter.message(f"Copied {index}/{total} external zipmods into game mods")
+            reporter.message(f"Copied {index}/{total} external zipmod candidate(s) into game mods")
 
     if copied:
         reporter.message("Rebuilding database after import copy")
@@ -859,7 +1028,13 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         "target_dir": str(import_dir),
         "card_target_dir": str(card_import_dir),
         "coordinate_target_dir": str(coordinate_import_dir),
-        "scanned_count": len(zipmod_paths),
+        "scanned_count": len(candidate_paths),
+        "zipmod_scanned_count": len(zipmod_paths),
+        "zip_scanned_count": len(zip_paths),
+        "zip_recognized_count": len(recognized_zip_paths),
+        "zip_renamed_count": sum(
+            1 for item in copied if item.get("source_extension") == ".zip"
+        ),
         "png_scanned_count": len(png_paths),
         "copied_count": len(copied),
         "unity3d_repaired_count": sum(int(item.get("repaired_count") or 0) for item in unity3d_repaired),
@@ -884,6 +1059,8 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
         "failures": failures,
         "message": (
             f"Imported {len(imported)} zipmod GUID(s), promoted {len(promoted)} better duplicate(s), "
+            f"recognized {len(recognized_zip_paths)} external zip archive(s) and normalized "
+            f"{sum(1 for item in copied if item.get('source_extension') == '.zip')} imported filename(s), "
             f"repaired {sum(int(item.get('repaired_count') or 0) for item in unity3d_repaired)} unity3d file(s), "
             f"copied {len(imported_cards)} character card(s) and {len(imported_coordinates)} clothes card(s), "
             f"skipped {len(skipped)}, invalid {len(invalid)}, failed {len(failures)}"
@@ -893,7 +1070,8 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
 
 def run_task(task: TaskState, payload: dict) -> None:
     reporter = build_reporter(task)
-    task.status = "running"
+    if not task.pause_requested:
+        task.status = "running"
     task.updated_at = time()
 
     try:
@@ -983,6 +1161,100 @@ def run_task(task: TaskState, payload: dict) -> None:
             if stats.get("thumbnail_profile_log"):
                 reporter.message(f"Thumbnail profile log: {stats['thumbnail_profile_log']}")
             reporter.message(f"Card preview cache: {preview_dir.resolve()}")
+        elif task.task_type == "index_single_zipmod":
+            game_dir = str(payload.get("game_dir") or "")
+            zipmod_path = str(payload.get("zipmod_path") or "")
+            db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+            thumbnail_dir = Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR))
+            preview_dir = Path(str(payload.get("preview_dir") or DEFAULT_CARD_PREVIEW_DIR))
+            if not is_hs2_game_dir(game_dir):
+                raise ValueError("Select a valid HS2 game directory before indexing a single zipmod.")
+            reporter.title("Index single zipmod")
+            reporter.message(f"Indexing only: {zipmod_path}")
+
+            def report_single_zipmod_progress(value: int, message: str) -> None:
+                reporter.progress(value, 100)
+                reporter.message(message)
+
+            stats = index_single_zipmod(
+                Path(game_dir),
+                db_path,
+                thumbnail_dir,
+                Path(zipmod_path),
+                report_single_zipmod_progress,
+            )
+            card_stats = rebuild_affected_character_cards(
+                game_dir,
+                db_path,
+                preview_dir,
+                stats.get("affected_mod_guids"),
+                reporter,
+            )
+            task.data = {
+                "database_path": str(db_path.resolve()),
+                "thumbnail_dir": str(thumbnail_dir.resolve()),
+                "preview_dir": str(preview_dir.resolve()),
+                "mode": "single",
+                "stats": stats,
+                "card_stats": card_stats,
+            }
+            reporter.message(f"Single zipmod indexed: {zipmod_path}")
+        elif task.task_type == "download_card_missing_mods":
+            remote_ids = payload.get("remote_ids") or []
+            game_dir = str(payload.get("game_dir") or "")
+            db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+            thumbnail_dir = Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR))
+            preview_dir = Path(str(payload.get("preview_dir") or DEFAULT_CARD_PREVIEW_DIR))
+            reporter.title("Download missing card mods")
+            reporter.message(f"Preparing {len(remote_ids)} selected remote mod(s)")
+            task.phase = "preparing"
+            task.phase_progress = 0
+            task.phase_message = "准备下载"
+            task.updated_at = time()
+
+            def report_remote_download(value: float, message: str, details: dict | None = None) -> None:
+                wait_for_task_resume(task)
+                reporter.progress(value, 100)
+                reporter.message(message)
+                details = details or {}
+                task.phase = str(details.get("phase") or task.phase or "download")
+                task.phase_progress = round(float(details.get("phase_progress") or 0), 1)
+                task.download_speed_bps = round(float(details.get("download_speed_bps") or 0), 1)
+                task.downloaded_bytes = max(0, int(details.get("downloaded_bytes") or 0))
+                task.total_bytes = max(0, int(details.get("total_bytes") or 0))
+                task.current_file = str(details.get("current_file") or "")
+                task.phase_message = message
+                task.updated_at = time()
+
+            task.data = download_card_missing_mods(
+                game_dir,
+                remote_ids,
+                progress_callback=report_remote_download,
+                control_callback=lambda: wait_for_task_resume(task),
+                db_path=db_path,
+                thumbnail_dir=thumbnail_dir,
+            )
+            task.phase = "install"
+            task.phase_progress = 95 if task.data.get("affected_mod_guids") else 100
+            task.download_speed_bps = 0
+            task.phase_message = "正在刷新人物卡依赖" if task.data.get("affected_mod_guids") else "模组已安装"
+            task.progress = 99 if task.data.get("affected_mod_guids") else 100
+            task.updated_at = time()
+            card_stats = rebuild_affected_character_cards(
+                game_dir,
+                db_path,
+                preview_dir,
+                task.data.get("affected_mod_guids"),
+                reporter,
+            )
+            if card_stats is not None:
+                task.data["card_stats"] = card_stats
+            if not task.data.get("ok"):
+                raise ValueError(str(task.data.get("message") or "Remote mod download failed"))
+            task.phase_progress = 100
+            task.progress = 100
+            task.phase_message = "模组安装完成"
+            reporter.message(str(task.data.get("message") or "Remote mod download completed"))
         elif task.task_type == "build_card_database":
             game_dir = str(payload.get("game_dir") or "")
             db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
@@ -1488,9 +1760,25 @@ def run_task(task: TaskState, payload: dict) -> None:
             raise ValueError(f"Unknown task type: {task.task_type}")
 
         task.progress = 100
+        if task.task_type == "download_card_missing_mods":
+            task.phase = "completed"
+            task.phase_progress = 100
+            task.download_speed_bps = 0
         task.status = "completed"
+    except RemoteDownloadCancelled as error:
+        task.error = "下载已取消"
+        if task.task_type == "download_card_missing_mods":
+            task.phase = "cancelled"
+            task.phase_message = str(error)
+            task.download_speed_bps = 0
+        task.status = "cancelled"
+        task.messages.append("Download cancelled")
     except Exception as error:
         task.error = str(error)
+        if task.task_type == "download_card_missing_mods":
+            task.phase = "failed"
+            task.phase_message = str(error)
+            task.download_speed_bps = 0
         task.status = "failed"
         task.messages.append(f"[Error] {error}")
     finally:

@@ -22,8 +22,10 @@ from star_manager.services.mod_database_core import (
     PreparedModItem,
     PreparedZipmodItems,
     ThumbnailResult,
+    Unity3dProvider,
     Unity3dStatus,
     ZipmodCandidate,
+    get_database_metadata,
     init_db,
     set_database_metadata,
     timestamp_to_utc,
@@ -35,12 +37,16 @@ from star_manager.services.mod_database_queries import (
     find_zipmod_paths_by_guid,
     list_mod_item_filters,
     list_mod_items,
+    list_workbench_template_items,
     list_zipmod_authors,
     list_zipmods,
     resolve_thumbnail_cache_path,
 )
 from star_manager.services.model_preview import (
-    export_item_fbx,
+    list_unity3d_main_data_candidates,
+    export_item_unity3d_file,
+    preprocess_unity3d_asset,
+    prepare_item_unity3d_file,
     prepare_item_model_preview,
     resolve_mannequin_model_file,
     resolve_model_preview_file,
@@ -59,11 +65,13 @@ from star_manager.services.mod_database_assets import (
     delete_primary_and_promote_duplicate,
     delete_zipmod,
     export_zipmod_item_thumbnail,
+    ensure_mod_item_thumbnail,
     extract_thumbnail_from_zipmod,
     find_zipmods,
     find_header_index,
     get_zipmod_manifest,
     inspect_unity3d_status,
+    is_map_scene_item,
     is_unity3d_path,
     main_unity3d_reference_paths,
     import_zipmod_item_thumbnail,
@@ -73,8 +81,8 @@ from star_manager.services.mod_database_assets import (
     group_valid_candidates,
     merge_duplicate_zipmod,
     normalize_zip_path,
+    normalize_abdata_path,
     preextract_zip_unity_thumbnails,
-    build_candidates,
     read_items_from_csv,
     read_manifest,
     repair_zipmod_unity3d_from_game,
@@ -92,7 +100,10 @@ from star_manager.services.mod_database_assets import (
     ZipMemberIndex,
     write_thumbnail_profile,
     zipmod_unity3d_diagnostics,
+    refresh_unity3d_provider_index,
+    unity3d_provider_lookup_keys,
 )
+from star_manager.services.builtin_database import build_builtin_items_index
 from star_manager.services.card_library import (
     IGNORED_ROOT_CARD_DIRS,
     get_card_root,
@@ -112,6 +123,7 @@ WRITE_END_PROGRESS = 96
 FINALIZE_PROGRESS = 98
 AUTO_REBUILD_MAX_CHANGES = 200
 AUTO_REBUILD_MAX_RATIO = 0.05
+MOD_ITEM_PARSER_VERSION = "8"
 
 
 def choose_build_worker_count(primary_zipmod_count: int) -> int:
@@ -128,17 +140,25 @@ def calculate_progress(current: int, total: int, start: int, end: int) -> float:
     return start + clamped / total * (end - start)
 
 
-def summarize_prepared_unity3d(items: list[PreparedModItem]) -> tuple[str, int, int, int, str]:
+def summarize_prepared_unity3d(
+    items: list[PreparedModItem],
+) -> tuple[str, int, int, int, int, int, str]:
     in_mod = 0
+    not_in_mod = 0
     in_game = 0
+    other_mod = 0
     missing = 0
     error = 0
     missing_examples: list[str] = []
     for item in items:
         if item.unity3d_status == "in_mod":
             in_mod += 1
-        elif item.unity3d_status == "in_game":
-            in_game += 1
+        elif item.unity3d_status in {"in_game", "not_in_mod"}:
+            not_in_mod += 1
+            if item.unity3d_source == "other_zipmod":
+                other_mod += 1
+            else:
+                in_game += 1
         elif item.unity3d_status == "missing":
             missing += 1
             if item.unity3d_error and len(missing_examples) < 3:
@@ -152,13 +172,13 @@ def summarize_prepared_unity3d(items: list[PreparedModItem]) -> tuple[str, int, 
         status = "error"
     elif missing:
         status = "missing"
-    elif in_game:
-        status = "in_game"
+    elif not_in_mod:
+        status = "not_in_mod"
     elif in_mod:
         status = "in_mod"
     else:
         status = ""
-    return status, in_mod, in_game, missing, " | ".join(missing_examples)
+    return status, in_mod, not_in_mod, in_game, other_mod, missing, " | ".join(missing_examples)
 
 
 def thumbnail_error_indicates_unity3d_unreadable(item, thumbnail: ThumbnailResult) -> bool:
@@ -290,7 +310,7 @@ def unity3d_retry_guids(conn: sqlite3.Connection) -> set[str]:
             FROM zipmods
             WHERE scan_status != 'stale'
               AND (
-                    COALESCE(unity3d_status, '') IN ('missing', 'in_game', 'error')
+                    COALESCE(unity3d_status, '') IN ('missing', 'in_game', 'not_in_mod', 'error')
                  OR COALESCE(unity3d_missing_count, 0) > 0
                  OR COALESCE(unity3d_in_game_count, 0) > 0
               )
@@ -448,6 +468,7 @@ def prepare_mod_items(
     game_dir: Path,
     candidate: ZipmodCandidate,
     thumbnail_dir: Path,
+    provider_index: dict[str, list[Unity3dProvider]] | None = None,
 ) -> PreparedZipmodItems:
     ok_count = 0
     duplicate_items = 0
@@ -467,10 +488,14 @@ def prepare_mod_items(
 
     try:
         if status_zip is not None:
-            csv_items = list(iter_open_zip_csv_items(status_zip))
+            csv_items = list(iter_open_zip_csv_items(status_zip, candidate.manifest.name))
             preextract_zip_unity_thumbnails(
                 candidate,
-                csv_items,
+                [
+                    item
+                    for item in csv_items
+                    if not is_map_scene_item(item) or item.thumb_ab
+                ],
                 thumbnail_dir,
                 status_zip,
                 status_zip_index,
@@ -488,15 +513,19 @@ def prepare_mod_items(
                 duplicate_items += 1
                 continue
             seen_keys.add(key)
-            thumbnail = extract_thumbnail_from_zipmod(
-                game_dir,
-                candidate,
-                item,
-                thumbnail_dir,
-                status_zip,
-                status_zip_index,
-                bundle_cache,
-                source_cache,
+            thumbnail = (
+                ThumbnailResult("", "ready", "")
+                if is_map_scene_item(item) and not item.thumb_ab
+                else extract_thumbnail_from_zipmod(
+                    game_dir,
+                    candidate,
+                    item,
+                    thumbnail_dir,
+                    status_zip,
+                    status_zip_index,
+                    bundle_cache,
+                    source_cache,
+                )
             )
             if status_zip is None:
                 unity3d = (
@@ -505,11 +534,19 @@ def prepare_mod_items(
                     else Unity3dStatus("", "")
                 )
             else:
-                unity3d = inspect_unity3d_status(game_dir, status_zip, item, status_zip_index)
+                unity3d = inspect_unity3d_status(
+                    game_dir,
+                    status_zip,
+                    item,
+                    status_zip_index,
+                    provider_index,
+                    str(candidate.path),
+                )
                 if unity3d.status == "in_mod" and thumbnail_error_indicates_unity3d_unreadable(item, thumbnail):
                     unity3d = Unity3dStatus(
                         "error",
                         f"unreadable thumbnail unity3d: abdata/{normalize_zip_path(item.thumb_ab)}: {thumbnail.error}",
+                        "in_mod",
                     )
             prepared_items.append(
                 PreparedModItem(
@@ -520,12 +557,14 @@ def prepare_mod_items(
                     main_manifest=item.main_manifest,
                     main_ab=item.main_ab,
                     main_data=item.main_data,
+                    tex_ab=item.tex_ab,
                     thumb_ab=item.thumb_ab,
                     thumb_tex=item.thumb_tex,
                     thumbnail_cache_path=thumbnail.cache_path,
                     thumbnail_status=thumbnail.status,
                     thumbnail_error=thumbnail.error,
                     unity3d_status=unity3d.status,
+                    unity3d_source=unity3d.source,
                     unity3d_error=unity3d.error,
                     parse_status=item.parse_status,
                     parse_error=item.parse_error,
@@ -537,7 +576,7 @@ def prepare_mod_items(
         if status_zip is not None:
             status_zip.close()
 
-    unity3d_status, in_mod, in_game, missing, unity3d_error = summarize_prepared_unity3d(
+    unity3d_status, in_mod, not_in_mod, in_game, other_mod, missing, unity3d_error = summarize_prepared_unity3d(
         prepared_items
     )
     return PreparedZipmodItems(
@@ -546,7 +585,9 @@ def prepare_mod_items(
         duplicate_items=duplicate_items,
         unity3d_status=unity3d_status,
         unity3d_in_mod_count=in_mod,
+        unity3d_not_in_mod_count=not_in_mod,
         unity3d_in_game_count=in_game,
+        unity3d_other_mod_count=other_mod,
         unity3d_missing_count=missing,
         unity3d_error=unity3d_error,
     )
@@ -587,12 +628,14 @@ def replace_mod_items(
             item.main_manifest,
             item.main_ab,
             item.main_data,
+            item.tex_ab,
             item.thumb_ab,
             item.thumb_tex,
             item.thumbnail_cache_path,
             item.thumbnail_status,
             item.thumbnail_error,
             item.unity3d_status,
+            item.unity3d_source,
             item.unity3d_error,
             item.parse_status,
             item.parse_error,
@@ -604,8 +647,8 @@ def replace_mod_items(
                 UPDATE mod_items
                 SET zipmod_id = ?, zipmod_guid = ?, zipmod_author = ?, csv_path = ?,
                     item_id = ?, kind = ?, name = ?, main_manifest = ?, main_ab = ?,
-                    main_data = ?, thumb_ab = ?, thumb_tex = ?, thumbnail_cache_path = ?,
-                    thumbnail_status = ?, thumbnail_error = ?, unity3d_status = ?,
+                    main_data = ?, tex_ab = ?, thumb_ab = ?, thumb_tex = ?, thumbnail_cache_path = ?,
+                    thumbnail_status = ?, thumbnail_error = ?, unity3d_status = ?, unity3d_source = ?,
                     unity3d_error = ?, parse_status = ?, parse_error = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -617,12 +660,12 @@ def replace_mod_items(
                 """
                 INSERT INTO mod_items (
                     zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind, name,
-                    main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
+                    main_manifest, main_ab, main_data, tex_ab, thumb_ab, thumb_tex,
                     thumbnail_cache_path, thumbnail_status, thumbnail_error,
-                    unity3d_status, unity3d_error,
+                    unity3d_status, unity3d_source, unity3d_error,
                     parse_status, parse_error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (*values, now),
             )
@@ -641,8 +684,10 @@ def replace_mod_items(
         UPDATE zipmods
         SET item_count = ?,
             unity3d_status = ?,
+            unity3d_not_in_mod_count = ?,
             unity3d_in_mod_count = ?,
             unity3d_in_game_count = ?,
+            unity3d_other_mod_count = ?,
             unity3d_missing_count = ?,
             unity3d_error = ?,
             updated_at = ?
@@ -651,8 +696,10 @@ def replace_mod_items(
         (
             prepared.ok_count,
             prepared.unity3d_status,
+            prepared.unity3d_not_in_mod_count,
             prepared.unity3d_in_mod_count,
             prepared.unity3d_in_game_count,
+            prepared.unity3d_other_mod_count,
             prepared.unity3d_missing_count,
             prepared.unity3d_error,
             now,
@@ -698,8 +745,19 @@ def build_database(
                 "profile_schema": 2,
             }
         )
-        report(SCAN_PROGRESS, "Scanning mods/**/*.zipmod")
         force_full = str(mode or "incremental").lower() == "full"
+        report(1, "Scanning original game resource lists")
+        builtin_stats = build_builtin_items_index(
+            conn,
+            game_dir,
+            thumbnail_dir,
+            progress_callback=report,
+            mode=mode,
+        )
+        report(SCAN_PROGRESS, "Scanning mods/**/*.zipmod")
+        parser_version_changed = (
+            get_database_metadata(conn, "mod_item_parser_version") != MOD_ITEM_PARSER_VERSION
+        )
         existing_primary_paths = {
             str(row["guid"]): str(row["file_path"])
             for row in conn.execute(
@@ -744,6 +802,35 @@ def build_database(
             guid: choose_primary(group, existing_paths)
             for guid, group in grouped_items
         }
+        provider_index, provider_index_changed, changed_resource_keys = refresh_unity3d_provider_index(
+            conn,
+            candidates,
+            utc_now(),
+            force_full=force_full,
+        )
+        provider_affected_guids: set[str] = set()
+        if provider_index_changed and changed_resource_keys:
+            for row in conn.execute(
+                """
+                SELECT DISTINCT zipmod_guid, main_manifest, main_ab, tex_ab
+                FROM mod_items
+                WHERE parse_status = 'ok'
+                """
+            ):
+                references = {
+                    normalize_abdata_path(str(row["main_manifest"] or ""), str(row["main_ab"] or "")),
+                    normalize_abdata_path("abdata", str(row["tex_ab"] or "")),
+                }
+                lookup_keys = {
+                    key
+                    for reference in references
+                    if reference
+                    for key in unity3d_provider_lookup_keys(reference)
+                }
+                if lookup_keys & changed_resource_keys:
+                    guid = str(row["zipmod_guid"] or "").strip()
+                    if guid:
+                        provider_affected_guids.add(guid)
         retry_thumbnail_guids = set() if force_full else thumbnail_retry_guids(conn)
         retry_unity3d_guids = set() if force_full else unity3d_retry_guids(conn)
         retry_guids = retry_thumbnail_guids | retry_unity3d_guids
@@ -757,9 +844,11 @@ def build_database(
             guid
             for guid, primary in primary_by_guid.items()
             if force_full
+            or parser_version_changed
             or str(primary.path) in changed_paths
             or guid in retry_guids
             or guid in primary_changed_guids
+            or guid in provider_affected_guids
         }
         current_guids = set(primary_by_guid)
         removed_guids = set(existing_primary_paths) - current_guids
@@ -791,6 +880,8 @@ def build_database(
             "affected_mod_guids": sorted(affected_mod_guids, key=str.casefold),
             "affected_mod_guid_count": len(affected_mod_guids),
             "primary_changed_guid_count": len(primary_changed_guids),
+            "parser_version_changed": parser_version_changed,
+            **builtin_stats,
         }
         report(
             PREPARE_START_PROGRESS,
@@ -809,7 +900,13 @@ def build_database(
         if worker_count > 1:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_to_candidate = {
-                    executor.submit(prepare_mod_items, game_dir, candidate, thumbnail_dir): candidate
+                    executor.submit(
+                        prepare_mod_items,
+                        game_dir,
+                        candidate,
+                        thumbnail_dir,
+                        provider_index,
+                    ): candidate
                     for candidate in primary_candidates
                 }
                 for completed_count, future in enumerate(as_completed(future_to_candidate), start=1):
@@ -832,7 +929,10 @@ def build_database(
         else:
             for completed_count, candidate in enumerate(primary_candidates, start=1):
                 prepared_by_guid[candidate.manifest.guid] = prepare_mod_items(
-                    game_dir, candidate, thumbnail_dir
+                    game_dir,
+                    candidate,
+                    thumbnail_dir,
+                    provider_index,
                 )
                 report(
                     round(
@@ -871,7 +971,12 @@ def build_database(
                     guid in replaced_item_guids
                 )
                 if prepared is None and should_replace_items:
-                    prepared = prepare_mod_items(game_dir, primary, thumbnail_dir)
+                    prepared = prepare_mod_items(
+                        game_dir,
+                        primary,
+                        thumbnail_dir,
+                        provider_index,
+                    )
                 if prepared is not None:
                     item_count, duplicate_items = replace_mod_items(
                         conn, zipmod_id, primary, prepared, now
@@ -905,6 +1010,7 @@ def build_database(
                 conn.execute("SELECT COUNT(DISTINCT guid) FROM duplicate_zipmods").fetchone()[0]
             )
             set_database_metadata(conn, "last_built_at", now)
+            set_database_metadata(conn, "mod_item_parser_version", MOD_ITEM_PARSER_VERSION)
             report(FINALIZE_PROGRESS, "Finalizing database records")
             write_thumbnail_profile(
                 {
@@ -920,6 +1026,102 @@ def build_database(
             )
         report(100, "Database rebuild completed")
         return stats
+    finally:
+        conn.close()
+
+
+def index_single_zipmod(
+    game_dir: Path,
+    db_path: Path,
+    thumbnail_dir: Path,
+    zipmod_path: Path,
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> dict[str, object]:
+    """Index exactly one zipmod without scanning or pruning any other records."""
+
+    def report(value: int, message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(value, message)
+
+    game_dir = game_dir.resolve()
+    db_path = db_path.resolve()
+    thumbnail_dir = thumbnail_dir.resolve()
+    zipmod_path = zipmod_path.resolve()
+    mods_dir = (game_dir / "mods").resolve()
+    if not zipmod_path.is_file():
+        raise ValueError(f"zipmod file not found: {zipmod_path}")
+    try:
+        relative_path = zipmod_path.relative_to(mods_dir).as_posix()
+    except ValueError as error:
+        raise ValueError("zipmod must be inside the selected game's mods directory") from error
+
+    stat = zipmod_path.stat()
+    candidate = ZipmodCandidate(
+        manifest=read_manifest(zipmod_path),
+        path=zipmod_path,
+        relative_path=relative_path,
+        file_size=stat.st_size,
+        modified_at=timestamp_to_utc(stat.st_mtime),
+    )
+    if not candidate.manifest.guid:
+        raise ValueError(
+            f"cannot index zipmod without a valid manifest GUID: {zipmod_path.name}"
+        )
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+    now = utc_now()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        existing_zipmod = conn.execute(
+            "SELECT id, file_path FROM zipmods WHERE guid = ?",
+            (candidate.manifest.guid,),
+        ).fetchone()
+        report(
+            10,
+            (
+                f"Updating existing GUID record: {candidate.manifest.guid}"
+                if existing_zipmod is not None
+                else f"Creating GUID record: {candidate.manifest.guid}"
+            ),
+        )
+        # The single-mod task intentionally does not scan other zipmods or refresh
+        # the archive-level provider index. Those operations belong to the full
+        # database rebuild; this task only needs the target archive and the
+        # existing GUID row in SQLite.
+        prepared = prepare_mod_items(
+            game_dir,
+            candidate,
+            thumbnail_dir,
+            None,
+        )
+        report(70, f"Prepared {prepared.ok_count} items from {zipmod_path.name}")
+        with conn:
+            zipmod_id = upsert_zipmod(conn, candidate, now)
+            item_count, duplicate_items = replace_mod_items(
+                conn, zipmod_id, candidate, prepared, now
+            )
+            duplicate_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM duplicate_zipmods WHERE guid = ?",
+                    (candidate.manifest.guid,),
+                ).fetchone()[0]
+            )
+            set_database_metadata(conn, "last_built_at", now)
+            set_database_metadata(conn, "mod_item_parser_version", MOD_ITEM_PARSER_VERSION)
+        report(100, f"Indexed target zipmod: {zipmod_path.name}")
+        return {
+            "zipmod_path": str(zipmod_path),
+            "guid": candidate.manifest.guid,
+            "primary_zipmods": 1,
+            "mod_items": item_count,
+            "duplicate_zipmods": duplicate_count,
+            "duplicate_items": duplicate_items,
+            "affected_mod_guids": [candidate.manifest.guid],
+            "scanned_zipmods": 1,
+        }
     finally:
         conn.close()
 

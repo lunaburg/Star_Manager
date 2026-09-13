@@ -228,6 +228,32 @@ def test_parse_geom_reads_panda_bone_palette_and_weights() -> None:
     assert all(sum(weights) == 255 for weights in mesh["bone_weights"])
 
 
+def test_parse_geom_reads_version_0f_bone_palette_footer() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "extracted"
+        / "panda_dress"
+        / "raw_resources"
+        / "panda_lod0_D9DAE30E1866ABF6.geom"
+    )
+    raw = bytearray(fixture.read_bytes())
+    geom_start = raw.find(b"GEOM")
+    assert geom_start >= 0
+    tgi_offset = struct.unpack_from("<I", raw, geom_start + 8)[0]
+    tgi_table_start = geom_start + 12 + tgi_offset
+
+    raw[tgi_table_start:tgi_table_start] = b"\0" * 4
+    struct.pack_into("<I", raw, geom_start + 4, 0x0F)
+    struct.pack_into("<I", raw, geom_start + 8, tgi_offset + 4)
+
+    mesh = parse_geom(bytes(raw))
+
+    assert mesh["version"] == 0x0F
+    assert len(mesh["bone_hashes"]) == 58
+    assert len(mesh["bone_indices"]) == mesh["vertex_count"]
+    assert all(sum(weights) == 255 for weights in mesh["bone_weights"])
+
+
 def test_bake_t_pose_with_blender_exports_mesh_without_skin(tmp_path: Path) -> None:
     output_dir = tmp_path / "result"
     work_dir = output_dir / ".skin_work"
@@ -273,6 +299,13 @@ def test_bake_t_pose_with_blender_exports_mesh_without_skin(tmp_path: Path) -> N
                             "pose_reference": "HS2",
                             "source_arm_drop_degrees": 44.908,
                             "target_arm_drop_degrees": 0.0,
+                            "vertices_after_reverse_cleanup": 120,
+                            "triangles_after_reverse_cleanup": 200,
+                            "reverse_duplicate_groups_detected": 7,
+                            "reverse_duplicate_faces_removed": 6,
+                            "reverse_duplicate_ambiguous_groups": 1,
+                            "reverse_duplicate_material_mismatch_groups": 0,
+                            "reverse_duplicate_multi_face_groups": 0,
                         }
                     ]
                 }
@@ -292,6 +325,11 @@ def test_bake_t_pose_with_blender_exports_mesh_without_skin(tmp_path: Path) -> N
     assert exported["rigged"] is False
     assert exported["t_pose_baked"] is True
     assert exported["skin_data_removed"] is True
+    assert exported["vertices"] == 120
+    assert exported["triangles"] == 200
+    assert exported["reverse_duplicate_groups_detected"] == 7
+    assert exported["reverse_duplicate_faces_removed"] == 6
+    assert exported["reverse_duplicate_ambiguous_groups"] == 1
     assert exported["skeleton_bones"] == 0
     assert exported["weighted_bones"] == 0
     assert manifest["rigged_model_count"] == 0

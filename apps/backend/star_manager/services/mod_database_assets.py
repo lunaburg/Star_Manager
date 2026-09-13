@@ -26,6 +26,7 @@ from star_manager.services.mod_database_core import (
     DEFAULT_THUMBNAIL_DIR,
     ManifestData,
     ThumbnailResult,
+    Unity3dProvider,
     Unity3dStatus,
     VENDOR_DIR,
     ZipmodCandidate,
@@ -33,6 +34,7 @@ from star_manager.services.mod_database_core import (
     timestamp_to_utc,
     utc_now,
 )
+from star_manager.services.trash import move_to_trash
 
 if VENDOR_DIR.exists():
     sys.path.insert(0, str(VENDOR_DIR))
@@ -48,6 +50,12 @@ _THUMBNAIL_PROFILE_LOCK = threading.Lock()
 _THUMBNAIL_PROFILE_CURRENT_PATH = THUMBNAIL_PROFILE_LOG_PATH
 _THUMBNAIL_PROFILE_RUN_ID = ""
 _THUMBNAIL_PROFILE_SEQUENCE = 0
+
+KPLUG_MAP_CSV_PATH = "abdata/studio/info/kplug/map_kplug.csv"
+MAP_SCENE_KIND = "__map_scene__"
+GAME_MAP_SCENE_KIND = "__game_map_scene__"
+DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__"
+GAME_MAPINFO_PREFIX = "abdata/map/list/mapinfo/"
 
 
 def thumbnail_profile_path_for_run(started_at: str, run_id: str) -> Path:
@@ -168,6 +176,36 @@ def read_manifest(zipmod_path: Path) -> ManifestData:
     return ManifestData(guid, text("name"), text("version"), author, "ok", "")
 
 
+def inspect_zipmod_archive(zipmod_path: Path) -> tuple[bool, str]:
+    """Check whether an archive has the minimum standard zipmod layout."""
+    try:
+        with zipfile.ZipFile(zipmod_path, "r") as zf:
+            members = zf.infolist()
+            exact_names = {info.filename for info in members}
+            normalized_names = {
+                normalize_zip_path(info.filename).casefold()
+                for info in members
+                if not info.is_dir()
+            }
+            if "manifest.xml" not in exact_names:
+                return False, "manifest.xml not found at the archive root"
+            if not any(name.startswith("abdata/") for name in normalized_names):
+                return False, "abdata content not found"
+            with zf.open("manifest.xml") as manifest_file:
+                root = ET.parse(manifest_file).getroot()
+            if str(root.tag or "").strip().casefold() != "manifest":
+                return False, "manifest.xml root element is not manifest"
+    except zipfile.BadZipFile as exc:
+        return False, f"bad zip file: {exc}"
+    except (OSError, ET.ParseError) as exc:
+        return False, str(exc)
+
+    manifest = read_manifest(zipmod_path)
+    if manifest.scan_status != "ok" or not manifest.guid:
+        return False, manifest.scan_error or "manifest guid missing"
+    return True, ""
+
+
 def _manifest_fields_from_root(root: ET.Element) -> list[dict[str, str]]:
     fields: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -191,7 +229,8 @@ def _zipmod_row_payload(conn: sqlite3.Connection, zipmod_id: int) -> dict:
     row = conn.execute(
         """
         SELECT id, scan_status, name, author, version, item_count,
-               unity3d_status, unity3d_in_mod_count, unity3d_in_game_count,
+               unity3d_status, unity3d_not_in_mod_count, unity3d_in_mod_count,
+               unity3d_in_game_count, unity3d_other_mod_count,
                unity3d_missing_count, unity3d_error, guid,
                file_name, relative_path, file_path, last_scanned_at, scan_error,
                (
@@ -215,8 +254,10 @@ def _zipmod_row_payload(conn: sqlite3.Connection, zipmod_id: int) -> dict:
         "item_count": row["item_count"],
         "duplicate_zipmod_count": row["duplicate_zipmod_count"],
         "unity3d_status": row["unity3d_status"],
+        "unity3d_not_in_mod_count": row["unity3d_not_in_mod_count"],
         "unity3d_in_mod_count": row["unity3d_in_mod_count"],
         "unity3d_in_game_count": row["unity3d_in_game_count"],
+        "unity3d_other_mod_count": row["unity3d_other_mod_count"],
         "unity3d_missing_count": row["unity3d_missing_count"],
         "unity3d_error": row["unity3d_error"],
         "guid": row["guid"],
@@ -384,11 +425,12 @@ def upsert_invalid_zipmod(conn: sqlite3.Connection, invalid: ZipmodCandidate, no
         """
         INSERT INTO zipmods (
             guid, name, version, author, file_path, relative_path, file_name,
-            file_size, modified_at, item_count, unity3d_status, unity3d_in_mod_count,
-            unity3d_in_game_count, unity3d_missing_count, unity3d_error, scan_status, scan_error,
+            file_size, modified_at, item_count, unity3d_status, unity3d_not_in_mod_count,
+            unity3d_in_mod_count, unity3d_in_game_count, unity3d_other_mod_count,
+            unity3d_missing_count, unity3d_error, scan_status, scan_error,
             last_scanned_at, created_at, updated_at
         )
-        VALUES (?, '', '', '', ?, ?, ?, ?, ?, 0, '', 0, 0, 0, '', ?, ?, ?, ?, ?)
+        VALUES (?, '', '', '', ?, ?, ?, ?, ?, 0, '', 0, 0, 0, 0, 0, '', ?, ?, ?, ?, ?)
         ON CONFLICT(guid) DO UPDATE SET
             file_path = excluded.file_path,
             relative_path = excluded.relative_path,
@@ -397,8 +439,10 @@ def upsert_invalid_zipmod(conn: sqlite3.Connection, invalid: ZipmodCandidate, no
             modified_at = excluded.modified_at,
             item_count = excluded.item_count,
             unity3d_status = excluded.unity3d_status,
+            unity3d_not_in_mod_count = excluded.unity3d_not_in_mod_count,
             unity3d_in_mod_count = excluded.unity3d_in_mod_count,
             unity3d_in_game_count = excluded.unity3d_in_game_count,
+            unity3d_other_mod_count = excluded.unity3d_other_mod_count,
             unity3d_missing_count = excluded.unity3d_missing_count,
             unity3d_error = excluded.unity3d_error,
             scan_status = excluded.scan_status,
@@ -445,7 +489,17 @@ def decode_csv_bytes(data: bytes) -> str:
 
 def decode_csv_bytes_with_encoding(data: bytes) -> tuple[str, str]:
     candidates: list[tuple[int, int, str, str]] = []
-    for index, encoding in enumerate(("utf-8-sig", "utf-8", "cp932", "gb18030")):
+    for index, encoding in enumerate(
+        (
+            "utf-8-sig",
+            "utf-8",
+            "utf-16",
+            "utf-16-le",
+            "utf-16-be",
+            "cp932",
+            "gb18030",
+        )
+    ):
         try:
             text = data.decode(encoding)
         except UnicodeDecodeError:
@@ -473,7 +527,7 @@ def csv_decode_score(text: str) -> int:
     score += control_count * 50
 
     try:
-        rows = list(csv.reader(io.StringIO(text)))
+        rows = list(csv.reader(io.StringIO(text, newline="")))
     except csv.Error:
         return score + 1000
 
@@ -487,6 +541,7 @@ def csv_decode_score(text: str) -> int:
             "Name",
             "MainAB",
             "MainData",
+            "TexAB",
             "ThumbAB",
             "ThumbTex",
         }
@@ -518,7 +573,7 @@ def value_any(row_map: dict[str, str], keys: Iterable[str]) -> str:
 def read_items_from_csv(csv_path: str, data: bytes) -> list[CsvItem]:
     try:
         text = decode_csv_bytes(data)
-        rows = list(csv.reader(io.StringIO(text)))
+        rows = list(csv.reader(io.StringIO(text, newline="")))
     except csv.Error as exc:
         return [
             CsvItem(csv_path, "", "", "", "", "", "", "", "", "parse_error", str(exc))
@@ -554,6 +609,7 @@ def read_items_from_csv(csv_path: str, data: bytes) -> list[CsvItem]:
                 main_manifest=value_any(row_map, ("MainManifest", "MainTexManifest")),
                 main_ab=value_any(row_map, ("MainAB", "MainTexAB")),
                 main_data=value_any(row_map, ("MainData", "MainTex", "AddTex", "GlossTex")),
+                tex_ab=value(row_map, "TexAB"),
                 thumb_ab=value(row_map, "ThumbAB"),
                 thumb_tex=value(row_map, "ThumbTex"),
                 parse_status="ok",
@@ -562,9 +618,154 @@ def read_items_from_csv(csv_path: str, data: bytes) -> list[CsvItem]:
         )
     return items
 
-def iter_open_zip_csv_items(zf: zipfile.ZipFile) -> Iterable[CsvItem]:
-    for name in sorted(zf.namelist()):
+
+def read_kplug_map_items(
+    csv_path: str,
+    data: bytes,
+    kind: str = MAP_SCENE_KIND,
+    display_name: str = "",
+    thumbnail_references: list[tuple[str, str]] | None = None,
+) -> list[CsvItem]:
+    """Read kPlug MAPMOD registrations as read-only map-scene index items."""
+    try:
+        text = decode_csv_bytes(data)
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except csv.Error:
+        return []
+
+    items: list[CsvItem] = []
+    map_number = 0
+    for row in rows:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        if row[0].strip().upper() == "MAPMOD":
+            continue
+        if len(row) < 5:
+            continue
+        bundle_path = row[2].strip()
+        if not bundle_path.lower().endswith(".unity3d"):
+            continue
+        map_number += 1
+        map_id = row[0].strip()
+        registered_name = row[3].strip()
+        is_scene_alias = bool(re.fullmatch(r"scene\d*", registered_name, flags=re.IGNORECASE))
+        map_name = (
+            (display_name if is_scene_alias else registered_name)
+            or row[1].strip()
+            or f"地图场景 {map_number}"
+        )
+        thumb_ab, thumb_tex = (thumbnail_references or [])[map_number - 1] if (
+            thumbnail_references and map_number <= len(thumbnail_references)
+        ) else ("", "")
+        items.append(
+            CsvItem(
+                csv_path=csv_path,
+                item_id=f"kplug-map:{map_number}:{map_id or 'default'}",
+                kind=kind,
+                name=map_name,
+                main_manifest=row[4].strip() or "abdata",
+                main_ab=bundle_path,
+                main_data=row[1].strip(),
+                thumb_ab=thumb_ab,
+                thumb_tex=thumb_tex,
+                parse_status="ok",
+                parse_error="",
+            )
+        )
+    return items
+
+
+def is_map_scene_item(item: CsvItem) -> bool:
+    return item.kind in {MAP_SCENE_KIND, GAME_MAP_SCENE_KIND, DUAL_MAP_SCENE_KIND}
+
+
+def read_game_mapinfo_items(
+    mapinfo_paths: Iterable[str],
+    display_name: str = "",
+    thumbnail_references: list[tuple[str, str]] | None = None,
+) -> list[CsvItem]:
+    items: list[CsvItem] = []
+    for index, path in enumerate(sorted(mapinfo_paths), start=1):
+        normalized = normalize_zip_path(path)
+        relative_path = normalized.removeprefix("abdata/")
+        fallback_name = Path(relative_path).stem.replace("_mapdata_000", "")
+        thumb_ab, thumb_tex = (thumbnail_references or [])[index - 1] if (
+            thumbnail_references and index <= len(thumbnail_references)
+        ) else ("", "")
+        items.append(
+            CsvItem(
+                csv_path=normalized,
+                item_id=f"game-map:{index}",
+                kind=GAME_MAP_SCENE_KIND,
+                name=display_name or fallback_name or f"游戏本体地图 {index}",
+                main_manifest="abdata",
+                main_ab=relative_path,
+                main_data="mapinfo.asset",
+                thumb_ab=thumb_ab,
+                thumb_tex=thumb_tex,
+                parse_status="ok",
+                parse_error="",
+            )
+        )
+    return items
+
+
+def read_game_mapinfo_thumbnail_references(
+    zf: zipfile.ZipFile,
+    mapinfo_paths: Iterable[str],
+) -> list[tuple[str, str]]:
+    references: list[tuple[str, str]] = []
+    if UnityPy is None:
+        return references
+
+    for path in sorted(mapinfo_paths):
+        try:
+            env = UnityPy.load(zf.read(path))
+            behaviour = next(
+                (item for item in env.objects if item.type.name == "MonoBehaviour"),
+                None,
+            )
+            if behaviour is None:
+                continue
+            payload = behaviour.read_typetree()
+            parameters = payload.get("param") or []
+            parameter = parameters[0] if parameters else {}
+            thumb_ab = str(parameter.get("ThumbnailBundle_S") or "").strip()
+            thumb_tex = str(parameter.get("ThumbnailAsset_S") or "").strip()
+            references.append((thumb_ab, thumb_tex))
+        except Exception:  # MapInfo metadata is optional for map recognition.
+            references.append(("", ""))
+    return references
+
+
+def iter_open_zip_csv_items(
+    zf: zipfile.ZipFile,
+    map_display_name: str = "",
+) -> Iterable[CsvItem]:
+    names = sorted(zf.namelist())
+    normalized_names = [name.replace("\\", "/") for name in names]
+    mapinfo_paths = [
+        name
+        for name in normalized_names
+        if name.lower().startswith(GAME_MAPINFO_PREFIX) and name.lower().endswith(".unity3d")
+    ]
+    has_kplug_map = any(name.lower() == KPLUG_MAP_CSV_PATH for name in normalized_names)
+    thumbnail_references = read_game_mapinfo_thumbnail_references(zf, mapinfo_paths)
+    for name in names:
         normalized = name.replace("\\", "/")
+        if normalized.lower() == KPLUG_MAP_CSV_PATH:
+            try:
+                kind = DUAL_MAP_SCENE_KIND if mapinfo_paths else MAP_SCENE_KIND
+                yield from read_kplug_map_items(
+                    normalized,
+                    zf.read(name),
+                    kind,
+                    map_display_name,
+                    thumbnail_references,
+                )
+            except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+                yield CsvItem(normalized, "", MAP_SCENE_KIND, "", "", "", "", "", "", "parse_error", str(exc))
+            continue
         if not normalized.lower().startswith("abdata/list/"):
             continue
         if not normalized.lower().endswith(".csv"):
@@ -573,6 +774,13 @@ def iter_open_zip_csv_items(zf: zipfile.ZipFile) -> Iterable[CsvItem]:
             yield from read_items_from_csv(normalized, zf.read(name))
         except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
             yield CsvItem(normalized, "", "", "", "", "", "", "", "", "parse_error", str(exc))
+
+    if mapinfo_paths and not has_kplug_map:
+        yield from read_game_mapinfo_items(
+            mapinfo_paths,
+            map_display_name,
+            thumbnail_references,
+        )
 
 
 def iter_zip_csv_items(zipmod_path: Path) -> Iterable[CsvItem]:
@@ -688,6 +896,184 @@ class ZipMemberIndex:
                 return normalize_zip_path(normalized_path).rstrip("/")
         return None
 
+
+def _unity3d_provider_entries(zf: zipfile.ZipFile) -> list[tuple[str, str, str, str]]:
+    """Return lookup keys for Unity3D files and directory-backed bundles in one archive."""
+    entries: dict[tuple[str, str], tuple[str, str, str]] = {}
+    directory_index = ZipMemberIndex(zf)
+
+    for member_name in zf.namelist():
+        normalized = normalize_zip_path(member_name)
+        if not normalized.casefold().startswith("abdata/"):
+            continue
+        if not is_unity3d_path(normalized):
+            continue
+        for key in zip_path_match_keys(normalized):
+            entries.setdefault((key, "file"), (normalized, member_name, "file"))
+
+    for directory_name in set(directory_index.directory_names_by_key.values()):
+        normalized = normalize_zip_path(directory_name).rstrip("/")
+        if not normalized.casefold().startswith("abdata/") or not normalized:
+            continue
+        for key in zip_path_match_keys(normalized):
+            entries.setdefault((key, "directory"), (normalized, normalized, "directory"))
+
+    return [
+        (key, resource_path, member_path, source_kind)
+        for (key, source_kind), (resource_path, member_path, _source_kind) in entries.items()
+    ]
+
+
+def load_unity3d_provider_index(conn: sqlite3.Connection) -> dict[str, list[Unity3dProvider]]:
+    providers: dict[str, list[Unity3dProvider]] = {}
+    for row in conn.execute(
+        """
+        SELECT zipmod_path, relative_path, guid, resource_key, resource_path,
+               member_path, source_kind
+        FROM unity3d_providers
+        ORDER BY resource_key, zipmod_path COLLATE NOCASE
+        """
+    ):
+        providers.setdefault(str(row["resource_key"]), []).append(
+            Unity3dProvider(
+                zipmod_path=str(row["zipmod_path"]),
+                relative_path=str(row["relative_path"] or ""),
+                guid=str(row["guid"] or ""),
+                resource_path=str(row["resource_path"] or ""),
+                member_path=str(row["member_path"] or ""),
+                source_kind=str(row["source_kind"] or "file"),
+            )
+        )
+    return providers
+
+
+def refresh_unity3d_provider_index(
+    conn: sqlite3.Connection,
+    candidates: Iterable[ZipmodCandidate],
+    now: str,
+    force_full: bool = False,
+) -> tuple[dict[str, list[Unity3dProvider]], bool, set[str]]:
+    """Refresh the archive-level Unity3D provider index incrementally."""
+    candidate_list = list(candidates)
+    current_paths = {str(candidate.path.resolve()) for candidate in candidate_list}
+    existing = {
+        str(row["zipmod_path"]): row
+        for row in conn.execute("SELECT * FROM unity3d_provider_archives")
+    }
+    changed = False
+    changed_resource_keys: set[str] = set()
+    if set(existing) != current_paths:
+        changed = True
+        obsolete_paths = set(existing) - current_paths
+        if obsolete_paths:
+            placeholders = ", ".join("?" for _ in obsolete_paths)
+            changed_resource_keys.update(
+                str(row["resource_key"])
+                for row in conn.execute(
+                    f"SELECT resource_key FROM unity3d_providers WHERE zipmod_path IN ({placeholders})",
+                    tuple(sorted(obsolete_paths)),
+                )
+            )
+    for candidate in candidate_list:
+        zipmod_path = str(candidate.path.resolve())
+        stat_matches = (
+            not force_full
+            and zipmod_path in existing
+            and int(existing[zipmod_path]["file_size"] or 0) == int(candidate.file_size)
+            and str(existing[zipmod_path]["modified_at"] or "") == str(candidate.modified_at)
+        )
+        if stat_matches:
+            continue
+
+        changed = True
+        changed_resource_keys.update(
+            str(row["resource_key"])
+            for row in conn.execute(
+                "SELECT resource_key FROM unity3d_providers WHERE zipmod_path = ?",
+                (zipmod_path,),
+            )
+        )
+        conn.execute("DELETE FROM unity3d_providers WHERE zipmod_path = ?", (zipmod_path,))
+        scan_status = "ok"
+        scan_error = ""
+        entries: list[tuple[str, str, str, str]] = []
+        try:
+            with zipfile.ZipFile(candidate.path, "r") as zf:
+                entries = _unity3d_provider_entries(zf)
+        except (OSError, zipfile.BadZipFile) as exc:
+            scan_status = "error"
+            scan_error = str(exc)
+
+        conn.execute(
+            """
+            INSERT INTO unity3d_provider_archives (
+                zipmod_path, relative_path, guid, file_size, modified_at,
+                scan_status, scan_error, scanned_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(zipmod_path) DO UPDATE SET
+                relative_path = excluded.relative_path,
+                guid = excluded.guid,
+                file_size = excluded.file_size,
+                modified_at = excluded.modified_at,
+                scan_status = excluded.scan_status,
+                scan_error = excluded.scan_error,
+                scanned_at = excluded.scanned_at
+            """,
+            (
+                zipmod_path,
+                candidate.relative_path,
+                candidate.manifest.guid,
+                candidate.file_size,
+                candidate.modified_at,
+                scan_status,
+                scan_error,
+                now,
+            ),
+        )
+        if entries:
+            changed_resource_keys.update(key for key, _resource_path, _member_path, _source_kind in entries)
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO unity3d_providers (
+                    zipmod_path, resource_key, resource_path, member_path,
+                    source_kind, relative_path, guid, file_size, modified_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        zipmod_path,
+                        key,
+                        resource_path,
+                        member_path,
+                        source_kind,
+                        candidate.relative_path,
+                        candidate.manifest.guid,
+                        candidate.file_size,
+                        candidate.modified_at,
+                        now,
+                    )
+                    for key, resource_path, member_path, source_kind in entries
+                ),
+            )
+
+    if current_paths:
+        placeholders = ", ".join("?" for _ in current_paths)
+        conn.execute(
+            f"DELETE FROM unity3d_provider_archives WHERE zipmod_path NOT IN ({placeholders})",
+            tuple(sorted(current_paths)),
+        )
+    else:
+        conn.execute("DELETE FROM unity3d_provider_archives")
+    conn.execute(
+        """
+        DELETE FROM unity3d_providers
+        WHERE NOT EXISTS (
+            SELECT 1 FROM unity3d_provider_archives a
+            WHERE a.zipmod_path = unity3d_providers.zipmod_path
+        )
+        """
+    )
+    return load_unity3d_provider_index(conn), changed, changed_resource_keys
 
 class UnityThumbnailBundleCache:
     def __init__(self):
@@ -939,6 +1325,10 @@ def unity3d_reference_paths(item: CsvItem) -> list[str]:
     if main_path and is_unity3d_path(main_path):
         paths.append(main_path)
 
+    tex_path = normalize_abdata_path("abdata", item.tex_ab)
+    if tex_path and is_unity3d_path(tex_path):
+        paths.append(tex_path)
+
     thumb_path = normalize_abdata_path("abdata", item.thumb_ab)
     if thumb_path and is_unity3d_path(thumb_path):
         paths.append(thumb_path)
@@ -960,8 +1350,62 @@ def main_unity3d_reference_paths(item: CsvItem) -> list[str]:
     return []
 
 
+def item_unity3d_reference_roles(item: CsvItem) -> list[tuple[str, str]]:
+    """Return distinct MainAB/TexAB references with their CSV roles."""
+    references: list[tuple[str, str]] = []
+    main_path = normalize_abdata_path(item.main_manifest, item.main_ab)
+    if main_path and is_unity3d_path(main_path):
+        references.append((main_path, "main"))
+
+    tex_path = normalize_abdata_path("abdata", item.tex_ab)
+    if tex_path and is_unity3d_path(tex_path):
+        if not main_path or tex_path.casefold() != main_path.casefold():
+            references.append((tex_path, "tex"))
+    return references
+
+
+def is_common_game_chara_path(reference: str) -> bool:
+    """Whether a game resource path is under the shared chara/00..60 area."""
+    normalized = normalize_zip_path(reference).casefold()
+    if normalized.startswith("abdata/"):
+        normalized = normalized.removeprefix("abdata/")
+    parts = normalized.split("/")
+    if len(parts) < 3 or parts[0] != "chara":
+        return False
+    slot = parts[1]
+    return len(slot) == 2 and slot.isdigit() and 0 <= int(slot) <= 60
+
+
+def unity3d_provider_lookup_keys(reference: str) -> set[str]:
+    normalized = normalize_abdata_path("abdata", reference)
+    keys = set(zip_path_match_keys(normalized))
+    if is_unity3d_path(normalized):
+        keys.update(zip_path_match_keys(unity3d_directory_fallback_path(normalized)))
+    return keys
+
+
+def find_other_unity3d_providers(
+    provider_index: dict[str, list[Unity3dProvider]] | None,
+    reference: str,
+    current_zipmod_path: str = "",
+) -> list[Unity3dProvider]:
+    if not provider_index:
+        return []
+    current_key = str(Path(current_zipmod_path).resolve()).casefold() if current_zipmod_path else ""
+    providers: list[Unity3dProvider] = []
+    seen_paths: set[str] = set()
+    for key in unity3d_provider_lookup_keys(reference):
+        for provider in provider_index.get(key, []):
+            provider_key = str(Path(provider.zipmod_path).resolve()).casefold()
+            if provider_key == current_key or provider_key in seen_paths:
+                continue
+            seen_paths.add(provider_key)
+            providers.append(provider)
+    return sorted(providers, key=lambda provider: provider.zipmod_path.casefold())
+
+
 def item_error_unity3d_reference_paths(item: CsvItem) -> list[str]:
-    return main_unity3d_reference_paths(item)
+    return [path for path, _role in item_unity3d_reference_roles(item)]
 
 
 def find_zip_resource_image(
@@ -1063,57 +1507,89 @@ def inspect_unity3d_status(
     zf: zipfile.ZipFile,
     item: CsvItem,
     index: ZipMemberIndex | None = None,
+    provider_index: dict[str, list[Unity3dProvider]] | None = None,
+    current_zipmod_path: str = "",
 ) -> Unity3dStatus:
     if item.parse_status != "ok":
         return Unity3dStatus("", "")
 
-    references = item_error_unity3d_reference_paths(item)
+    reference_roles = item_unity3d_reference_roles(item)
+    references = [path for path, _role in reference_roles]
     if not references:
         if find_zip_resource_image(zf, item, index) is not None:
             return Unity3dStatus("in_mod", "")
         game_resource = resolve_game_resource_image(game_dir, item)
         if game_resource is not None:
-            return Unity3dStatus("in_game", f"found in game abdata: {game_resource}")
+            return Unity3dStatus("not_in_mod", f"found in game abdata: {game_resource}", "game_abdata")
         return Unity3dStatus("missing", "no .unity3d path referenced by MainAB")
 
     found_in_game: list[str] = []
+    found_in_other_mod: list[str] = []
     missing: list[str] = []
-    for reference in references:
+    for reference, role in reference_roles:
         if find_zip_unity3d_or_directory(zf, reference, index) is not None:
             continue
-        if resolve_game_unity3d_or_directory(game_dir, reference) is not None:
+        game_resource = resolve_game_unity3d_or_directory(game_dir, reference)
+        if game_resource is not None:
+            if is_common_game_chara_path(reference):
+                continue
             found_in_game.append(reference)
+        providers = find_other_unity3d_providers(
+            provider_index,
+            reference,
+            current_zipmod_path,
+        )
+        if providers:
+            found_in_other_mod.append(reference)
             continue
-        missing.append(reference)
+        if game_resource is not None:
+            continue
+        if role == "main":
+            missing.append(reference)
 
     if missing:
         return Unity3dStatus("missing", "missing: " + ", ".join(missing))
+    if found_in_other_mod:
+        return Unity3dStatus(
+            "not_in_mod",
+            "provided by other zipmod: " + ", ".join(found_in_other_mod),
+            "other_zipmod",
+        )
     if found_in_game:
-        return Unity3dStatus("in_game", "found in game abdata: " + ", ".join(found_in_game))
+        return Unity3dStatus(
+            "not_in_mod",
+            "found in game abdata: " + ", ".join(found_in_game),
+            "game_abdata",
+        )
     return Unity3dStatus("in_mod", "")
 
 
 def summarize_zipmod_unity3d_status(conn: sqlite3.Connection, zipmod_id: int) -> dict[str, int | str]:
-    counts = {"in_mod": 0, "in_game": 0, "missing": 0, "error": 0}
+    counts = {"in_mod": 0, "not_in_mod": 0, "in_game": 0, "other_mod": 0, "missing": 0, "error": 0}
     for row in conn.execute(
         """
-        SELECT unity3d_status, COUNT(*) AS count
+        SELECT unity3d_status, unity3d_source, COUNT(*) AS count
         FROM mod_items
         WHERE zipmod_id = ? AND unity3d_status != ''
-        GROUP BY unity3d_status
+        GROUP BY unity3d_status, unity3d_source
         """,
         (zipmod_id,),
     ):
         status = str(row["unity3d_status"])
         if status in counts:
-            counts[status] = int(row["count"])
+            counts[status] += int(row["count"])
+        if status == "not_in_mod":
+            if str(row["unity3d_source"] or "") == "other_zipmod":
+                counts["other_mod"] += int(row["count"])
+            else:
+                counts["in_game"] += int(row["count"])
 
     if counts["error"]:
         status = "error"
     elif counts["missing"]:
         status = "missing"
-    elif counts["in_game"]:
-        status = "in_game"
+    elif counts["not_in_mod"]:
+        status = "not_in_mod"
     elif counts["in_mod"]:
         status = "in_mod"
     else:
@@ -1136,7 +1612,9 @@ def summarize_zipmod_unity3d_status(conn: sqlite3.Connection, zipmod_id: int) ->
     return {
         "status": status,
         "in_mod": counts["in_mod"],
+        "not_in_mod": counts["not_in_mod"],
         "in_game": counts["in_game"],
+        "other_mod": counts["other_mod"],
         "missing": counts["missing"],
         "error": error,
     }
@@ -1162,16 +1640,17 @@ def zipmod_unity3d_diagnostics(
         issues_by_path: dict[str, dict] = {}
         item_rows = conn.execute(
             """
-            SELECT id, item_id, name, kind, csv_path, main_manifest, main_ab, main_data,
-                   thumb_ab, thumb_tex, unity3d_status, unity3d_error
+               SELECT id, item_id, name, kind, csv_path, main_manifest, main_ab, main_data,
+                   tex_ab, thumb_ab, thumb_tex, unity3d_status, unity3d_source, unity3d_error
             FROM mod_items
-            WHERE zipmod_id = ? AND unity3d_status IN ('in_game', 'missing', 'error')
+            WHERE zipmod_id = ? AND unity3d_status IN ('not_in_mod', 'in_game', 'missing', 'error')
             ORDER BY csv_path, item_id
             """,
             (zipmod_id,),
         ).fetchall()
 
         zipmod_path = Path(zipmod["file_path"])
+        provider_index = load_unity3d_provider_index(conn)
         try:
             with zipfile.ZipFile(zipmod_path, "r") as zf:
                 zip_index = ZipMemberIndex(zf)
@@ -1184,29 +1663,51 @@ def zipmod_unity3d_diagnostics(
                         main_manifest=item["main_manifest"],
                         main_ab=item["main_ab"],
                         main_data=item["main_data"],
+                        tex_ab=item["tex_ab"],
                         thumb_ab=item["thumb_ab"],
                         thumb_tex=item["thumb_tex"],
                         parse_status="ok",
                         parse_error="",
                     )
                     resolved_status = (
-                        Unity3dStatus(str(item["unity3d_status"] or ""), str(item["unity3d_error"] or ""))
+                        Unity3dStatus(
+                            str(item["unity3d_status"] or ""),
+                            str(item["unity3d_error"] or ""),
+                            str(item["unity3d_source"] or ""),
+                        )
                         if item["unity3d_status"] == "error"
-                        else inspect_unity3d_status(game_dir, zf, csv_item, zip_index)
+                        else inspect_unity3d_status(
+                            game_dir,
+                            zf,
+                            csv_item,
+                            zip_index,
+                            provider_index,
+                            str(zipmod_path),
+                        )
                     )
-                    if resolved_status.status != item["unity3d_status"]:
+                    if (
+                        resolved_status.status != item["unity3d_status"]
+                        or resolved_status.source != str(item["unity3d_source"] or "")
+                        or resolved_status.error != str(item["unity3d_error"] or "")
+                    ):
                         conn.execute(
                             """
                             UPDATE mod_items
-                            SET unity3d_status = ?, unity3d_error = ?, updated_at = ?
+                            SET unity3d_status = ?, unity3d_source = ?, unity3d_error = ?, updated_at = ?
                             WHERE id = ?
                             """,
-                            (resolved_status.status, resolved_status.error, utc_now(), item["id"]),
+                            (
+                                resolved_status.status,
+                                resolved_status.source,
+                                resolved_status.error,
+                                utc_now(),
+                                item["id"],
+                            ),
                         )
                     if resolved_status.status == "in_mod":
                         continue
                     if resolved_status.status == "error":
-                        references = item_error_unity3d_reference_paths(csv_item) or [item["main_ab"] or "__unity3d_error__"]
+                        references = main_unity3d_reference_paths(csv_item) or [item["main_ab"] or "__unity3d_error__"]
                         for reference in references:
                             issue = issues_by_path.setdefault(
                                 reference,
@@ -1234,25 +1735,71 @@ def zipmod_unity3d_diagnostics(
                                     }
                                 )
                         continue
-                    for reference in item_error_unity3d_reference_paths(csv_item):
+                    for reference, role in item_unity3d_reference_roles(csv_item):
                         if find_zip_unity3d_or_directory(zf, reference) is not None:
                             continue
                         game_path = resolve_game_abdata_path(game_dir, reference)
-                        status = "in_game" if resolve_game_unity3d_or_directory(game_dir, reference) is not None else "missing"
+                        game_resource = resolve_game_unity3d_or_directory(game_dir, reference)
+                        providers = find_other_unity3d_providers(
+                            provider_index,
+                            reference,
+                            str(zipmod_path),
+                        )
+                        if game_resource is None and not providers:
+                            if role == "tex":
+                                continue
+                            status = "missing"
+                        else:
+                            if is_common_game_chara_path(reference):
+                                continue
+                            status = "not_in_mod"
+                        effective_status = "not_in_mod" if providers or game_resource is not None else status
+                        source = (
+                            "other_zipmod"
+                            if providers
+                            else "game_abdata"
+                            if game_resource is not None
+                            else ""
+                        )
                         issue = issues_by_path.setdefault(
                             reference,
                             {
                                 "type": "unity3d",
-                                "status": status,
+                                "status": "missing" if effective_status == "missing" else "not_in_mod",
                                 "path": reference,
-                                "game_path": str(game_path),
+                                "game_path": str(game_path) if game_resource is not None else "",
+                                "source": source,
+                                "other_zipmods": [],
                                 "affected_count": 0,
                                 "affected_items": [],
                                 "solution": "",
                                 "repair_action": "",
                             },
                         )
-                        issue["status"] = "missing" if issue["status"] == "missing" or status == "missing" else "in_game"
+                        issue["status"] = (
+                            "missing"
+                            if issue["status"] == "missing" or effective_status == "missing"
+                            else "not_in_mod"
+                        )
+                        if providers:
+                            issue["source"] = "other_zipmod"
+                            issue["game_path"] = str(game_path) if game_resource is not None else issue["game_path"]
+                            existing_provider_paths = {
+                                str(provider["path"])
+                                for provider in issue["other_zipmods"]
+                            }
+                            for provider in providers:
+                                if provider.zipmod_path in existing_provider_paths:
+                                    continue
+                                issue["other_zipmods"].append(
+                                    {
+                                        "path": provider.zipmod_path,
+                                        "relative_path": provider.relative_path,
+                                        "guid": provider.guid,
+                                    }
+                                )
+                        elif game_resource is not None and issue["source"] != "other_zipmod":
+                            issue["source"] = "game_abdata"
                         issue["affected_count"] += 1
                         if len(issue["affected_items"]) < 8:
                             issue["affected_items"].append(
@@ -1271,8 +1818,10 @@ def zipmod_unity3d_diagnostics(
             """
             UPDATE zipmods
             SET unity3d_status = ?,
+                unity3d_not_in_mod_count = ?,
                 unity3d_in_mod_count = ?,
                 unity3d_in_game_count = ?,
+                unity3d_other_mod_count = ?,
                 unity3d_missing_count = ?,
                 unity3d_error = ?,
                 updated_at = ?
@@ -1280,8 +1829,10 @@ def zipmod_unity3d_diagnostics(
             """,
             (
                 summary["status"],
+                summary["not_in_mod"],
                 summary["in_mod"],
                 summary["in_game"],
+                summary["other_mod"],
                 summary["missing"],
                 summary["error"],
                 utc_now(),
@@ -1296,9 +1847,13 @@ def zipmod_unity3d_diagnostics(
             if issue["status"] == "error":
                 issue["solution"] = "This unity3d file exists in the zipmod, but UnityPy could not parse usable Unity resources from it. Reinstall or replace the source mod, then rebuild the database."
                 issue["repair_action"] = ""
-            elif issue["status"] == "in_game":
-                issue["solution"] = "Move this unity3d file from game abdata into the zipmod at the CSV-referenced path."
-                issue["repair_action"] = "copy_into_zipmod"
+            elif issue["status"] == "not_in_mod":
+                if issue.get("source") == "other_zipmod":
+                    issue["solution"] = "This unity3d file is provided by another zipmod. The current zipmod does not contain its own copy."
+                    issue["repair_action"] = ""
+                else:
+                    issue["solution"] = "Move this unity3d file from game abdata into the zipmod at the CSV-referenced path."
+                    issue["repair_action"] = "copy_into_zipmod"
             else:
                 issue["solution"] = "Find or reinstall the missing unity3d file, then rebuild the database."
                 issue["repair_action"] = ""
@@ -1493,7 +2048,19 @@ def cleanup_duplicate_zipmods(
             dup_path = Path(row["file_path"]).resolve()
             if dup_path.is_file():
                 try:
-                    dup_path.unlink()
+                    trash_record = move_to_trash(
+                        dup_path,
+                        "mods",
+                        name=str(row["file_name"] or dup_path.stem),
+                        metadata={
+                            "game_dir": resolve_game_dir_from_zipmod(
+                                str(dup_path), str(row["relative_path"] or "")
+                            ),
+                            "relative_path": str(row["relative_path"] or ""),
+                            "guid": str(zipmod["guid"] or ""),
+                            "reason": "duplicate_cleanup",
+                        },
+                    )
                     removed.append(str(dup_path))
                     cleared_ids.append(duplicate_id)
                     freed_bytes += int(row["file_size"] or 0)
@@ -1583,7 +2150,19 @@ def delete_primary_and_promote_duplicate(
         primary_path = Path(str(zipmod["file_path"])).resolve()
         removed_primary_file = False
         if primary_path.is_file():
-            primary_path.unlink()
+            move_to_trash(
+                primary_path,
+                "mods",
+                name=str(zipmod["name"] or zipmod["file_name"] or primary_path.stem),
+                metadata={
+                    "game_dir": resolve_game_dir_from_zipmod(
+                        str(primary_path), str(zipmod["relative_path"] or "")
+                    ),
+                    "relative_path": str(zipmod["relative_path"] or ""),
+                    "guid": str(zipmod["guid"] or ""),
+                    "reason": "promote_duplicate",
+                },
+            )
             removed_primary_file = True
 
         now = utc_now()
@@ -1722,7 +2301,7 @@ def merge_duplicate_zipmod(
                 csv_bytes = duplicate_zf.read(duplicate_csv_member)
                 encoding, text = decode_csv_bytes_with_encoding(csv_bytes)
                 del encoding
-                rows = list(csv.reader(io.StringIO(text)))
+                rows = list(csv.reader(io.StringIO(text, newline="")))
                 header_index = find_header_index(rows)
                 if header_index is None:
                     continue
@@ -1775,7 +2354,19 @@ def merge_duplicate_zipmod(
 
         rewrite_zip_members(primary_path, replacements)
 
-        duplicate_path.unlink()
+        move_to_trash(
+            duplicate_path,
+            "mods",
+            name=str(duplicate["file_name"] or duplicate_path.stem),
+            metadata={
+                "game_dir": resolve_game_dir_from_zipmod(
+                    str(duplicate_path), str(duplicate["relative_path"] or "")
+                ),
+                "relative_path": str(duplicate["relative_path"] or ""),
+                "guid": guid,
+                "reason": "merge_duplicate",
+            },
+        )
         now = utc_now()
         stat = primary_path.stat()
         candidate = ZipmodCandidate(
@@ -2217,8 +2808,22 @@ def delete_zipmod(
         zipmod_path = Path(zipmod["file_path"]).resolve()
         removed = False
         if zipmod_path.is_file():
-            zipmod_path.unlink()
+            trash_record = move_to_trash(
+                zipmod_path,
+                "mods",
+                name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
+                metadata={
+                    "game_dir": resolve_game_dir_from_zipmod(
+                        str(zipmod_path), str(zipmod["relative_path"] or "")
+                    ),
+                    "relative_path": str(zipmod["relative_path"] or ""),
+                    "guid": str(zipmod["guid"] or ""),
+                    "reason": "delete_zipmod",
+                },
+            )
             removed = True
+        else:
+            trash_record = None
 
         with conn:
             conn.execute("DELETE FROM mod_items WHERE zipmod_id = ?", (int(zipmod_id),))
@@ -2231,6 +2836,7 @@ def delete_zipmod(
             "removed_file": removed,
             "file_path": str(zipmod_path),
             "guid": zipmod["guid"],
+            "trash_id": str((trash_record or {}).get("id") or ""),
         }
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
@@ -2262,7 +2868,7 @@ def repair_zipmod_unity3d_from_game(
             return diagnostics
         repairable = [
             issue for issue in diagnostics["issues"]
-            if issue["status"] == "in_game" and issue["repair_action"] == "copy_into_zipmod"
+            if issue["status"] == "not_in_mod" and issue["repair_action"] == "copy_into_zipmod"
         ]
         wanted = normalize_zip_path(reference_path)
         if wanted:
@@ -2380,7 +2986,7 @@ def bulk_repair_zipmods_unity3d_from_game(
             continue
         game_dir = resolve_game_dir_from_zipmod(row["file_path"], row["relative_path"])
         for issue in diagnostics.get("issues") or []:
-            if issue.get("status") != "in_game" or issue.get("repair_action") != "copy_into_zipmod":
+            if issue.get("status") != "not_in_mod" or issue.get("repair_action") != "copy_into_zipmod":
                 continue
             source = resolve_game_abdata_path(game_dir, normalize_zip_path(str(issue.get("path") or "")))
             source_key = str(source.resolve()).casefold()
@@ -2526,7 +3132,7 @@ def rewrite_csv_thumbnail_reference(
     thumb_tex: str,
 ) -> bytes:
     encoding, text = decode_csv_bytes_with_encoding(csv_bytes)
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(csv.reader(io.StringIO(text, newline="")))
     header_index = find_header_index(rows)
     if header_index is None:
         raise ValueError("CSV header not found")
@@ -2571,7 +3177,7 @@ def rewrite_csv_without_item_row(
     target_item_id: str,
 ) -> bytes:
     encoding, text = decode_csv_bytes_with_encoding(csv_bytes)
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(csv.reader(io.StringIO(text, newline="")))
     header_index = find_header_index(rows)
     if header_index is None:
         raise ValueError("CSV header not found")
@@ -2606,7 +3212,7 @@ def append_csv_item_rows(
     rows_to_append: list[list[str]],
 ) -> bytes:
     encoding, text = decode_csv_bytes_with_encoding(csv_bytes)
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(csv.reader(io.StringIO(text, newline="")))
     header_index = find_header_index(rows)
     if header_index is None:
         raise ValueError("CSV header not found")
@@ -2693,7 +3299,20 @@ def delete_mod_item(
             (int(item["zipmod_id"]),),
         ).fetchone()[0])
         if item_count <= 1:
-            zipmod_path.unlink()
+            trash_record = move_to_trash(
+                zipmod_path,
+                "mods",
+                name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
+                metadata={
+                    "game_dir": resolve_game_dir_from_zipmod(
+                        str(zipmod_path), str(zipmod["relative_path"] or "")
+                    ),
+                    "relative_path": str(zipmod["relative_path"] or ""),
+                    "guid": str(zipmod["guid"] or ""),
+                    "reason": "delete_last_item",
+                    "deleted_item_id": int(mod_item_id),
+                },
+            )
             with conn:
                 conn.execute("DELETE FROM mod_items WHERE zipmod_id = ?", (int(item["zipmod_id"]),))
                 conn.execute("DELETE FROM duplicate_zipmods WHERE guid = ?", (zipmod["guid"],))
@@ -2704,6 +3323,7 @@ def delete_mod_item(
                 "deleted_item_id": int(mod_item_id),
                 "deleted_zipmod": True,
                 "deleted_zipmod_path": str(zipmod_path),
+                "trash_id": str(trash_record.get("id") or ""),
                 "removed_unity3d": [],
             }
 
@@ -2716,6 +3336,7 @@ def delete_mod_item(
             main_manifest=str(item["main_manifest"] or ""),
             main_ab=str(item["main_ab"] or ""),
             main_data=str(item["main_data"] or ""),
+            tex_ab=str(item["tex_ab"] or ""),
             thumb_ab=str(item["thumb_ab"] or ""),
             thumb_tex=str(item["thumb_tex"] or ""),
             parse_status=str(item["parse_status"] or "ok"),
@@ -3599,3 +4220,154 @@ def extract_thumbnail_from_zipmod(
             return extract_from_zip(opened_zf, ZipMemberIndex(opened_zf))
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
         return finish(ThumbnailResult("", "error", str(exc)), "zip_error")
+
+
+_THUMBNAIL_RECOVERY_LOCK = threading.Lock()
+
+
+def ensure_mod_item_thumbnail(
+    mod_item_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    thumbnail_dir: Path = DEFAULT_THUMBNAIL_DIR,
+) -> dict:
+    """Resolve or lazily rebuild one item's thumbnail cache from its zipmod."""
+    resolved_db = db_path.resolve()
+    if not resolved_db.exists() or not resolved_db.is_file():
+        return {"ok": False, "error": "Database not found"}
+
+    from star_manager.services.mod_database_queries import resolve_thumbnail_cache_path
+
+    conn = sqlite3.connect(resolved_db)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        item = conn.execute(
+            "SELECT * FROM mod_items WHERE id = ?",
+            (int(mod_item_id),),
+        ).fetchone()
+        if item is None:
+            return {"ok": False, "error": f"Item not found: {mod_item_id}"}
+        if str(item["parse_status"] or "") != "ok":
+            return {"ok": False, "error": "Item parsing is not ready"}
+        if not str(item["thumb_tex"] or "").strip():
+            return {"ok": False, "error": "Item has no thumbnail texture reference"}
+
+        resolved_cache = resolve_thumbnail_cache_path(
+            str(item["thumbnail_cache_path"] or ""),
+            thumbnail_dir,
+        )
+        if resolved_cache is not None:
+            cache_path = str(resolved_cache)
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE mod_items
+                    SET thumbnail_cache_path = ?, thumbnail_status = 'ready',
+                        thumbnail_error = '', updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (cache_path, utc_now(), int(mod_item_id)),
+                )
+            return {
+                "ok": True,
+                "item_id": int(mod_item_id),
+                "thumbnail_cache_path": cache_path,
+                "thumbnail_status": "ready",
+                "thumbnail_url": f"/mods/thumbnails?path={quote(cache_path)}",
+            }
+
+        zipmod = conn.execute(
+            "SELECT * FROM zipmods WHERE id = ?",
+            (int(item["zipmod_id"]),),
+        ).fetchone()
+        if zipmod is None:
+            return {"ok": False, "error": f"Zipmod not found: {item['zipmod_id']}"}
+
+        zipmod_path = Path(str(zipmod["file_path"] or "")).resolve()
+        if not zipmod_path.is_file():
+            return {"ok": False, "error": "Zipmod file not found"}
+
+        stat = zipmod_path.stat()
+        candidate = ZipmodCandidate(
+            manifest=ManifestData(
+                str(zipmod["guid"] or item["zipmod_guid"] or ""),
+                str(zipmod["name"] or ""),
+                str(zipmod["version"] or ""),
+                str(zipmod["author"] or ""),
+                str(zipmod["scan_status"] or "ok"),
+                str(zipmod["scan_error"] or ""),
+            ),
+            path=zipmod_path,
+            relative_path=str(zipmod["relative_path"] or ""),
+            file_size=stat.st_size,
+            modified_at=timestamp_to_utc(stat.st_mtime),
+        )
+        csv_item = CsvItem(
+            csv_path=str(item["csv_path"] or ""),
+            item_id=str(item["item_id"] or ""),
+            kind=str(item["kind"] or ""),
+            name=str(item["name"] or ""),
+            main_manifest=str(item["main_manifest"] or ""),
+            main_ab=str(item["main_ab"] or ""),
+            main_data=str(item["main_data"] or ""),
+            tex_ab=str(item["tex_ab"] or ""),
+            thumb_ab=str(item["thumb_ab"] or ""),
+            thumb_tex=str(item["thumb_tex"] or ""),
+            parse_status=str(item["parse_status"] or ""),
+            parse_error=str(item["parse_error"] or ""),
+        )
+        game_dir = resolve_game_dir_from_zipmod(
+            str(zipmod["file_path"] or ""),
+            str(zipmod["relative_path"] or ""),
+        )
+
+        with _THUMBNAIL_RECOVERY_LOCK:
+            # Another visible row may share the same cache key and finish while
+            # this request is waiting for the extraction lock.
+            resolved_cache = resolve_thumbnail_cache_path(
+                str(item["thumbnail_cache_path"] or ""),
+                thumbnail_dir,
+            )
+            if resolved_cache is None:
+                result = extract_thumbnail_from_zipmod(
+                    game_dir,
+                    candidate,
+                    csv_item,
+                    thumbnail_dir,
+                )
+            else:
+                result = ThumbnailResult(str(resolved_cache), "ready", "")
+
+        cache_path = str(result.cache_path or "")
+        if result.status == "ready" and not Path(cache_path).is_file():
+            result = ThumbnailResult("", "error", "thumbnail cache was not written")
+
+        with conn:
+            conn.execute(
+                """
+                UPDATE mod_items
+                SET thumbnail_cache_path = ?, thumbnail_status = ?,
+                    thumbnail_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (cache_path, result.status, result.error, utc_now(), int(mod_item_id)),
+            )
+
+        if result.status != "ready" or not cache_path:
+            return {
+                "ok": False,
+                "item_id": int(mod_item_id),
+                "thumbnail_status": result.status,
+                "thumbnail_error": result.error,
+            }
+        return {
+            "ok": True,
+            "item_id": int(mod_item_id),
+            "thumbnail_cache_path": cache_path,
+            "thumbnail_status": result.status,
+            "thumbnail_url": f"/mods/thumbnails?path={quote(cache_path)}",
+        }
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        conn.close()

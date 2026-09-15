@@ -1,126 +1,122 @@
-# Star_Manager
+# Star_Manager 页面概览（截图顺序）
 
-Star_Manager is a Windows desktop resource manager for local HS2 / AIS game directories. It helps players and modpack maintainers browse character cards, inspect zipmods, find missing resources, clean duplicate packages, and organize large local mod libraries.
+本文根据 `C:\Users\yukilat\Pictures\Screenshots\` 文件夹中 2026 年 9 月 15 日的 9 张截图，按文件名中的时间顺序，对 Star_Manager 当前可见页面做第一版粗略介绍。它面向第一次了解项目的用户，重点说明每个页面“看起来是什么”和“主要用来做什么”；详细的实现边界、接口和文件规则仍以各专题文档为准。
 
-The app is built with Electron, Vue, and a local Python backend. It never treats its SQLite database as the source of truth: your game directory, zipmod archives, `manifest.xml`, CSV files, `.unity3d` resources, and character-card PNG files remain the real data.
+> 截图中的游戏目录、数量、任务状态、插件版本和筛选条件都属于当时本机的示例状态，不代表所有用户都会看到相同数据。截图内的按钮、标签和提示文字是页面内容，不是本文对读者的额外操作指令。
 
-## What It Does
+## 统一的应用外壳
 
-- Builds a local searchable index for `mods/**/*.zipmod` and `UserData/chara`.
-- Browses zipmods by author, status, usage, path, GUID, version, scan result, and item count.
-- Browses parsed mod items by name, Kind, author, thumbnail state, source zipmod, and character-card usage.
-- Shows AIS/HS2 character-card folders and card previews.
-- Parses UniversalAutoResolver dependency records from character-card PNG payloads.
-- Links card dependencies back to indexed zipmods and mod items when possible.
-- Diagnoses missing or external `.unity3d` files, thumbnail issues, manifest errors, read failures, stale records, and duplicate GUIDs.
-- Repairs selected zipmod Unity3D issues, edits manifest metadata, imports/exports item thumbnails, and removes selected broken items or packages.
-- Generates on-demand item GLB/static FBX previews, including a reusable mannequin and Three.js viewer.
-- Manages character-card profiles, covers, favorites, ratings, tags, navi slots, coordinate-card exports, and portable dependency packages.
-- Scans BepInEx plugin metadata without executing DLLs and caches results by file fingerprint.
-- Runs batch workflows for database rebuilds, external resource import, zipmod export/organization, duplicate cleanup, author updates, shared thumbnail application, and filtered error-item deletion.
-- Launches `HoneySelect2.exe`, `StudioNEOV2.exe`, and `HoneySelect2VR.exe` from the desktop shell.
+大多数页面共享同一套桌面应用外壳：左侧是 Star_Manager 品牌和主导航，顶部通常显示当前 HS2 目录、目录有效性、Backend 状态、任务进度和“重建数据库”入口。工作区使用半透明玻璃和背景壁纸，页面内容根据任务分成浏览器、列表、详情面板和工具区。
 
-## Main Screens
+卡片管理、插件管理、工作台、运行日志、回收站和设置会根据页面职责隐藏或简化全局顶部栏；这不是功能缺失，而是页面布局的特例。应用外壳和顶部状态详见[主布局](frontend-ui/main-layout.md)。
 
-- **Start**: choose an HS2 directory, keep common paths, and launch the game or studio.
-- **Overview**: check library health, database status, suggested actions, and recent tasks.
-- **Characters**: browse `UserData/chara`, preview AIS cards, and inspect parsed dependency status.
-- **Mods**: switch between item browsing and zipmod browsing, filter large libraries, review details, and run repairs.
-- **Plugins**: inspect BepInEx plugin identity, version, dependencies, process restrictions, and diagnostics.
-- **Workbench**: extract Sims 4 Package LOD0 meshes and RLE2 textures, optionally bake an HS2-aligned T-Pose with Blender.
-- **Logs**: follow task progress and backend messages.
-- **Settings**: configure startup checks, local achievements, export defaults, favorite-card themes, and Blender.
+## 01. 开始游戏
 
-## How It Works
+**截图：** `屏幕截图 2026-09-15 181937.png`
+
+这是项目的入口页，用于先连接本地 HS2 游戏目录，再进行启动和资源管理。截图中顶部已经选择了游戏目录，界面显示“目录有效”和“Backend ready”，旁边可以观察当前等待任务并触发数据库重建。
+
+页面中部提供“开始游戏”“开始工作室”“开始 VR”等启动入口；左侧“游戏配置”区域可以查看语言、画质、显示器、分辨率和全屏设置；右侧“目录入口”可以快捷打开游戏主目录、`UserData`、工作室场景、截图以及男女角色卡目录。
+
+简单理解：用户第一次使用时先在这里选择 HS2 目录，确认状态正常，再启动游戏或进入其它资源管理页面。
+
+## 02. 总览
+
+**截图：** `屏幕截图 2026-09-15 181944.png`
+
+总览页是资源库的仪表盘。顶部三张统计卡概括人物卡、模组和物品数量；截图中的示例数量分别为 3,117、10,630 和 40,839。
+
+下方的“成就陈列柜”展示收藏、扫描、整理和修复等本地进度；右侧“建议操作”提供导入外部模组、一键整理和重建数据库等常用入口；“最近任务”用于确认目录检查和数据库任务是否完成。
+
+简单理解：这里用于快速判断资源库规模、索引是否健康，以及下一步应该做什么。统计数字来自本地索引，首次扫描或资源发生变化时可能会更新。
+
+## 03. 卡片管理：人物卡浏览器
+
+**截图：** `屏幕截图 2026-09-15 182022.png`
+
+卡片管理页用于浏览本地人物卡、服装卡和场景卡。截图展示的是人物卡浏览器：左侧导航的卡片入口旁有三种卡片类型切换按钮，中间是当前目录中的卡片网格，顶部提供多选、当前目录/人物卡库切换、标签搜索和卡片范围筛选。
+
+右侧“卡片详情”面板会随选中项变化，截图中能看到人物卡预览、收藏星标、评分、标签和人物参数。用户可以先通过目录和搜索找到卡片，再查看详情、依赖与工具操作。
+
+简单理解：这是角色资源的视觉浏览器，适合按文件夹、标签、收藏和预览图整理人物卡。人物卡、服装卡和场景卡共用卡片管理入口，但数据目录和详情内容有所区别，详见[角色卡库布局](frontend-ui/character-cards-layout.md)。
+
+## 04. 模组管理：物品浏览
+
+**截图：** `屏幕截图 2026-09-15 182213.png`
+
+这是模组管理中的“物品浏览”视图。截图顶部显示了女性服饰相关的 Kind 分类；中间区域以网格方式排列大量物品缩略图，并在每个缩略图下显示物品名称或内部标识，例如 `B001_1`、`B002_base` 等。
+
+上方工具栏提供返回分类、Kind 筛选和服饰部位切换；主筛选区支持按物品名称或模组 GUID 搜索，并按作者、来源和状态过滤。右侧是物品详情面板，未选中对象时显示“请选择一个对象”；选中后可继续查看来源、诊断、缩略图和模型相关信息。
+
+简单理解：物品浏览适合从“具体服装/配饰/身体部件”角度查找资源；它和模组浏览的区别是，前者关注包内单个物品，后者关注整个 zipmod 包。
+
+## 05. 插件管理
+
+**截图：** `屏幕截图 2026-09-15 182304.png`
+
+插件管理页用于查看游戏目录中的 BepInEx 插件库存。截图左侧列表按行展示插件名称、GUID、版本、类型和启用状态；顶部搜索框支持按插件名称、GUID 或 DLL 文件名查找，右上角可以打开 BepInEx 目录。
+
+选中插件后，右侧详情区会展示插件说明、插件 GUID、版本、依赖和适用进程等信息。截图示例中的插件状态为“已启用”，底部还显示了启用、禁用和元数据错误等汇总信息。
+
+简单理解：这里是插件清单和诊断入口，用来确认插件是否存在、版本是多少、是否启用以及是否声明了依赖。Star_Manager 读取插件元数据，不执行插件 DLL；单个启用/禁用属于文件名级别的管理操作，通常需要重启游戏才生效。
+
+## 06. 模组管理：模组浏览与详情
+
+**截图：** `屏幕截图 2026-09-15 182502.png`
+
+这是模组管理中的“模组浏览”视图，与第 04 张图的物品浏览相对应。顶部统计区展示 zipmod 数量、物品数量、警告、错误和最近索引时间；截图示例中选中了 `Pantyhose` 模组。
+
+中间区域是模组表格，每行代表一个 zipmod，列中包含状态、名称、作者、版本、物品数和包标识；上方可以按作者和状态筛选，也可以切换已使用、未使用或全部。右侧详情面板显示模组基本信息，并通过“详情”“物品”“诊断”页签分别查看包信息、包内物品和异常诊断。
+
+简单理解：模组浏览用于管理“一个完整的 zipmod 包”，适合检查包状态、查看包内内容和定位问题；需要操作单个物品时，再切换到第 04 张图所示的物品浏览。
+
+## 07. 回收站
+
+**截图：** `屏幕截图 2026-09-15 183324.png`
+
+回收站用于承接人物卡和模组的可恢复删除。截图中回收站为空，因此中央显示空状态提示；上方提供“全部”“人物卡”“模组”分类，并显示各分类数量；右上角有刷新和清空回收站按钮。
+
+当资源被放入回收站后，用户可以在这里按类型查看条目、恢复单项，或执行永久删除/清空操作。回收站页面不负责重新扫描所有资源，模组恢复后的索引修复会遵循现有的回收站和数据库流程。
+
+简单理解：这里是删除操作的缓冲区。普通删除先进入运行时回收站，只有恢复或永久删除等明确操作才会改变后续结果，详见[回收站说明](trash-recycle-bin.md)。
+
+## 08. 设置
+
+**截图：** `屏幕截图 2026-09-15 183331.png`
+
+设置页集中管理 Star_Manager 自身的偏好。左侧是设置分类导航，截图当前显示“启动与检查”“应用壁纸”“收藏主题”和“本地成就”等内容，右侧按卡片区块展示具体选项。
+
+截图中可以选择下次启动页面、控制启动时是否检查资源变化；应用壁纸区域支持选择图片或 MP4 并恢复默认；收藏主题区域提供多套人物卡视觉主题；本地成就区域可以启用成就陈列柜和解锁通知。导出位置、工具和 Blender 等设置位于同一页面的其它分类或滚动区域。
+
+简单理解：设置页调整的是管理器的长期偏好，例如启动行为、壁纸、收藏卡外观、成就和导出目录，不直接替代具体资源页面中的单次操作。
+
+## 09. 工作台：物品工程详情
+
+**截图：** `屏幕截图 2026-09-15 183352.png`
+
+这是工作台中的单个物品工程页。顶部工具栏显示当前工程 `T065`，并提供新建项目、打包模组、`Package → FBX`、物品工具和工程内搜索等入口。
+
+页面标题为 `T065_base`，上方标记了 CSV 来源并提供打开 CSV 目录的按钮。左侧“模型”区域展示 `MainAB` 和 `MainData` 的关联；右侧“贴图”区域列出 `MainTex`、`ColorMaskTex` 等纹理字段；下方左侧是 3D 物品预览，右侧“工程资源”列出 FBX 和多张贴图资源。
+
+简单理解：工作台面向模组制作和资源整理，不只是查看数据库。用户可以在工程中维护 CSV 物品字段、选择 Unity3D 模板、预处理 `MainData`，并把模型/贴图等资源写入工程；工作台也保留 Sims 4 Package → FBX 工具入口，详见[工作台文档](frontend-ui/workbench-layout.md)。
+
+## 按截图顺序快速串起来
 
 ```text
-Vue renderer
-  -> Electron preload bridge
-  -> local Python HTTP backend
-  -> zipmod/card scanners
-  -> SQLite runtime index and thumbnail/card-preview caches
+开始游戏
+  → 总览确认索引和资源规模
+  → 卡片管理浏览人物资源
+  → 模组管理查看单个物品或完整模组
+  → 插件管理检查 BepInEx 环境
+  → 回收站处理可恢复删除项
+  → 设置管理长期偏好
+  → 工作台制作或整理单个模组物品
 ```
 
-The runtime database and generated previews are rebuildable caches. If the index gets out of date, rebuild it from the selected game directory.
+这 9 张截图覆盖了项目的主要用户路径：从选择游戏目录、建立索引，到浏览卡片与模组，再到插件检查、资源回收、偏好设置和模组工程制作。运行日志页虽然没有出现在本批截图中，但它仍是观察扫描、批量任务和修复进度的独立页面。
 
-## Requirements
+## 相关文档
 
-- Windows
-- Node.js / npm for development
-- Python environment with the backend requirements installed
-- An HS2 / AIS-style local game directory
-
-The Electron main process starts the backend with `PYTHON_EXECUTABLE` if set. Otherwise it tries the local `mm_env` conda environment path, then falls back to `conda run -n mm_env python backend/app/server.py`.
-
-## Quick Start
-
-```powershell
-cd apps
-npm install
-npm run check:python
-npm run dev
-```
-
-To force a specific Python interpreter:
-
-```powershell
-cd apps
-$env:PYTHON_EXECUTABLE="D:\path\to\python.exe"
-npm run dev
-```
-
-Useful development commands:
-
-```powershell
-cd apps
-npm run python:dev
-npm run build
-npm run electron
-npm run build:backend
-npm run package:win
-```
-
-## Project Layout
-
-```text
-apps/
-|-- electron/                 # Electron main process and preload bridge
-|-- src/                      # Vue renderer
-|-- backend/app/              # Local Python HTTP service
-|-- backend/star_manager/     # Python business logic
-|-- backend/tests/            # Backend tests
-|-- scripts/                  # Developer and packaging helpers
-|-- docs/                     # Project documentation
-|-- tools/                    # Isolated C# helper and card metadata plugin
-|-- package.json
-`-- vite.config.js
-```
-
-The former `apps/pyside6` app has been removed. Current development should stay inside `apps/`.
-
-## Documentation
-
-文档按“仓库 → 应用 → 专题 → 具体文档”分级组织，建议从对应层级的索引进入：
-
-1. [文档总索引](apps/docs/README.md)：按阅读目标、功能和开发任务查找全部维护文档。
-2. [应用 README](apps/README.md)：从 `apps/` 目录运行、构建和排查应用时的快速说明。
-3. [项目总览](apps/docs/project-overview.md)：开发前了解架构、数据模型、工作流和边界。
-4. [前端 UI 专题索引](apps/docs/frontend-ui/README.md)：页面、应用外壳和视觉规范。
-5. [模组与资源专题索引](apps/docs/mod_manage/README.md)：模组数据库、角色卡解析、扫描变更和异常诊断。
-
-按具体场景继续阅读：
-
-- 用户首次使用： [项目介绍](apps/docs/project-introduction.md)
-- 修改接口或任务： [前后端接口](apps/docs/backend-interface.md)
-- 修改缓存或运行时文件： [缓存与运行时文件登记](apps/docs/runtime-cache-registry.md)
-- 修改 Unity3D / Workbench： [前端 UI 专题索引](apps/docs/frontend-ui/README.md) → [工作台](apps/docs/frontend-ui/workbench-layout.md)
-- 处理集成或资源恢复： [集成与排障文档](apps/docs/README.md#集成和排障)
-- 生成 Windows 发行目录： [Windows 打包指南](apps/docs/packaging-windows.md)
-
-## Development Notes
-
-- Keep application source, build scripts, runtime files, dependencies, and docs under `apps/`.
-- Use direct HTTP routes for single-object changes and `/tasks` for batch operations.
-- Treat `Copy` as the safe default for extraction and export workflows.
-- Move/delete operations modify the game directory and should be handled deliberately.
-- Runtime caches and build outputs are disposable.
+- [项目介绍](project-introduction.md)：产品定位、首次使用流程、完整页面导览和数据边界。
+- [项目总览](project-overview.md)：运行架构、目录职责、数据模型和开发边界。
+- [前端 UI 文档索引](frontend-ui/README.md)：各页面的详细布局与实现规则。

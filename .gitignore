@@ -41,6 +41,9 @@ htmlcov/
 
 # Local test environment and samples
 test/
+/source/
+/tmp/
+/插件/
 
 # Local IDE/editor files
 .idea/

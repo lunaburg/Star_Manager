@@ -14,7 +14,7 @@
 
 **截图：** `屏幕截图 2026-09-15 181937.png`
 
-![开始游戏页面](assets/page-screenshots/page-01-start.png)
+![开始游戏页面](apps/docs/assets/page-screenshots/page-01-start.png)
 
 这是项目的入口页，用于先连接本地 HS2 游戏目录，再进行启动和资源管理。截图中顶部已经选择了游戏目录，界面显示“目录有效”和“Backend ready”，旁边可以观察当前等待任务并触发数据库重建。
 

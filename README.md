@@ -62,7 +62,7 @@
 
 ## 07. 回收站
 
-![回收站页面](assets/page-screenshots/page-07-trash.png)
+![回收站页面](apps/docs/assets/page-screenshots/page-07-trash.png)
 
 回收站用于承接人物卡和模组的可恢复删除。截图中回收站为空，因此中央显示空状态提示；上方提供“全部”“人物卡”“模组”分类，并显示各分类数量；右上角有刷新和清空回收站按钮。
 
@@ -72,7 +72,7 @@
 
 ## 08. 设置
 
-![设置页面](assets/page-screenshots/page-08-settings.png)
+![设置页面](apps/docs/assets/page-screenshots/page-08-settings.png)
 
 设置页集中管理 Star_Manager 自身的偏好。左侧是设置分类导航，截图当前显示“启动与检查”“应用壁纸”“收藏主题”和“本地成就”等内容，右侧按卡片区块展示具体选项。
 
@@ -82,7 +82,7 @@
 
 ## 09. 工作台：物品工程详情
 
-![工作台物品工程详情](assets/page-screenshots/page-09-workbench-item.png)
+![工作台物品工程详情](apps/docs/assets/page-screenshots/page-09-workbench-item.png)
 
 这是工作台中的单个物品工程页。顶部工具栏显示当前工程 `T065`，并提供新建项目、打包模组、`Package → FBX`、物品工具和工程内搜索等入口。
 

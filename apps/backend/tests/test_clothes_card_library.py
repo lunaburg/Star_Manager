@@ -7,6 +7,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from star_manager.services.card_library import (  # noqa: E402
+    _CLOTHES_INDEX_JOBS,
+    _CLOTHES_INDEX_JOBS_LOCK,
+    _clothes_index_root_key,
+    _index_all_clothes_card_files,
     build_clothes_card_tree,
     get_clothes_card_detail,
     list_clothes_cards,
@@ -112,6 +116,37 @@ class ClothesCardLibraryTests(unittest.TestCase):
                 files[0].write_bytes(b"changed card")
                 list_clothes_cards(str(game), "female", offset=0, limit=1, index_path=index_path)
                 self.assertEqual(inspect_listing.call_count, 4)
+
+    def test_tree_uses_valid_clothes_count_after_background_index_completes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game, coordinate = self.make_game(Path(temp_dir))
+            valid_files = [
+                coordinate / "female" / "valid-one.png",
+                coordinate / "female" / "valid-two.png",
+            ]
+            ordinary = coordinate / "female" / "ordinary.png"
+            for file_path in [*valid_files, ordinary]:
+                file_path.write_bytes(b"clothes")
+
+            parsed = {
+                "marker": "【AIS_Clothes】",
+                "name": "Card",
+            }
+            index_path = Path(temp_dir) / "clothes.sqlite"
+            with patch("star_manager.services.card_library.is_hs2_game_dir", return_value=True), patch(
+                "star_manager.services.card_library.inspect_clothes_card_listing_file",
+                side_effect=lambda path: parsed if path in valid_files else None,
+            ):
+                _index_all_clothes_card_files(coordinate, index_path)
+                root_key = _clothes_index_root_key(coordinate)
+                with _CLOTHES_INDEX_JOBS_LOCK:
+                    _CLOTHES_INDEX_JOBS[root_key] = {"status": "completed", "error": ""}
+                tree = build_clothes_card_tree(str(game), index_path=index_path)
+
+            female = next(child for child in tree["tree"]["children"] if child["name"] == "female")
+            self.assertEqual(female["count"], 2)
+            self.assertFalse(female["count_is_candidate"])
+            self.assertEqual(tree["total"], 2)
 
     def test_detail_returns_parsed_summary_and_rejects_character_paths(self):
         with tempfile.TemporaryDirectory() as temp_dir:

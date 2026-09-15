@@ -63,6 +63,8 @@ Electron starts the backend with this priority:
 3. The configured local `mm_env` Python path.
 4. `conda run -n mm_env python backend/app/server.py`.
 
+The Electron main process uses `app.requestSingleInstanceLock()` so a second Star_Manager launch focuses the existing window instead of creating another app/backend pair. On shutdown, the `before-quit` handler waits for backend cleanup; Windows uses `taskkill.exe /PID <pid> /T /F` so wrapper and child processes are removed together. See [Electron 进程生命周期](electron-process-lifecycle.md) for the lifecycle contract and verification boundaries.
+
 The backend uses `STAR_MANAGER_RUNTIME_DIR` for runtime cache location. Development defaults to `apps/backend/runtime`; packaged builds use a `runtime` folder beside `Star_Manager.exe`.
 
 Electron hardware acceleration is enabled by default so the Three.js model preview remains responsive at large sizes. Set `STAR_MANAGER_DISABLE_GPU=1` only as a compatibility fallback for systems where GPU acceleration prevents the app from starting or rendering correctly.
@@ -117,7 +119,7 @@ Business modules:
 - `star_manager/services/mod_database_assets.py`: zipmod scanning, manifest/CSV parsing, thumbnails, Unity3D diagnostics, write-back repair/delete operations.
 - `star_manager/services/model_preview.py`: selected item MainAB mesh/material conversion to runtime GLB and preparation of the source Unity3D file for external tools.
 - `star_manager/services/mod_workflow.py`: legacy card search, dependency extraction, zipmod sorting workflows.
-- `star_manager/services/remote_mod_completion.py`: reads the remote missing-mod index and downloads, validates, installs, and relinks selected zipmods.
+- `star_manager/services/remote_mod_completion.py`: reads the remote missing-mod index for character and scene cards, downloads, validates, installs, and indexes selected zipmods.
 - `star_manager/services/trash.py`: validates runtime recycle-bin entries and handles recover/erase operations.
 - `star_manager/services/sims4_workbench.py`: Sims 4 Package export request handler for collision-safe LOD0 FBX plus RLE2 PNG texture extraction, exposed from the Workbench project-level Package → FBX modal.
 - `star_manager/core/card_metadata.py`: read/write of registered Star Manager favorite, rating, and tag metadata.
@@ -165,7 +167,7 @@ Examples of task mutations:
 
 - rebuild mod/card database;
 - index one newly packaged zipmod;
-- download and install selected remote missing-mod candidates;
+- query and download selected remote missing-mod candidates for character or scene cards;
 - import external zipmods and related loose cards/resources;
 - export or organize selected zipmods;
 - organize all zipmods by author;

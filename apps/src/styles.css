@@ -39,6 +39,7 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: #f7fbff;
 }
 
 body {
@@ -184,7 +185,13 @@ small {
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  background: var(--bg);
+  background:
+    linear-gradient(rgba(23, 23, 23, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 23, 23, .035) 1px, transparent 1px),
+    radial-gradient(circle at 12% 10%, rgba(218, 241, 255, .86), transparent 34%),
+    radial-gradient(circle at 82% 94%, rgba(255, 216, 231, .78), transparent 34%),
+    linear-gradient(120deg, #edf8ff 0%, #ffffff 48%, #fff1f7 100%);
+  background-size: 16px 16px, 16px 16px, auto, auto, auto;
 }
 
 .wallpaper-media,
@@ -198,11 +205,41 @@ small {
 .wallpaper-media {
   object-fit: cover;
   object-position: center;
+  opacity: 1;
+  transition: opacity .22s ease;
+}
+
+.wallpaper-layer--media-pending .wallpaper-media {
+  opacity: 0;
 }
 
 .wallpaper-scrim {
   background: linear-gradient(110deg, rgba(247, 251, 255, .86) 0%, rgba(247, 251, 255, .5) 44%, rgba(255, 241, 247, .3) 100%);
   backdrop-filter: saturate(.82);
+}
+
+.view-loading {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  min-height: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.view-loading-orbit {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(20, 126, 145, .18);
+  border-top-color: rgba(20, 126, 145, .72);
+  border-radius: 50%;
+  animation: view-loading-spin .75s linear infinite;
+}
+
+@keyframes view-loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .glass-surface,
@@ -324,7 +361,7 @@ small {
 .nav-card-type-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
 
 .nav-card-type-button {
@@ -334,8 +371,8 @@ small {
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, .58);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .48);
   color: #5f6873;
   box-shadow: none;
 }
@@ -349,13 +386,31 @@ small {
 }
 
 .nav-card-type-button.active {
-  border-color: transparent;
+  border-color: rgba(39, 131, 173, .45);
   background: var(--teal);
   color: #111;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .58);
 }
 
-.nav-card-type-button svg {
+.nav-card-type-button img {
+  display: block;
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
+}
+
+.nav-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #4f5965;
+}
+
+.nav-icon svg {
   width: 21px;
   height: 21px;
   fill: none;
@@ -365,30 +420,9 @@ small {
   stroke-linejoin: round;
 }
 
-.nav-icon {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: var(--surface-clean);
-  color: #5f6873;
-}
-
-.nav-icon svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .nav button.active .nav-icon {
-  background: var(--teal);
-  color: #111;
+  background: transparent;
+  color: #111827;
 }
 
 .nav-secondary {
@@ -1712,8 +1746,10 @@ small {
   stroke-width: 2.6;
 }
 
-/* 人物卡浏览器标题栏刷新按钮：与页面玻璃层保持连续，同时保留清晰的图标对比度。 */
-.character-layout .character-refresh-button {
+/* 卡片浏览器标题栏刷新按钮：与页面玻璃层保持连续，同时保留清晰的图标对比度。 */
+.character-layout .card-browser-refresh-button,
+.clothes-card-layout .card-browser-refresh-button,
+.scene-card-layout .card-browser-refresh-button {
   border: 1px solid var(--glass-border);
   border-radius: 11px;
   background: var(--glass-background-fallback);
@@ -1732,8 +1768,12 @@ small {
     transform .2s ease;
 }
 
-.character-layout .character-refresh-button:hover:not(:disabled),
-.character-layout .character-refresh-button:focus-visible {
+.character-layout .card-browser-refresh-button:hover:not(:disabled),
+.character-layout .card-browser-refresh-button:focus-visible,
+.clothes-card-layout .card-browser-refresh-button:hover:not(:disabled),
+.clothes-card-layout .card-browser-refresh-button:focus-visible,
+.scene-card-layout .card-browser-refresh-button:hover:not(:disabled),
+.scene-card-layout .card-browser-refresh-button:focus-visible {
   border-color: rgba(255, 255, 255, .92);
   background: rgba(255, 255, 255, .38);
   background: color-mix(in srgb, var(--surface-clean) 38%, transparent);
@@ -1743,17 +1783,19 @@ small {
     0 4px 14px rgba(73, 91, 109, .12);
 }
 
-.character-layout .character-refresh-button:focus-visible {
+.character-layout .card-browser-refresh-button:focus-visible,
+.clothes-card-layout .card-browser-refresh-button:focus-visible,
+.scene-card-layout .card-browser-refresh-button:focus-visible {
   outline: 2px solid rgba(82, 151, 180, .58);
   outline-offset: 2px;
 }
 
-.character-refresh-button:disabled {
+.card-browser-refresh-button:disabled {
   cursor: wait;
   opacity: .58;
 }
 
-.character-refresh-button:disabled svg {
+.card-browser-refresh-button:disabled svg {
   animation: character-refresh-spin .8s linear infinite;
 }
 
@@ -2288,6 +2330,47 @@ small {
   box-shadow: none;
 }
 
+.task-item {
+  width: 100%;
+  height: auto;
+  min-height: 62px;
+  text-align: left;
+  box-shadow: none;
+}
+
+.task-item-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.task-item-copy strong,
+.task-item-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-item-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.task-item-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-item-chevron {
+  color: #397b91;
+  font: 800 18px/1 var(--mono);
+  opacity: .55;
+  transition: transform .16s ease, opacity .16s ease;
+}
+
 .action-item strong,
 .action-item small {
   display: block;
@@ -2398,6 +2481,17 @@ small {
 .overview-grid .action-item:focus-visible {
   outline: 2px solid rgba(64, 146, 177, .62);
   outline-offset: 2px;
+}
+
+.overview-grid .task-item:focus-visible {
+  outline: 2px solid rgba(20, 126, 145, .56);
+  outline-offset: 2px;
+}
+
+.overview-grid .task-item:hover .task-item-chevron,
+.overview-grid .task-item:focus-visible .task-item-chevron {
+  opacity: 1;
+  transform: translate(2px, -2px);
 }
 
 .overview-grid .action-item--organize,
@@ -2738,6 +2832,58 @@ small {
   white-space: nowrap;
 }
 
+.scene-card-view,
+.scene-card-layout {
+  min-height: 0;
+  height: 100%;
+}
+
+.scene-card-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+}
+
+.scene-browser-panel {
+  background:
+    radial-gradient(circle at 88% 8%, rgba(220, 195, 255, .3), transparent 30%),
+    linear-gradient(145deg, #fffdfa, #f6f3ff);
+}
+
+.scene-card-tile {
+  aspect-ratio: auto;
+}
+
+.scene-card-preview {
+  aspect-ratio: 320 / 180;
+}
+
+.scene-card-preview .lazy-thumbnail,
+.scene-card-preview img {
+  object-fit: contain;
+}
+
+.scene-card-caption strong {
+  font-size: 12px;
+}
+
+.scene-detail-preview {
+  width: min(100%, 320px);
+  height: auto;
+  aspect-ratio: 320 / 180;
+}
+
+.scene-detail-preview img {
+  object-fit: contain;
+}
+
+.scene-detail-preview-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
 .clothes-card-check {
   position: absolute;
   z-index: 2;
@@ -2849,15 +2995,16 @@ small {
   position: relative;
   display: grid;
   width: min(100%, 220px);
-  height: clamp(210px, 30vh, 308px);
+  height: auto;
+  aspect-ratio: 252 / 352;
   min-width: 150px;
   margin: 6px auto 0;
-  padding: 4px;
+  padding: 0;
   place-items: center;
   overflow: hidden;
-  border: 3px solid var(--line-strong);
+  border: 0;
   border-radius: 6px;
-  background: #d5d5da;
+  background: transparent;
 }
 
 .clothes-detail-preview img {
@@ -2866,6 +3013,27 @@ small {
   display: block;
   border-radius: 2px;
   background: #f0eff7;
+  object-fit: contain;
+}
+
+/* 场景卡详情外框必须与 320:180 的横向卡面保持同一比例；该规则放在服装卡通用固定高度之后。 */
+.clothes-detail-preview.scene-detail-preview {
+  width: min(100%, 320px);
+  min-width: 0;
+  height: auto;
+  aspect-ratio: 320 / 180;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.clothes-detail-preview.scene-detail-preview .scene-detail-preview-image {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 0;
+  background: transparent;
   object-fit: contain;
 }
 
@@ -4477,7 +4645,7 @@ small {
   --card-grid-gap-y: 18px;
   --card-grid-padding: 18px;
   display: grid;
-  grid-template-columns: repeat(4, var(--card-width));
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: calc(var(--card-width) * 352 / 252);
   justify-content: space-between;
   align-content: start;
@@ -4495,7 +4663,7 @@ small {
   --card-grid-gap-x: 16px;
   --card-grid-gap-y: 18px;
   --card-grid-padding: 18px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: max-content;
   align-items: start;
 }
@@ -4504,6 +4672,21 @@ small {
   height: auto;
   align-self: start;
   min-height: 160px;
+}
+
+.character-card-virtual-canvas {
+  position: relative;
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+
+.character-card-virtual-grid {
+  display: grid;
+  align-items: stretch;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .clothes-card-virtual-canvas {
@@ -4542,6 +4725,11 @@ small {
   cursor: pointer;
   outline: none;
   transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+
+.clothes-card-virtual-grid > .char-card.scene-card-tile {
+  aspect-ratio: auto;
+  grid-template-rows: minmax(0, 1fr) var(--caption-height);
 }
 
 .char-card:hover,
@@ -5340,6 +5528,20 @@ small {
   animation:
     favorite-obsidian-name-ember 4.2s ease-in-out infinite,
     card-name-overflow-scroll var(--card-name-scroll-duration, 8s) ease-in-out infinite;
+}
+
+/* Ordinary card-browser nameplates use the shared light glass surface.
+   Favorite selectors below retain their themed plaque and text effects. */
+.char-card .card-caption {
+  background: rgba(255, 255, 255, .66);
+  border-top: 1px solid rgba(255, 255, 255, .86);
+  border-bottom: 1px solid rgba(255, 255, 255, .48);
+  backdrop-filter: blur(10px) saturate(125%);
+  -webkit-backdrop-filter: blur(10px) saturate(125%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .64),
+    inset 0 -1px 0 rgba(255, 255, 255, .22),
+    0 -3px 10px rgba(255, 255, 255, .18);
 }
 
 .card-theme-embers {
@@ -6832,6 +7034,12 @@ small {
   justify-content: space-between;
   min-height: 72px;
   padding: 12px 14px;
+}
+
+/* 作者联想列表需要越过后方表格绘制；工具栏的磨砂层会创建独立层叠上下文。 */
+.mod-page > .library-toolbar {
+  position: relative;
+  z-index: 4;
 }
 
 .mod-head,
@@ -12179,6 +12387,41 @@ tbody tr:hover td {
 .achievement-title-row small { white-space: nowrap; }
 .achievement-progress { height: 5px; overflow: hidden; border: 1px solid currentColor; background: #fff; }
 .achievement-progress i { display: block; height: 100%; background: #83c5f1; }
+.task-drawer-backdrop { position: fixed; z-index: 45; inset: 0; background: rgba(34, 48, 57, .24); backdrop-filter: blur(2px); }
+.task-drawer { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; width: min(520px, 94vw); height: 100%; padding: calc(var(--titlebar-height) + 30px) 26px 32px; overflow-x: hidden; overflow-y: auto; border-left: 1px solid rgba(126, 143, 157, .42); background: rgba(244, 250, 255, .82); background: color-mix(in srgb, var(--bg-color) 82%, transparent); box-shadow: -18px 0 42px rgba(53, 77, 91, .16); -webkit-backdrop-filter: blur(20px) saturate(1.08); backdrop-filter: blur(20px) saturate(1.08); animation: task-drawer-in .22s ease-out; }
+@keyframes task-drawer-in { from { transform: translateX(100%); opacity: .72; } }
+.task-drawer-close { position: absolute; top: calc(var(--titlebar-height) + 16px); right: 18px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid rgba(126, 143, 157, .36); border-radius: 10px; background: rgba(255, 255, 255, .32); color: #274454; box-shadow: 0 3px 10px rgba(53, 77, 91, .08); font-size: 23px; line-height: 1; }
+.task-drawer-close:hover { border-color: rgba(20, 126, 145, .58); background: rgba(255, 255, 255, .58); }
+.task-drawer-kicker { color: #397b91; font: 900 10px/1 var(--mono); letter-spacing: .16em; }
+.task-drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 12px; padding-right: 42px; }
+.task-drawer-heading h2 { margin: 0; color: #193847; font-size: 25px; line-height: 1.15; }
+.task-drawer-heading code { display: block; margin-top: 7px; overflow-wrap: anywhere; color: #66808d; font: 11px/1.45 var(--mono); }
+.task-drawer-heading .badge { flex: 0 0 auto; margin-top: 2px; }
+.task-drawer-summary { display: grid; gap: 5px; margin: 22px 0 6px; padding: 15px 16px; border: 1px solid rgba(126, 143, 157, .28); border-radius: 12px; background: rgba(255, 255, 255, .34); background: color-mix(in srgb, var(--surface-clean) 34%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68), 0 5px 16px rgba(53, 77, 91, .06); }
+.task-drawer-summary strong { color: #274454; font-size: 14px; }
+.task-drawer-summary span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.task-drawer-section { margin-top: 22px; }
+.task-drawer-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.task-drawer-section-head h3 { margin: 0; color: #274454; font-size: 13px; }
+.task-drawer-section-head span { color: #66808d; font: 11px var(--mono); }
+.task-timing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.task-timing-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 10px 11px; border: 1px solid rgba(126, 143, 157, .22); border-radius: 9px; background: rgba(255, 255, 255, .28); background: color-mix(in srgb, var(--surface-clean) 28%, transparent); }
+.task-timing-row span { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.task-timing-row strong { flex: 0 0 auto; color: #1e657d; font: 800 12px var(--mono); }
+.task-timing-row--total { grid-column: 1 / -1; border-color: rgba(20, 126, 145, .35); background: rgba(222, 245, 255, .44); background: color-mix(in srgb, #def5ff 44%, transparent); }
+.task-timing-row--total span { color: #1e657d; font-weight: 800; }
+.task-result-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.task-result-grid > div { display: grid; gap: 5px; min-width: 0; padding: 10px 11px; border: 1px solid rgba(126, 143, 157, .22); border-radius: 9px; background: rgba(255, 255, 255, .25); background: color-mix(in srgb, var(--surface-clean) 25%, transparent); }
+.task-result-grid span { color: var(--muted); font-size: 10px; }
+.task-result-grid strong { color: #274454; font: 800 17px var(--mono); }
+.task-message-list { display: grid; gap: 6px; max-height: 230px; overflow: auto; padding: 11px 12px; border: 1px solid rgba(126, 143, 157, .24); border-radius: 10px; background: rgba(255, 255, 255, .24); background: color-mix(in srgb, var(--surface-clean) 24%, transparent); scrollbar-width: thin; }
+.task-message-list p { margin: 0; color: #516b77; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+.task-message-list p + p { padding-top: 6px; border-top: 1px solid rgba(126, 143, 157, .14); }
+.task-message-list .task-message-error { color: #9e2831; }
+.task-drawer-meta { display: grid; gap: 0; margin: 22px 0 0; border-top: 1px solid rgba(126, 143, 157, .22); }
+.task-drawer-meta div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(126, 143, 157, .18); font-size: 11px; }
+.task-drawer-meta dt { color: var(--muted); }
+.task-drawer-meta dd { margin: 0; overflow-wrap: anywhere; color: #274454; font-family: var(--mono); text-align: right; }
 .achievement-drawer-backdrop { position: fixed; z-index: 40; inset: 0; background: rgba(22, 20, 18, .22); }
 .achievement-drawer { position: absolute; top: 0; right: 0; width: min(420px, 92vw); height: 100%; padding: calc(var(--titlebar-height) + 38px) 28px 38px; border-left: 2px solid #171514; background: linear-gradient(180deg, #fffdf5, #f3f8ff); box-shadow: -10px 0 0 rgba(23,21,20,.12); animation: achievement-drawer-in .2s ease-out; }
 @keyframes achievement-drawer-in { from { transform: translateX(100%); } }
@@ -12974,6 +13217,617 @@ tbody tr:hover td {
 
 @keyframes trash-spin { to { transform: rotate(360deg); } }
 @keyframes trash-item-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 服装卡与场景卡浏览器控件统一为连续的透明玻璃层。 */
+.scene-card-layout > .panel,
+.clothes-card-layout > .clothes-browser-panel {
+  border-color: var(--glass-border);
+  background: var(--glass-background-fallback);
+  background: var(--glass-background);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--glass-shadow);
+}
+
+.scene-card-layout > .scene-browser-panel {
+  background:
+    radial-gradient(circle at 88% 8%, rgba(220, 195, 255, .24), transparent 30%),
+    var(--glass-background-fallback);
+  background:
+    radial-gradient(circle at 88% 8%, rgba(220, 195, 255, .24), transparent 30%),
+    var(--glass-background);
+}
+
+.clothes-card-layout > .clothes-browser-panel > .clothes-browser-head,
+.scene-card-layout > .scene-browser-panel > .clothes-browser-head,
+.clothes-card-layout > .clothes-side-panel > .character-side-head,
+.scene-card-layout > .scene-side-panel > .character-side-head {
+  border-bottom: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.clothes-card-layout > .clothes-side-panel,
+.scene-card-layout > .scene-side-panel {
+  --card-glass-border: rgba(255, 255, 255, .58);
+  --card-glass-surface: rgba(255, 255, 255, .24);
+  --card-glass-surface-hover: rgba(255, 255, 255, .44);
+  --card-glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .58), 0 4px 12px rgba(59, 77, 91, .07);
+  --card-glass-text: rgba(46, 55, 64, .9);
+  --card-glass-muted: rgba(82, 88, 98, .74);
+  background: var(--glass-background-fallback);
+  background: var(--glass-background);
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle,
+.scene-card-layout > .scene-side-panel .side-toggle {
+  gap: 3px;
+  padding: 3px;
+  border-color: rgba(148, 164, 177, .38);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 2px 8px rgba(59, 77, 91, .05);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle button,
+.scene-card-layout > .scene-side-panel .side-toggle button,
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button,
+.clothes-card-layout > .clothes-side-panel .clothes-open-directory,
+.scene-card-layout > .scene-side-panel .clothes-open-directory,
+.clothes-card-layout > .clothes-side-panel .card-dependency-install-all,
+.scene-card-layout > .scene-side-panel .card-dependency-install-all,
+.clothes-card-layout > .clothes-side-panel .dependency-install-button,
+.scene-card-layout > .scene-side-panel .dependency-install-button,
+.clothes-card-layout > .clothes-side-panel .dependency-cancel-download,
+.scene-card-layout > .scene-side-panel .dependency-cancel-download,
+.clothes-card-layout > .clothes-side-panel .dependency-inline-control,
+.scene-card-layout > .scene-side-panel .dependency-inline-control {
+  transform: none;
+  transition: background .24s ease, border-color .24s ease, box-shadow .24s ease, color .24s ease, opacity .24s ease, transform .24s ease;
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle button,
+.scene-card-layout > .scene-side-panel .side-toggle button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--card-glass-muted);
+  box-shadow: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle button:hover:not(:disabled),
+.clothes-card-layout > .clothes-side-panel .side-toggle button:focus-visible,
+.scene-card-layout > .scene-side-panel .side-toggle button:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .side-toggle button:focus-visible {
+  border-color: rgba(103, 154, 174, .44);
+  background: rgba(218, 241, 255, .34);
+  color: #245c75;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+  outline: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle button.active,
+.scene-card-layout > .scene-side-panel .side-toggle button.active {
+  border-color: rgba(255, 255, 255, .66);
+  background: rgba(255, 255, 255, .48);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 2px 7px rgba(59, 77, 91, .08);
+}
+
+.clothes-card-layout > .clothes-side-panel .side-toggle button:focus-visible,
+.scene-card-layout > .scene-side-panel .side-toggle button:focus-visible,
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button:focus-visible,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button:focus-visible,
+.clothes-card-layout > .clothes-side-panel .clothes-open-directory:focus-visible,
+.scene-card-layout > .scene-side-panel .clothes-open-directory:focus-visible,
+.clothes-card-layout > .clothes-side-panel .card-dependency-install-all:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-install-all:focus-visible,
+.clothes-card-layout > .clothes-side-panel .dependency-install-button:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-install-button:focus-visible,
+.clothes-card-layout > .clothes-side-panel .dependency-cancel-download:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-cancel-download:focus-visible,
+.clothes-card-layout > .clothes-side-panel .dependency-inline-control:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-inline-control:focus-visible {
+  outline: 2px solid rgba(64, 146, 177, .68);
+  outline-offset: 2px;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-directory-section,
+.scene-card-layout > .scene-side-panel .clothes-directory-section,
+.clothes-card-layout > .clothes-side-panel .clothes-detail-section,
+.scene-card-layout > .scene-side-panel .clothes-detail-section {
+  background: transparent;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-tree-row,
+.scene-card-layout > .scene-side-panel .clothes-tree-row {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  transition: background .24s ease, border-color .24s ease, box-shadow .24s ease, color .24s ease, transform .2s ease;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-tree-row:hover,
+.clothes-card-layout > .clothes-side-panel .clothes-tree-row.active,
+.scene-card-layout > .scene-side-panel .clothes-tree-row:hover,
+.scene-card-layout > .scene-side-panel .clothes-tree-row.active {
+  border-color: rgba(255, 255, 255, .48);
+  background: rgba(218, 241, 255, .24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42);
+  color: var(--text);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-tree-row.active,
+.scene-card-layout > .scene-side-panel .clothes-tree-row.active {
+  background: rgba(255, 255, 255, .34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .58), 0 2px 8px rgba(59, 77, 91, .05);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-tree-toggle,
+.scene-card-layout > .scene-side-panel .clothes-tree-toggle {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-tree-toggle:hover:not(:disabled),
+.clothes-card-layout > .clothes-side-panel .clothes-tree-toggle:focus-visible,
+.scene-card-layout > .scene-side-panel .clothes-tree-toggle:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .clothes-tree-toggle:focus-visible {
+  border-color: rgba(103, 154, 174, .42);
+  background: rgba(218, 241, 255, .38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+  color: #245c75;
+  outline: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-folder-count,
+.scene-card-layout > .scene-side-panel .clothes-folder-count {
+  border: 1px solid rgba(255, 255, 255, .54);
+  background: rgba(255, 255, 255, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+  color: #326477;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-preview,
+.scene-card-layout > .scene-side-panel .clothes-detail-preview {
+  border: 1px solid var(--card-glass-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .14);
+  box-shadow: var(--card-glass-shadow);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  transition: background .24s ease, border-color .24s ease, box-shadow .24s ease;
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-tile,
+.scene-card-layout > .scene-browser-panel .clothes-card-tile {
+  border-color: rgba(255, 255, 255, .58);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 4px 12px rgba(59, 77, 91, .06);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  transition: transform .2s ease, background .24s ease, border-color .24s ease, box-shadow .24s ease;
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-tile:hover,
+.clothes-card-layout > .clothes-browser-panel .clothes-card-tile:focus-visible,
+.scene-card-layout > .scene-browser-panel .clothes-card-tile:hover,
+.scene-card-layout > .scene-browser-panel .clothes-card-tile:focus-visible {
+  border-color: rgba(103, 154, 174, .62);
+  background: rgba(255, 255, 255, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 7px 16px rgba(59, 77, 91, .1);
+  outline: 2px solid rgba(64, 146, 177, .26);
+  outline-offset: 1px;
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-tile.selected,
+.scene-card-layout > .scene-browser-panel .clothes-card-tile.selected {
+  border: 2px solid rgba(64, 146, 177, .72);
+  background: rgba(218, 241, 255, .3);
+  box-shadow: 0 0 0 2px rgba(158, 216, 255, .44), inset 0 1px 0 rgba(255, 255, 255, .72), 0 7px 16px rgba(59, 77, 91, .1);
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-caption,
+.scene-card-layout > .scene-browser-panel .scene-card-caption {
+  border-top: 1px solid rgba(255, 255, 255, .7);
+  border-bottom: 1px solid rgba(255, 255, 255, .38);
+  border-radius: 0 0 8px 8px;
+  background: rgba(255, 255, 255, .48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56), 0 -3px 10px rgba(255, 255, 255, .14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-caption strong,
+.scene-card-layout > .scene-browser-panel .scene-card-caption strong {
+  color: rgba(46, 55, 64, .9);
+}
+
+.clothes-card-layout > .clothes-browser-panel .clothes-card-check,
+.scene-card-layout > .scene-browser-panel .clothes-card-check {
+  border: 1px solid rgba(255, 255, 255, .72);
+  background: rgba(255, 255, 255, .62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .76), 0 2px 7px rgba(59, 77, 91, .1);
+  color: #245c75;
+}
+
+.clothes-card-layout > .clothes-side-panel .scene-detail-preview,
+.scene-card-layout > .scene-side-panel .scene-detail-preview {
+  border-radius: 12px;
+}
+
+.clothes-card-layout > .clothes-side-panel .scene-detail-preview-image,
+.scene-card-layout > .scene-side-panel .scene-detail-preview-image {
+  border-radius: 10px;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs {
+  gap: 6px;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--card-glass-muted);
+  box-shadow: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button:hover:not(:disabled),
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button:focus-visible,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button:focus-visible {
+  border-color: rgba(103, 154, 174, .44);
+  background: rgba(218, 241, 255, .34);
+  color: #245c75;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+  outline: none;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button.active,
+.scene-card-layout > .scene-side-panel .clothes-detail-tabs button.active {
+  border-color: rgba(255, 255, 255, .66);
+  background: rgba(255, 255, 255, .52);
+  color: #087765;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 2px 7px rgba(59, 77, 91, .08);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-title,
+.scene-card-layout > .scene-side-panel .clothes-detail-title {
+  color: var(--card-glass-text);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-path,
+.scene-card-layout > .scene-side-panel .clothes-detail-path,
+.clothes-card-layout > .clothes-side-panel .clothes-detail-meta,
+.scene-card-layout > .scene-side-panel .clothes-detail-meta,
+.clothes-card-layout > .clothes-side-panel .detail-inline-state,
+.scene-card-layout > .scene-side-panel .detail-inline-state,
+.clothes-card-layout > .clothes-side-panel .clothes-detail-empty,
+.scene-card-layout > .scene-side-panel .clothes-detail-empty {
+  border: 1px solid var(--card-glass-border);
+  border-radius: 10px;
+  background: var(--card-glass-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .46);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-path,
+.scene-card-layout > .scene-side-panel .clothes-detail-path {
+  margin-bottom: 0;
+  padding: 8px 10px;
+  color: var(--card-glass-muted);
+  line-height: 1.45;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-meta,
+.scene-card-layout > .scene-side-panel .clothes-detail-meta {
+  gap: 0;
+  margin-top: 0;
+  padding: 4px 10px;
+  color: var(--card-glass-muted);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-meta span,
+.scene-card-layout > .scene-side-panel .clothes-detail-meta span {
+  min-height: 30px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, .3);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-meta span:last-child,
+.scene-card-layout > .scene-side-panel .clothes-detail-meta span:last-child {
+  border-bottom: 0;
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-meta b,
+.scene-card-layout > .scene-side-panel .clothes-detail-meta b {
+  color: var(--card-glass-text);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-open-directory,
+.scene-card-layout > .scene-side-panel .clothes-open-directory {
+  border-color: rgba(126, 160, 174, .48);
+  border-radius: 9px;
+  background: rgba(240, 250, 255, .34);
+  color: #28596a;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .58), 0 2px 8px rgba(59, 77, 91, .05);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-open-directory:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .clothes-open-directory:hover:not(:disabled) {
+  border-color: rgba(73, 139, 161, .68);
+  background: rgba(222, 245, 255, .58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 4px 12px rgba(59, 77, 91, .08);
+  transform: translateY(-1px);
+}
+
+.clothes-card-layout > .clothes-side-panel .clothes-detail-tab-panel,
+.scene-card-layout > .scene-side-panel .clothes-detail-tab-panel {
+  gap: 10px;
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-browser,
+.scene-card-layout > .scene-side-panel .card-dependency-browser {
+  gap: 10px;
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-overview,
+.scene-card-layout > .scene-side-panel .card-dependency-overview {
+  min-height: 54px;
+  padding: 10px 12px;
+  border-color: rgba(103, 154, 174, .42);
+  border-radius: 10px;
+  background: rgba(218, 241, 255, .24);
+  background: color-mix(in srgb, #d9f1ff 34%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62), 0 3px 10px rgba(59, 102, 119, .07);
+  color: rgba(42, 91, 103, .9);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-overview strong,
+.scene-card-layout > .scene-side-panel .card-dependency-overview strong {
+  color: #087765;
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-overview small,
+.scene-card-layout > .scene-side-panel .card-dependency-overview small {
+  color: rgba(70, 104, 111, .78);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-install-all,
+.scene-card-layout > .scene-side-panel .card-dependency-install-all,
+.clothes-card-layout > .clothes-side-panel .dependency-install-button,
+.scene-card-layout > .scene-side-panel .dependency-install-button {
+  border-color: rgba(75, 164, 137, .5);
+  background: rgba(224, 249, 239, .3);
+  color: #087765;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56), 0 2px 7px rgba(59, 102, 119, .05);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-install-all:hover:not(:disabled),
+.clothes-card-layout > .clothes-side-panel .card-dependency-install-all:focus-visible,
+.clothes-card-layout > .clothes-side-panel .dependency-install-button:hover:not(:disabled),
+.clothes-card-layout > .clothes-side-panel .dependency-install-button:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-install-all:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .card-dependency-install-all:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-install-button:hover:not(:disabled),
+.scene-card-layout > .scene-side-panel .dependency-install-button:focus-visible {
+  border-color: rgba(43, 125, 117, .74);
+  background: rgba(205, 238, 229, .58);
+  color: #064d53;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 3px 10px rgba(59, 102, 119, .09);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-cancel-download,
+.scene-card-layout > .scene-side-panel .dependency-cancel-download {
+  border-color: rgba(181, 73, 93, .48);
+  background: rgba(255, 225, 230, .28);
+  color: #9f2424;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .52), 0 2px 7px rgba(119, 59, 72, .05);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-cancel-download:hover,
+.clothes-card-layout > .clothes-side-panel .dependency-cancel-download:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-cancel-download:hover,
+.scene-card-layout > .scene-side-panel .dependency-cancel-download:focus-visible {
+  border-color: rgba(181, 73, 93, .72);
+  background: rgba(255, 225, 230, .54);
+  color: #7d1717;
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-group,
+.scene-card-layout > .scene-side-panel .card-dependency-group {
+  border-color: var(--card-glass-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .16);
+  background: color-mix(in srgb, var(--dependency-soft) 38%, transparent);
+  box-shadow: var(--card-glass-shadow);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-group-head,
+.scene-card-layout > .scene-side-panel .card-dependency-group-head {
+  min-height: 52px;
+  padding: 8px 10px;
+  border-bottom-color: rgba(255, 255, 255, .38);
+  border-radius: 9px 9px 0 0;
+  background: rgba(255, 255, 255, .16);
+  background: color-mix(in srgb, var(--dependency-soft) 52%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .44);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-group-count,
+.scene-card-layout > .scene-side-panel .dependency-group-count {
+  border-color: color-mix(in srgb, var(--dependency-accent) 58%, rgba(255, 255, 255, .7));
+  background: rgba(255, 255, 255, .28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-group-title strong,
+.scene-card-layout > .scene-side-panel .dependency-group-title strong,
+.clothes-card-layout > .clothes-side-panel .card-dependency-main strong,
+.scene-card-layout > .scene-side-panel .card-dependency-main strong {
+  color: var(--card-glass-text);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-list,
+.scene-card-layout > .scene-side-panel .card-dependency-list {
+  gap: 6px;
+  padding: 7px;
+  border-radius: 0 0 9px 9px;
+  background: rgba(255, 255, 255, .1);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-item,
+.scene-card-layout > .scene-side-panel .card-dependency-item {
+  min-height: 64px;
+  border-color: rgba(255, 255, 255, .58);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .27);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .52), 0 2px 8px rgba(59, 77, 91, .05);
+  transition: transform .2s ease, background .24s ease, border-color .24s ease, box-shadow .24s ease;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-item:hover,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-item:hover,
+.scene-card-layout > .scene-side-panel .card-dependency-item:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--dependency-accent) 58%, rgba(255, 255, 255, .7));
+  background: color-mix(in srgb, var(--dependency-soft) 62%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 4px 11px rgba(59, 77, 91, .08);
+  outline: 2px solid rgba(64, 146, 177, .3);
+  outline-offset: 1px;
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.item-missing,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-missing,
+.scene-card-layout > .scene-side-panel .card-dependency-item.item-missing,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing {
+  border-color: rgba(211, 59, 74, .54);
+  background: rgba(255, 225, 230, .28);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.item-missing:hover,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.item-missing:focus-visible,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-missing:hover,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-missing:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-item.item-missing:hover,
+.scene-card-layout > .scene-side-panel .card-dependency-item.item-missing:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing:hover,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing:focus-visible {
+  background: rgba(255, 225, 230, .5);
+}
+
+.clothes-card-layout > .clothes-side-panel .item-thumb,
+.scene-card-layout > .scene-side-panel .item-thumb {
+  border: 1px solid rgba(255, 255, 255, .64);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56), 0 2px 6px rgba(59, 77, 91, .06);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-part-label,
+.scene-card-layout > .scene-side-panel .dependency-part-label {
+  border-color: color-mix(in srgb, var(--dependency-accent) 58%, rgba(255, 255, 255, .7));
+  background: color-mix(in srgb, var(--dependency-soft) 58%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .46);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-item-meta small,
+.scene-card-layout > .scene-side-panel .dependency-item-meta small {
+  color: rgba(82, 88, 98, .72);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-match-state,
+.scene-card-layout > .scene-side-panel .dependency-match-state {
+  border-color: rgba(75, 164, 137, .5);
+  background: rgba(224, 249, 239, .3);
+  color: #08745c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .52);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.item-missing,
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.mod-missing,
+.scene-card-layout > .scene-side-panel .dependency-match-state.item-missing,
+.scene-card-layout > .scene-side-panel .dependency-match-state.mod-missing {
+  border-color: rgba(211, 59, 74, .5);
+  background: rgba(255, 225, 230, .34);
+  color: #b51f34;
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-inline-progress,
+.scene-card-layout > .scene-side-panel .dependency-inline-progress {
+  border-color: rgba(75, 164, 137, .42);
+  border-radius: 9px;
+  background: rgba(224, 249, 239, .24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-inline-control,
+.scene-card-layout > .scene-side-panel .dependency-inline-control {
+  border-color: rgba(75, 164, 137, .5);
+  background: rgba(224, 249, 239, .34);
+  color: #087765;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-inline-control:hover,
+.clothes-card-layout > .clothes-side-panel .dependency-inline-control:focus-visible,
+.scene-card-layout > .scene-side-panel .dependency-inline-control:hover,
+.scene-card-layout > .scene-side-panel .dependency-inline-control:focus-visible {
+  border-color: rgba(43, 125, 117, .74);
+  background: rgba(205, 238, 229, .58);
+  color: #064d53;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clothes-card-layout > .clothes-side-panel .side-toggle button,
+  .scene-card-layout > .scene-side-panel .side-toggle button,
+  .clothes-card-layout > .clothes-side-panel .clothes-tree-row,
+  .scene-card-layout > .scene-side-panel .clothes-tree-row,
+  .clothes-card-layout > .clothes-side-panel .clothes-tree-toggle,
+  .scene-card-layout > .scene-side-panel .clothes-tree-toggle,
+  .clothes-card-layout > .clothes-side-panel .clothes-detail-preview,
+  .scene-card-layout > .scene-side-panel .clothes-detail-preview,
+  .clothes-card-layout > .clothes-side-panel .clothes-detail-tabs button,
+  .scene-card-layout > .scene-side-panel .clothes-detail-tabs button,
+  .clothes-card-layout > .clothes-side-panel .clothes-open-directory,
+  .scene-card-layout > .scene-side-panel .clothes-open-directory,
+  .clothes-card-layout > .clothes-side-panel .card-dependency-install-all,
+  .scene-card-layout > .scene-side-panel .card-dependency-install-all,
+  .clothes-card-layout > .clothes-side-panel .dependency-install-button,
+  .scene-card-layout > .scene-side-panel .dependency-install-button,
+  .clothes-card-layout > .clothes-side-panel .dependency-cancel-download,
+  .scene-card-layout > .scene-side-panel .dependency-cancel-download,
+  .clothes-card-layout > .clothes-side-panel .dependency-inline-control,
+  .scene-card-layout > .scene-side-panel .dependency-inline-control,
+  .clothes-card-layout > .clothes-side-panel .card-dependency-item,
+  .scene-card-layout > .scene-side-panel .card-dependency-item {
+    transition: none;
+  }
+}
 
 @media (max-width: 760px) {
   .trash-hero, .trash-toolbar { align-items: stretch; flex-direction: column; }

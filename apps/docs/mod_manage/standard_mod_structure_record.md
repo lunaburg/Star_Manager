@@ -37,6 +37,26 @@
 
 `characustom` 下的 CSV 可能直接放在该目录，也可能继续按分类编号分层。读取时应递归扫描 `abdata/list/**/*.csv`。
 
+### Studio 自定义物品模组变体
+
+Studio 自定义物品可以使用另一套列表目录，不应强行按角色服饰的 `characustom` CSV 解析：
+
+```text
+模组根目录/
+|-- manifest.xml
+`-- abdata/
+    |-- <作者或模组资源目录>/*.unity3d
+    `-- studio/info/<作者>/
+        |-- ItemCategory_<分类>_<大类>.csv
+        `-- ItemList_<列表>_<大类>_<分类>.csv
+```
+
+`ItemCategory_*.csv` 通常登记 Studio 分类 ID 和显示名称；`ItemList_*.csv` 通常使用 `BigCategory`、`MidCategory`、`Name`、`Manifest`、`Bundle`、`Object` 等字段，把每个 Studio 物品映射到 Unity3D AssetBundle 内的 prefab。它可能没有 `ThumbAB` / `ThumbTex`，因此资源包中的材质贴图不应被误当作列表缩略图。
+
+当前 Star Manager 的通用 ZIP CSV 迭代器只读取 `abdata/list/**/*.csv`、`Map_kPlug.csv` 和游戏 `mapinfo`；一般 `abdata/studio/info/<作者>/ItemCategory_*.csv` / `ItemList_*.csv` 尚未进入物品索引范围。遇到这类文件时，应保留“manifest 可识别但物品数为 0”的边界，不把它诊断为损坏模组。需要支持时应增加独立的 Studio 列表适配器，并保留 `BigCategory + MidCategory`，再将 `Manifest + Bundle + Object` 与 AssetBundle 容器路径匹配。
+
+已验证样本：[Hooh ammunition_go.zipmod 结构解析记录](hooh_ammunition_go_zipmod_analysis.md)。
+
 ## 外部导入的 `.zip` 归一化
 
 “导入外部模组”任务除了扫描 `*.zipmod`，还会扫描 `*.zip`。对后者，后端先检查压缩包内部结构：
@@ -198,6 +218,14 @@ ThumbAB,ThumbTex
 - 如果 `ThumbTex` 没有扩展名，应尝试 `.png`、`.jpg`、`.jpeg`、`.tga` 等常见图片扩展名。
 - 如果直接图片存在，直接复制或转换为缓存 PNG，不需要解析 Unity AssetBundle。
 - 如果 `ThumbAB` 指向 `.unity3d`，再进入 AssetBundle 解析流程。
+
+### Unity3D 缩略图的按目标解析
+
+- **问题背景**：一个缩略图 Unity3D 包可能包含大量 `Texture2D` / `Sprite`。旧流程在加载包后对 `env.container` 中的所有对象以及所有纹理对象调用 `obj.read()`，即使当前物品只需要其中一张图，也会把整包图片逐张解码。
+- **根因**：UnityPy 的 `obj.read()` 会执行对象解析和图像转换；对象路径和对象名称本身可以先作为索引使用，不需要提前读取图像。
+- **解决方案**：现在加载包时只登记 container 路径和 `Texture2D` / `Sprite` 的 `peek_name()`；`ThumbTex` 匹配到目标对象后才调用 `obj.read()` 和 `.image`。同一个对象在当前包内的解码结果只保留一次，多个物品引用同一目标时复用该结果；找不到精确目标时仍按原有 `icon` / `thumb` / `preview` fallback 顺序尝试。
+- **验证结果**：缩略图相关后端测试 51 项通过。当前真实模组样本中，Unity3D 包解析及目标图写出耗时的中位数约为 80ms；与旧版整包图像读取基准的中位数约 649ms 相比，约 8 倍加速。不同压缩格式、包大小和目标对象位置会造成明显差异。
+- **适用边界**：该优化只减少不相关图片的对象读取和解码，不改变 UnityPy 对包头、SerializedFile、AssetBundle 容器元数据的加载成本；损坏包、特殊加密包、没有可读名称的对象仍沿用原有错误或 fallback 行为。官方参考：[UnityPy Object](https://github.com/K0lb3/UnityPy#object) 和 [Texture2D](https://github.com/K0lb3/UnityPy#texture2d)。
 
 ## 提取脚本
 

@@ -63,6 +63,95 @@ def _remote_db(path: Path, rows: list[tuple]) -> None:
 
 
 class RemoteModCompletionTests(unittest.TestCase):
+    def test_scene_card_missing_mods_uses_scene_dependencies_and_remote_index(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "HS2"
+            scene_root = game_dir / "UserData" / "studio" / "scene"
+            scene_root.mkdir(parents=True)
+            scene_path = scene_root / "sample.png"
+            scene_path.write_bytes(b"scene")
+            remote_db = root / "remote.sqlite"
+            source = "https://sideload.betterrepack.com/download/AISHS2/"
+            _remote_db(remote_db, [(
+                12,
+                source,
+                source + "scene-pack.zipmod",
+                "Author/scene-pack.zipmod",
+                "scene-pack.zipmod",
+                "scene.pack",
+                "scene.pack",
+                "Scene Pack",
+                "2",
+                "Author",
+                128,
+                "ok",
+                1,
+            )])
+            parsed = {
+                "is_scene_card": True,
+                "dependencies": [
+                    {"ModID": "scene.pack", "DependencyType": "scene"},
+                    {"ModID": "scene.pack", "DependencyType": "scene_item", "Slot": 4},
+                    {"ModID": "not.indexed", "DependencyType": "scene_pattern", "Slot": 8},
+                ],
+            }
+            resolved = [
+                {
+                    "mod_id": "scene.pack",
+                    "dependency_type": "scene",
+                    "matched": False,
+                    "zipmod": None,
+                    "category_no": "",
+                    "slot": "",
+                    "local_slot": "",
+                    "property": "StudioScene.Map",
+                    "name": "scene.pack",
+                },
+                {
+                    "mod_id": "scene.pack",
+                    "dependency_type": "scene_item",
+                    "matched": False,
+                    "zipmod": {"guid": "scene.pack"},
+                    "category_no": "501",
+                    "slot": "4",
+                    "local_slot": "",
+                    "property": "StudioScene.Item",
+                    "name": "scene.pack",
+                },
+                {
+                    "mod_id": "not.indexed",
+                    "dependency_type": "scene_pattern",
+                    "matched": False,
+                    "zipmod": None,
+                    "category_no": "",
+                    "slot": "8",
+                    "local_slot": "",
+                    "property": "StudioScene.Pattern",
+                    "name": "not.indexed",
+                },
+            ]
+
+            with (
+                patch.object(completion, "is_hs2_game_dir", return_value=True),
+                patch.object(completion, "validate_scene_root", return_value=(True, scene_root, "")),
+                patch.object(completion, "resolve_scene_file", return_value=scene_path),
+                patch.object(completion, "inspect_scene_card_file", return_value=parsed),
+                patch.object(completion, "resolve_dependency_records", return_value=resolved),
+            ):
+                result = completion.inspect_scene_missing_mods(
+                    str(game_dir), "sample.png", index_path=remote_db,
+                )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["resource_type"], "scene_card")
+            self.assertEqual(result["available_count"], 1)
+            self.assertEqual(result["unavailable_count"], 1)
+            self.assertEqual(result["local_item_missing_count"], 1)
+            self.assertEqual(result["available"][0]["guid_norm"], "scene.pack")
+            self.assertEqual(result["available"][0]["usage_count"], 2)
+            self.assertEqual(result["available"][0]["candidate_count"], 1)
+
     def test_batch_downloads_run_concurrently_before_single_file_indexing(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

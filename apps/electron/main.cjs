@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { terminateProcessTree } = require("./backend-process.cjs");
 const {
   STANDARD_RESOLUTIONS,
   formatResolution,
@@ -16,7 +17,8 @@ const {
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL || "";
 const isDev = Boolean(rendererUrl);
-const expectedBackendRevision = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1";
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const expectedBackendRevision = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1";
 const disableGpu = process.env.STAR_MANAGER_DISABLE_GPU === "1";
 if (disableGpu) {
   app.disableHardwareAcceleration();
@@ -28,12 +30,27 @@ app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 let backendPort = process.env.STAR_MANAGER_BACKEND_PORT || "8765";
 let backendProcess = null;
 let backendStopRequested = false;
+let backendShutdownPromise = null;
+let appShutdownStarted = false;
+const windowReadiness = new WeakMap();
 const gameExecutables = {
   game: "HoneySelect2.exe",
   studio: "StudioNEOV2.exe",
   vr: "HoneySelect2VR.exe"
 };
 const DEFAULT_SB3UTILITY_EXECUTABLE_PATH = String(process.env.STAR_MANAGER_SB3UTILITY_EXE || "");
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  });
+}
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "wallpaper",
@@ -318,6 +335,17 @@ function saveSettingsFile(settings = {}) {
   }
 }
 
+function getStartupWallpaperSettings() {
+  const result = loadSettingsFile();
+  const settings = result?.settings || normalizeSettings();
+  return {
+    wallpaperPath: String(settings.wallpaperPath || "").trim(),
+    wallpaperType: ["image", "video"].includes(String(settings.wallpaperType || ""))
+      ? String(settings.wallpaperType)
+      : ""
+  };
+}
+
 function runtimeDir() {
   if (app.isPackaged) {
     return path.join(path.dirname(app.getPath("exe")), "runtime");
@@ -338,6 +366,8 @@ function clearModelPreviewCache() {
 function createWindow() {
   const createWindowStart = process.hrtime.bigint();
   process.env.STAR_MANAGER_BACKEND_BASE_URL = `http://127.0.0.1:${backendPort}`;
+  const nativeSurfaceColor = "#ffffff";
+  const transparentTitleBarColor = "rgba(0, 0, 0, 0)";
   const window = new BrowserWindow({
     width: 1420,
     height: 900,
@@ -345,10 +375,16 @@ function createWindow() {
     minHeight: 780,
     title: "Star_Manager",
     icon: path.join(__dirname, "../build-resources/app-icon.png"),
-    backgroundColor: "#00000000",
+    // Keep the native surface opaque while the renderer and external wallpaper
+    // are warming up. Transparent BrowserWindows can composite as black on
+    // Windows before the first renderer frame is available.
+    backgroundColor: nativeSurfaceColor,
+    show: false,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#00000000",
+      // Keep the native caption buttons transparent so the renderer's
+      // wallpaper remains visible underneath them.
+      color: transparentTitleBarColor,
       symbolColor: "#2d2930",
       height: 38
     },
@@ -358,20 +394,49 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  const readiness = {
+    nativeReady: false,
+    rendererReady: false,
+    revealed: false,
+    fallbackTimer: null,
+    revealWindow: null,
+    logPageLoadStep: null
+  };
+  windowReadiness.set(window, readiness);
+  const revealWindow = (trigger = "unknown") => {
+    if (readiness.revealed || window.isDestroyed()) return;
+    readiness.revealed = true;
+    if (readiness.fallbackTimer) clearTimeout(readiness.fallbackTimer);
+    window.show();
+    logPageLoadStep("first-screen-shown", "renderer", `(trigger=${trigger})`);
+    window.focus();
+  };
+  readiness.revealWindow = revealWindow;
   logStartupStep("BrowserWindow constructed", createWindowStart);
 
   const pageLoadStart = process.hrtime.bigint();
-  const logPageLoadStep = (step) => {
-    console.log(`[startup] renderer ${step} at ${formatDurationMs(hrtimeMs(pageLoadStart))}`);
+  const logPageLoadStep = (step, origin = "renderer", detail = "") => {
+    const message = `[startup] ${origin} ${step} at ${formatDurationMs(hrtimeMs(pageLoadStart))}${detail ? ` ${detail}` : ""}`;
+    console.log(message);
+    if (["ready-to-show", "renderer-ready", "first-screen-shown"].includes(step) && !window.isDestroyed()) {
+      window.webContents.send("startup:log", { message });
+    }
   };
+  readiness.logPageLoadStep = logPageLoadStep;
   window.webContents.once("did-start-loading", () => {
     logPageLoadStep("did-start-loading");
+  });
+  window.once("ready-to-show", () => {
+    readiness.nativeReady = true;
+    logPageLoadStep("ready-to-show", "electron");
+    revealWindow("ready-to-show");
   });
   window.webContents.once("dom-ready", () => {
     logPageLoadStep("dom-ready");
   });
   window.webContents.once("did-finish-load", () => {
     logPageLoadStep("did-finish-load");
+    revealWindow("did-finish-load");
   });
   window.webContents.once("did-fail-load", (_event, errorCode, errorDescription) => {
     console.error(
@@ -380,13 +445,21 @@ function createWindow() {
   });
   window.webContents.on("render-process-gone", (_event, details) => {
     console.error(`[renderer] process gone reason=${details.reason} exitCode=${details.exitCode}`);
-    shutdownBackend("renderer process ended");
     if (!app.isQuitting) {
       app.quit();
     }
   });
   window.webContents.on("unresponsive", () => {
     console.warn("[renderer] window became unresponsive");
+  });
+  readiness.fallbackTimer = setTimeout(() => {
+    if (readiness.revealed || window.isDestroyed()) return;
+    console.warn("[startup] renderer readiness timed out; revealing window");
+    revealWindow("timeout");
+  }, 5000);
+  window.once("closed", () => {
+    if (readiness.fallbackTimer) clearTimeout(readiness.fallbackTimer);
+    windowReadiness.delete(window);
   });
 
   if (rendererUrl) {
@@ -597,14 +670,32 @@ function killProcess(pid) {
   });
 }
 
-function shutdownBackend(reason = "app shutdown") {
-  if (!backendProcess || backendProcess.killed) {
+async function shutdownBackend(reason = "app shutdown") {
+  if (backendShutdownPromise) {
+    return backendShutdownPromise;
+  }
+
+  const child = backendProcess;
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    backendProcess = null;
     return;
   }
 
   backendStopRequested = true;
   console.log(`[backend] stopping because ${reason}`);
-  backendProcess.kill();
+  backendShutdownPromise = terminateProcessTree(child, {
+    platform: process.platform,
+    execFileImpl: execFile
+  })
+    .catch((error) => {
+      console.warn(`[backend] failed to stop process tree: ${error.message}`);
+    })
+    .finally(() => {
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+    });
+  return backendShutdownPromise;
 }
 
 function decodeExternalProcessOutput(value, outputEncoding = "utf8") {
@@ -3683,6 +3774,24 @@ ipcMain.handle("settings:load", async () => {
   return loadSettingsFile();
 });
 
+ipcMain.on("settings:getStartupWallpaper", (event) => {
+  try {
+    event.returnValue = getStartupWallpaperSettings();
+  } catch (error) {
+    console.warn(`[settings] failed to load startup wallpaper: ${error.message}`);
+    event.returnValue = { wallpaperPath: "", wallpaperType: "" };
+  }
+});
+
+ipcMain.on("renderer:ready", (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const readiness = window ? windowReadiness.get(window) : null;
+  if (!window || !readiness || window.isDestroyed()) return;
+  readiness.rendererReady = true;
+  readiness.logPageLoadStep?.("renderer-ready", "renderer");
+  readiness.revealWindow?.("renderer-ready");
+});
+
 ipcMain.handle("settings:save", async (_event, settings) => {
   return saveSettingsFile(settings);
 });
@@ -3828,6 +3937,7 @@ ipcMain.handle("game:launchExecutable", async (_event, launchType, gameDir) => {
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   const startupStart = process.hrtime.bigint();
   Menu.setApplicationMenu(null);
   logStartupStep("app.whenReady", startupStart, "(menu cleared)");
@@ -3863,10 +3973,15 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (!hasSingleInstanceLock || appShutdownStarted) return;
+  event.preventDefault();
+  appShutdownStarted = true;
   app.isQuitting = true;
-  shutdownBackend("app is quitting");
   clearModelPreviewCache();
+  void shutdownBackend("app is quitting").finally(() => {
+    app.quit();
+  });
 });
 
 ipcMain.handle("blender:openFbx", async (_event, blenderPath, fbxPath) => {
@@ -3958,7 +4073,6 @@ ipcMain.handle("shell:openDirectory", async (_event, directoryPath) => {
 });
 
 app.on("window-all-closed", () => {
-  shutdownBackend("all windows closed");
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -6,6 +6,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Callable, Iterable
 
 from star_manager.core.card_parser import (
@@ -52,11 +53,12 @@ def build_card_database(
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
     affected_mod_guids: Iterable[str] | None = None,
-) -> dict[str, int]:
+) -> dict[str, object]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
             progress_callback(value, message)
 
+    build_started_at = perf_counter()
     is_valid, root, error = validate_card_root(str(game_dir))
     if not is_valid:
         raise ValueError(error or "Invalid character-card directory.")
@@ -67,7 +69,9 @@ def build_card_database(
     preview_dir.mkdir(parents=True, exist_ok=True)
 
     report(5, "Scanning UserData/chara/**/*.png")
+    scan_started_at = perf_counter()
     card_paths = list(iter_card_pngs(root))
+    scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
     total = max(len(card_paths), 1)
     now = utc_now()
     seen_paths: set[str] = set()
@@ -84,6 +88,9 @@ def build_card_database(
         "relinked_cards": 0,
         "untouched_cards": 0,
         "worker_count": choose_card_database_worker_count(len(card_paths)),
+        "timings": {
+            "card_scan_ms": scan_duration_ms,
+        },
     }
 
     conn = sqlite3.connect(db_path)
@@ -120,6 +127,7 @@ def build_card_database(
                 ),
             )
 
+        prepare_started_at = perf_counter()
         prepared_by_path: dict[str, dict] = {}
         worker_count = int(stats["worker_count"])
         with ThreadPoolExecutor(
@@ -138,7 +146,12 @@ def build_card_database(
                     5 + round(completed_count / total * 70),
                     f"Prepared {completed_count}/{len(card_paths)} character cards",
                 )
+        stats["timings"]["card_prepare_ms"] = round(
+            (perf_counter() - prepare_started_at) * 1000,
+            2,
+        )
 
+        database_write_started_at = perf_counter()
         with conn:
             for index, card_path in enumerate(card_paths, start=1):
                 prepared = prepared_by_path[str(card_path.resolve())]
@@ -168,6 +181,14 @@ def build_card_database(
             stats["stale_cards"] = mark_stale_cards(conn, seen_paths, now)
             set_database_metadata(conn, "last_card_built_at", now)
             set_database_metadata(conn, "character_card_tags_cache_root", tag_cache_key)
+        stats["timings"]["card_database_write_ms"] = round(
+            (perf_counter() - database_write_started_at) * 1000,
+            2,
+        )
+        stats["timings"]["card_database_total_ms"] = round(
+            (perf_counter() - build_started_at) * 1000,
+            2,
+        )
         report(100, "Character card database rebuild completed")
         return stats
     finally:

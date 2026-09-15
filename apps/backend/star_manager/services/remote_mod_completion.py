@@ -18,8 +18,12 @@ from star_manager.services.card_library import (
     is_ais_card,
     resolve_card_dependencies,
     resolve_card_file,
+    resolve_dependency_records,
+    resolve_scene_file,
     validate_card_root,
+    validate_scene_root,
 )
+from star_manager.core.scene_card import inspect_scene_card_file
 from star_manager.services.mod_database import index_single_zipmod
 from star_manager.services.mod_database_core import (
     DEFAULT_DB_PATH,
@@ -104,6 +108,92 @@ def _read_remote_candidates(
     return [_candidate_payload(row) for row in rows]
 
 
+def _group_missing_dependencies(
+    dependencies: Iterable[dict],
+    connection: sqlite3.Connection,
+) -> tuple[list[dict], int]:
+    """Group unresolved card/scene dependencies by the manifest GUID."""
+
+    grouped: dict[str, dict] = {}
+    local_item_missing = 0
+    for dependency in dependencies:
+        guid = str(dependency.get("mod_id") or "").strip()
+        guid_norm = normalize_guid(guid)
+        if not guid_norm or dependency.get("matched"):
+            continue
+        group = grouped.setdefault(
+            guid_norm,
+            {
+                "guid": guid,
+                "guid_norm": guid_norm,
+                "usage_count": 0,
+                "missing_mod_count": 0,
+                "local_item_missing_count": 0,
+                "usages": [],
+            },
+        )
+        if dependency.get("zipmod"):
+            local_item_missing += 1
+            group["local_item_missing_count"] += 1
+        else:
+            group["missing_mod_count"] += 1
+        usage = _dependency_usage(dependency)
+        usage_key = tuple(usage.values())
+        if usage_key not in {tuple(item.values()) for item in group["usages"]}:
+            group["usages"].append(usage)
+        group["usage_count"] += 1
+
+    groups: list[dict] = []
+    for group in grouped.values():
+        candidates = _read_remote_candidates(connection, group["guid_norm"])
+        group["candidates"] = candidates
+        group["candidate_count"] = len(candidates)
+        group["can_download"] = bool(candidates)
+        if candidates:
+            group["display_name"] = candidates[0]["name"]
+            group["status"] = "available"
+            group["status_label"] = "可补全"
+            group["reason"] = "远程索引中找到可下载模组"
+        else:
+            group["display_name"] = group["guid"]
+            group["status"] = "unavailable"
+            group["status_label"] = "不可补全"
+            group["reason"] = "远程索引中没有有效 manifest 记录"
+        groups.append(group)
+
+    groups.sort(key=lambda item: (not item["can_download"], item["display_name"].casefold()))
+    return groups, local_item_missing
+
+
+def _missing_mod_result(
+    card_path: Path,
+    relative_path: str,
+    dependencies: Iterable[dict],
+    connection: sqlite3.Connection,
+    *,
+    resource_type: str,
+    index_path: Path,
+) -> dict:
+    groups, local_item_missing = _group_missing_dependencies(dependencies, connection)
+    available_groups = [item for item in groups if item["can_download"]]
+    unavailable_groups = [item for item in groups if not item["can_download"]]
+    return {
+        "ok": True,
+        "resource_type": resource_type,
+        "card_path": str(card_path),
+        "relative_path": str(relative_path),
+        "index_path": str(index_path.resolve()),
+        "source_url": REMOTE_INDEX_SOURCE,
+        "missing_count": len(groups),
+        "available_count": len(available_groups),
+        "unavailable_count": len(unavailable_groups),
+        "local_item_missing_count": local_item_missing,
+        "groups": groups,
+        "available": available_groups,
+        "unavailable": unavailable_groups,
+    }
+
+
 def inspect_card_missing_mods(
     game_dir: str,
     relative_path: str,
@@ -129,75 +219,58 @@ def inspect_card_missing_mods(
     except (OSError, sqlite3.Error) as exc:
         return {"ok": False, "error": str(exc)}
 
-    grouped: dict[str, dict] = {}
-    local_item_missing = 0
-    for dependency in dependencies:
-        guid = str(dependency.get("mod_id") or "").strip()
-        guid_norm = normalize_guid(guid)
-        if not guid_norm:
-            continue
-        if dependency.get("matched"):
-            continue
-        group = grouped.setdefault(
-            guid_norm,
-            {
-                "guid": guid,
-                "guid_norm": guid_norm,
-                "usage_count": 0,
-                "missing_mod_count": 0,
-                "local_item_missing_count": 0,
-                "usages": [],
-            },
-        )
-        if dependency.get("zipmod"):
-            local_item_missing += 1
-            group["local_item_missing_count"] += 1
-        else:
-            group["missing_mod_count"] += 1
-        usage = _dependency_usage(dependency)
-        usage_key = tuple(usage.values())
-        if usage_key not in {tuple(item.values()) for item in group["usages"]}:
-            group["usages"].append(usage)
-        group["usage_count"] += 1
-
-    groups: list[dict] = []
     try:
-        for group in grouped.values():
-            candidates = _read_remote_candidates(connection, group["guid_norm"])
-            group["candidates"] = candidates
-            group["candidate_count"] = len(candidates)
-            group["can_download"] = bool(candidates)
-            if candidates:
-                group["display_name"] = candidates[0]["name"]
-                group["status"] = "available"
-                group["status_label"] = "可补全"
-                group["reason"] = "远程索引中找到可下载模组"
-            else:
-                group["display_name"] = group["guid"]
-                group["status"] = "unavailable"
-                group["status_label"] = "不可补全"
-                group["reason"] = "远程索引中没有有效 manifest 记录"
-            groups.append(group)
+        result = _missing_mod_result(
+            card_path,
+            relative_path,
+            dependencies,
+            connection,
+            resource_type="character_card",
+            index_path=index_path,
+        )
     finally:
         connection.close()
+    return result
 
-    groups.sort(key=lambda item: (not item["can_download"], item["display_name"].casefold()))
-    available_groups = [item for item in groups if item["can_download"]]
-    unavailable_groups = [item for item in groups if not item["can_download"]]
-    return {
-        "ok": True,
-        "card_path": str(card_path),
-        "relative_path": str(relative_path),
-        "index_path": str(index_path.resolve()),
-        "source_url": REMOTE_INDEX_SOURCE,
-        "missing_count": len(groups),
-        "available_count": len(available_groups),
-        "unavailable_count": len(unavailable_groups),
-        "local_item_missing_count": local_item_missing,
-        "groups": groups,
-        "available": available_groups,
-        "unavailable": unavailable_groups,
-    }
+
+def inspect_scene_missing_mods(
+    game_dir: str,
+    relative_path: str,
+    index_path: Path = DEFAULT_REMOTE_INDEX_PATH,
+) -> dict:
+    """Return remote candidates for unresolved dependencies in one scene card."""
+
+    if not is_hs2_game_dir(game_dir):
+        return {"ok": False, "error": "Please select a valid HS2 game directory."}
+    is_valid, root, error = validate_scene_root(game_dir)
+    if not is_valid:
+        return {"ok": False, "error": error or "Scene-card directory is invalid."}
+    try:
+        card_path = resolve_scene_file(root, relative_path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    parsed = inspect_scene_card_file(card_path)
+    if not parsed or not parsed.get("is_scene_card"):
+        return {"ok": False, "error": "Scene card not found or invalid."}
+
+    try:
+        dependencies = resolve_dependency_records(parsed.get("dependencies") or [])
+        connection = _remote_index_connection(index_path)
+    except (OSError, sqlite3.Error) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        result = _missing_mod_result(
+            card_path,
+            relative_path,
+            dependencies,
+            connection,
+            resource_type="scene_card",
+            index_path=index_path,
+        )
+    finally:
+        connection.close()
+    return result
 
 
 def _safe_component(value: str, fallback: str) -> str:

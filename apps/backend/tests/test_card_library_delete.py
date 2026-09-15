@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from star_manager.services.card_library import delete_character_card  # noqa: E402
 from star_manager.services.mod_database_core import init_db  # noqa: E402
+from star_manager.services import trash  # noqa: E402
 
 
 class CardLibraryDeleteTests(unittest.TestCase):
@@ -37,9 +38,9 @@ class CardLibraryDeleteTests(unittest.TestCase):
                 )
             conn.close()
 
-            with patch("star_manager.services.card_library.is_hs2_game_dir", return_value=True), patch(
-                "star_manager.services.card_library.is_ais_card", return_value=True
-            ):
+            with patch.object(trash, "TRASH_ROOT", root / "runtime" / "trash"), patch(
+                "star_manager.services.card_library.is_hs2_game_dir", return_value=True
+            ), patch("star_manager.services.card_library.is_ais_card", return_value=True):
                 result = delete_character_card(str(game), "female/delete-me.png", db_path, preview_dir)
 
             self.assertTrue(result["ok"])

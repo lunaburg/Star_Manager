@@ -28,6 +28,8 @@ Runtime cache files created by the packaged app are stored next to `Star_Manager
 
 ```text
 apps/release/win-unpacked/runtime/
+|-- remote/
+|   `-- remote_zipmod_index.sqlite  # bundled read-only remote mod index
 |-- star_manager.sqlite
 |-- ais_card_cache.json
 |-- thumbnails/
@@ -39,7 +41,9 @@ apps/release/win-unpacked/runtime/
 
 The complete cache, temporary-file, and cleanup registry is maintained in [缓存与运行时文件登记](runtime-cache-registry.md). In particular, `star_manager.sqlite` also contains local achievement state and must not be treated as a disposable image cache.
 
-The packaged output includes the empty `runtime/` directory beside `Star_Manager.exe`; the application fills its cache subdirectories on first use.
+The packaged output includes only the remote mod index at `runtime/remote/remote_zipmod_index.sqlite`. The source file is `apps/backend/runtime/remote/remote_zipmod_index.sqlite`; `package:win` checks that it exists, packages the app, then resets the release `runtime/` directory and stages the remote index. Local databases, settings, caches, previews, thumbnails, and trash from a previous launch are therefore cleared from every new package. Other runtime files are created by the application on first use.
+
+The release package intentionally excludes the Python backend source/vendor tree and Node modules. The packaged Electron main process starts `resources/backend/star_manager_backend.exe`, while Vite has already bundled the Vue, Three.js and Lottie renderer code into `dist`. Only `en-US` and `zh-CN` Electron locale files are included.
 
 ## Prerequisites
 
@@ -92,9 +96,11 @@ The packaging configuration lives in the `build` field of `apps/package.json`. T
 
 - `dist/**/*`
 - `electron/**/*`
-- `backend/**/*`, excluding `backend/runtime/**/*`
+- `build-resources/**/*`
+- no `node_modules` or Python backend source/vendor files
 - `package.json`
 - `build/backend/star_manager_backend.exe` as `resources/backend/star_manager_backend.exe`
+- `backend/runtime/remote/**/*` as `runtime/remote/**/*` (the read-only remote mod index)
 
 ## Verification
 
@@ -103,7 +109,14 @@ After packaging, confirm the expected files exist:
 ```powershell
 Test-Path .\release\win-unpacked\Star_Manager.exe
 Test-Path .\release\win-unpacked\resources\backend\star_manager_backend.exe
+Test-Path .\release\win-unpacked\runtime\remote\remote_zipmod_index.sqlite
+Test-Path .\release\win-unpacked\resources\app.asar.unpacked\node_modules
+Get-ChildItem .\release\win-unpacked\runtime -Recurse -File | Select-Object -ExpandProperty FullName
 ```
+
+The second command should return `False`; it confirms that Node modules were not copied into the release app. The final command should list only `runtime\remote\remote_zipmod_index.sqlite` immediately after packaging.
+
+The package does not include or reset the user's external Electron settings under `%APPDATA%\star-manager\settings.json`; those settings are outside the release directory and must not be deleted during packaging.
 
 Then perform a smoke launch:
 

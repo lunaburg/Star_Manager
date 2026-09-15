@@ -13,6 +13,7 @@ Star_Manager is an HS2 / AIS resource manager. It indexes a selected game direct
 - [前端 UI 专题索引](docs/frontend-ui/README.md)：页面布局、应用外壳和视觉规范。
 - [模组与资源专题索引](docs/mod_manage/README.md)：模组数据库、角色卡解析和异常诊断。
 - [前后端接口](docs/backend-interface.md)：Electron preload、HTTP 路由和任务协议。
+- [Electron 进程生命周期](docs/electron-process-lifecycle.md)：单实例锁、后端进程树清理和退出等待。
 - [Windows 打包指南](docs/packaging-windows.md)：开发构建、后端打包和产物验证。
 
 ## Product Scope
@@ -247,7 +248,6 @@ Mutation and task routes:
 Current task types:
 
 - `check_game_dir`
-- `search_cards`
 - `extract_mods`
 - `sort_mods`
 - `build_card_database`

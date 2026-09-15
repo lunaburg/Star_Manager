@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import LazyThumbnail from "../LazyThumbnail.vue";
 import LoadingAnimation from "../LoadingAnimation.vue";
+import VirtualCharacterCardGrid from "../VirtualCharacterCardGrid.vue";
 import VirtualClothesCardGrid from "../VirtualClothesCardGrid.vue";
 import characterCardEmptyAnimation from "../../assets/character-card-empty-loading.json";
 import characterCardLoadingAnimation from "../../assets/character-card-loading.json";
@@ -163,6 +164,18 @@ const PROPERTY_PARTS = [
 ];
 
 function dependencyDescriptor(dependency) {
+  if (dependency?.dependency_type === "scene") {
+    return { group: "other", part: "场景地图" };
+  }
+  if (dependency?.displayMode === "mod") {
+    return { group: "other", part: "场景模组" };
+  }
+  if (dependency?.dependency_type === "scene_item") {
+    return { group: "other", part: "场景物品" };
+  }
+  if (dependency?.dependency_type === "scene_pattern") {
+    return { group: "other", part: "场景图案" };
+  }
   const property = String(dependency.property || "").replace(/^outfit\./i, "");
   const category = CATEGORY_PARTS[String(dependency.category_no || "").trim()];
   if (/^accessory\d+\./i.test(property) && category) {
@@ -195,15 +208,57 @@ function dependencyStatus(dependency) {
   return { label: "模组未安装", state: "mod-missing" };
 }
 
-function buildDependencyGroups(dependencies) {
-  const buckets = new Map(DEPENDENCY_GROUPS.map((group) => [group.key, []]));
+function collapseUnmatchedSceneDependencies(dependencies) {
+  const result = [];
+  const unmatchedByMod = new Map();
   for (const dependency of dependencies || []) {
+    const modId = String(dependency?.mod_id || "").trim();
+    if (dependency?.matched || !modId) {
+      result.push(dependency);
+      continue;
+    }
+
+    const key = modId.toLowerCase();
+    const existing = unmatchedByMod.get(key);
+    if (existing) {
+      existing.missingDependencyCount += 1;
+      existing.missingDependencies.push(dependency);
+      continue;
+    }
+
+    const aggregate = {
+      ...dependency,
+      displayMode: "mod",
+      name: dependency.zipmod?.name || modId,
+      item: null,
+      matched: false,
+      missingDependencyCount: 1,
+      missingDependencies: [dependency]
+    };
+    unmatchedByMod.set(key, aggregate);
+    result.push(aggregate);
+  }
+  return result;
+}
+
+function buildDependencyGroups(dependencies, { collapseUnmatchedByMod = false } = {}) {
+  const displayDependencies = collapseUnmatchedByMod
+    ? collapseUnmatchedSceneDependencies(dependencies)
+    : dependencies || [];
+  const buckets = new Map(DEPENDENCY_GROUPS.map((group) => [group.key, []]));
+  for (const dependency of displayDependencies) {
     const descriptor = dependencyDescriptor(dependency);
     buckets.get(descriptor.group).push({
       ...dependency,
       partLabel: descriptor.part,
-      displayName: dependency.item?.name || dependency.name || dependency.mod_id || "未知物品",
-      sourceName: dependency.item?.source_mod || dependency.zipmod?.name || dependency.mod_id || "来源未知",
+      displayName: dependency.displayMode === "mod"
+        ? dependency.zipmod?.name || dependency.mod_id || "未知模组"
+        : dependency.dependency_type === "scene"
+        ? dependency.zipmod?.name || dependency.name || dependency.mod_id || "未知场景地图"
+        : dependency.item?.name || dependency.name || dependency.mod_id || "未知物品",
+      sourceName: dependency.displayMode === "mod"
+        ? `${dependency.mod_id || "未知 GUID"} · ${dependency.missingDependencyCount || 1} 项未匹配本地数据库`
+        : dependency.item?.source_mod || dependency.zipmod?.name || dependency.mod_id || "来源未知",
       status: dependencyStatus(dependency)
     });
   }
@@ -225,6 +280,14 @@ const clothesDependencyGroups = computed(() => (
   buildDependencyGroups(ctx.selectedClothesCard?.dependencies || [])
 ));
 
+const sceneDependencyGroups = computed(() => (
+  buildDependencyGroups(ctx.selectedSceneCard?.dependencies || [], { collapseUnmatchedByMod: true })
+));
+
+const sceneDependencyDisplayCount = computed(() => (
+  sceneDependencyGroups.value.reduce((total, group) => total + group.items.length, 0)
+));
+
 const cardModeMeta = computed(() => {
   const modes = {
       clothes: {
@@ -236,12 +299,9 @@ const cardModeMeta = computed(() => {
         detail: "服装卡按 female / male 目录浏览，点击卡片可查看依赖模组和文件信息。"
     },
     scene: {
-      eyebrow: "SCENE CARD LIBRARY",
       title: "场景卡浏览器",
-      description: "浏览 Studio 场景卡资源。",
       root: "UserData\\studio\\scene",
-      accent: "scene",
-      detail: "场景卡会按场景文件夹和缩略图组织，后续接入独立索引后将在此处显示。"
+      accent: "scene"
     }
   };
   return modes[ctx.cardBrowserMode] || null;
@@ -256,7 +316,7 @@ const cardModeMeta = computed(() => {
               <div class="module-head">
                 <div><h1>人物卡浏览器（{{ ctx.cardBrowserCountText }}）</h1><p class="subtext mono">{{ ctx.cardFolderDisplay }}</p></div>
                 <button
-                  class="module-icon-button character-refresh-button"
+                  class="module-icon-button card-browser-refresh-button"
                   type="button"
                   :disabled="ctx.cardLibrary.loading || !ctx.cardLibrary.validGameDir"
                   aria-label="刷新当前目录人物卡"
@@ -508,53 +568,15 @@ const cardModeMeta = computed(() => {
                   <strong>{{ ctx.cardDependencyFilter === 'missing' && ctx.cards.length ? '当前目录没有依赖缺失的人物卡' : ctx.cardDependencyFilter === 'favorite' && ctx.cards.length ? '当前目录还没有收藏的人物卡' : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cardTagFilter.scope === 'library' ? `人物卡库中没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cards.length ? `当前目录没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : '未找到人物卡' }}</strong>
                   <span class="subtext mono">{{ ctx.cardTagFilter.scope === 'library' && ctx.cardDependencyFilter.startsWith('tag:') ? 'UserData/chara · 全库' : ctx.cardFolderDisplay }}</span>
                 </div>
-                <template v-else>
-                  <div
-                    v-for="card in ctx.visibleCards"
-                    :key="card.id"
-                    role="button"
-                    tabindex="0"
-                    class="char-card"
-                    :class="{ selected: ctx.selectedCards.has(card.absolutePath), favorite: card.favorite, 'favorite-theme-neon': card.favorite && ctx.managerSettings.favoriteCardTheme === 'neon', 'favorite-theme-sakura': card.favorite && ctx.managerSettings.favoriteCardTheme === 'sakura', 'favorite-theme-obsidian': card.favorite && ctx.managerSettings.favoriteCardTheme === 'obsidian', 'bulk-mode': ctx.cardBulkMode }"
-                    :aria-pressed="ctx.selectedCards.has(card.absolutePath)"
-                    @click="ctx.handleCardClick(card)"
-                    @keydown.enter.prevent="ctx.handleCardClick(card)"
-                    @keydown.space.prevent="ctx.handleCardClick(card)"
-                  >
-                    <span v-if="ctx.selectedCards.has(card.absolutePath)" class="check">✓</span>
-                    <span v-if="card.missingCount > 0" class="card-missing-badge">缺 {{ card.missingCount }}</span>
-                    <span class="portrait">
-                      <LazyThumbnail :src="card.thumbnailUrl" :alt="card.name + ' preview'" />
-                    </span>
-                    <span v-if="card.favorite && ctx.managerSettings.favoriteCardTheme === 'sakura'" class="card-theme-petals" aria-hidden="true">
-                      <i v-for="petalIndex in 5" :key="petalIndex"></i>
-                    </span>
-                    <span v-if="card.favorite && ctx.managerSettings.favoriteCardTheme === 'obsidian'" class="card-theme-embers" aria-hidden="true">
-                      <i v-for="emberIndex in 6" :key="emberIndex"></i>
-                    </span>
-                    <span
-                      v-if="card.tags?.length"
-                      class="card-hover-tags"
-                      role="tooltip"
-                      aria-label="人物卡标签"
-                    >
-                      <span class="card-hover-tag-list">
-                        <span
-                          v-for="tag in card.tags"
-                          :key="tag"
-                          class="card-hover-tag"
-                          :class="cardTagTone(tag)"
-                        >
-                          {{ tag }}
-                        </span>
-                      </span>
-                    </span>
-                    <span class="card-caption">
-                      <strong v-card-name-scroll><span class="card-name-text">{{ card.name }}</span></strong>
-                      <span>{{ card.modifiedAt }}</span>
-                    </span>
-                  </div>
-                </template>
+                <VirtualCharacterCardGrid
+                  v-else
+                  :rows="ctx.visibleCards"
+                  :selected-ids="ctx.selectedCards"
+                  :bulk-mode="ctx.cardBulkMode"
+                  :favorite-theme="ctx.managerSettings.favoriteCardTheme"
+                  :card-tag-tone="cardTagTone"
+                  @card-click="ctx.handleCardClick"
+                />
               </div>
             </section>
             <aside class="panel side-panel character-side-panel">
@@ -1266,7 +1288,7 @@ const cardModeMeta = computed(() => {
           <p class="subtext mono">UserData/coordinate{{ ctx.selectedClothesFolder ? `/${ctx.selectedClothesFolder}` : '' }}</p>
         </div>
         <button
-          class="module-icon-button"
+          class="module-icon-button card-browser-refresh-button"
           type="button"
           :disabled="ctx.clothesLibrary.loading || !ctx.clothesLibrary.validGameDir"
           aria-label="刷新服装卡库"
@@ -1352,7 +1374,7 @@ const cardModeMeta = computed(() => {
               @keydown.space.prevent.stop="ctx.toggleClothesFolder(folder)"
             >{{ folder.hasChildren ? (folder.expanded ? '-' : '+') : '·' }}</button>
             <span class="tree-name clothes-folder-name">{{ folder.name }}</span>
-            <span class="clothes-folder-count" :title="folder.countIsCandidate ? '目录树快速统计：PNG 候选数量，点击后校验服装卡' : ''">
+            <span class="clothes-folder-count">
               {{ folder.count }}
             </span>
           </div>
@@ -1450,52 +1472,281 @@ const cardModeMeta = computed(() => {
     </aside>
   </div>
 </section>
-<section v-else class="view card-type-view">
-  <div class="card-type-layout">
-    <section class="panel card-type-browser-panel card-type-browser-panel--scene">
-      <div class="card-type-hero">
-        <div class="card-type-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
-            <circle cx="16.5" cy="8" r="1.5"></circle>
-            <path d="m5.5 17 4.5-5 3 3 2-2 3.5 4M6 17h12"></path>
-          </svg>
-        </div>
+<section v-else class="view scene-card-view">
+  <div class="scene-card-layout">
+    <section class="panel clothes-browser-panel scene-browser-panel">
+      <div class="module-head clothes-browser-head">
         <div>
-          <span class="card-type-eyebrow">{{ cardModeMeta?.eyebrow }}</span>
-          <h1>{{ cardModeMeta?.title }}</h1>
-          <p>{{ cardModeMeta?.description }}</p>
+          <h1>场景卡浏览器（{{ ctx.sceneCardCountText }}）</h1>
+          <p class="subtext mono">UserData/studio/scene{{ ctx.selectedSceneFolder ? `/${ctx.selectedSceneFolder}` : '' }}</p>
         </div>
-      </div>
-      <div class="card-type-toolbar">
-        <span class="card-type-path mono">{{ cardModeMeta?.root }}</span>
-        <span class="card-type-status">浏览器已切换</span>
-      </div>
-      <div class="card-type-empty-state">
-        <div class="card-type-empty-graphic" aria-hidden="true">
-          <svg viewBox="0 0 64 64" focusable="false">
-            <rect x="10" y="9" width="44" height="46" rx="5"></rect>
-            <path d="M18 20h28M18 29h20M18 38h24M18 47h12"></path>
-            <circle cx="46" cy="46" r="8"></circle>
-            <path d="m43 46 2 2 4-5"></path>
+        <button
+          class="module-icon-button card-browser-refresh-button"
+          type="button"
+          :disabled="ctx.sceneLibrary.loading || !ctx.sceneLibrary.validGameDir"
+          aria-label="刷新场景卡库"
+          title="刷新场景卡库"
+          @click="ctx.refreshSceneCards"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M20 11a8 8 0 0 0-14.8-4L3.5 9" />
+            <path d="M3.5 4.5V9h4.5" />
+            <path d="M4 13a8 8 0 0 0 14.8 4L20.5 15" />
+            <path d="M20.5 19.5V15H16" />
           </svg>
+        </button>
+      </div>
+
+      <div class="card-grid clothes-card-grid scene-card-grid" @scroll.passive="ctx.handleSceneCardGridScroll">
+        <div v-if="ctx.sceneLibrary.loading && !ctx.sceneCards.length" class="clothes-card-state">
+          <LoadingAnimation class="card-loading-animation" :animation-data="characterCardLoadingAnimation" />
+          <strong>正在读取场景卡</strong>
         </div>
-        <strong>{{ cardModeMeta?.title }}子界面</strong>
-        <p>{{ cardModeMeta?.detail }}</p>
+        <div v-else-if="ctx.sceneLibrary.checked && !ctx.sceneLibrary.validGameDir" class="clothes-card-state">
+          <strong>请选择有效的游戏目录</strong>
+          <span class="subtext">需要存在 UserData/studio/scene</span>
+        </div>
+        <div v-else-if="ctx.sceneLibrary.error" class="clothes-card-state">
+          <strong>{{ ctx.sceneLibrary.error }}</strong>
+        </div>
+        <div v-else-if="!ctx.visibleSceneCards.length" class="clothes-card-state">
+          <strong>当前目录没有场景卡</strong>
+          <span class="subtext mono">UserData/studio/scene{{ ctx.selectedSceneFolder ? `/${ctx.selectedSceneFolder}` : '' }}</span>
+        </div>
+        <VirtualClothesCardGrid
+          v-else-if="ctx.visibleSceneCards.length"
+          :rows="ctx.visibleSceneCards"
+          :selected-id="ctx.selectedSceneDetailPath"
+          variant="scene"
+          :aspect-width="320"
+          :aspect-height="180"
+          aria-label="场景卡列表"
+          @card-click="ctx.handleSceneCardClick"
+        />
+        <div v-if="ctx.sceneLibrary.loadingMore" class="clothes-card-load-more">正在继续读取场景卡…</div>
       </div>
     </section>
-    <aside class="panel card-type-side-panel">
-      <span class="card-type-side-kicker">CARD TYPE</span>
-      <h2>{{ cardModeMeta?.title }}</h2>
-      <div class="card-type-side-row">
-        <span>当前游戏目录</span>
-        <strong>{{ ctx.paths.gameDir ? '已选择' : '未选择' }}</strong>
+
+    <aside class="panel side-panel character-side-panel clothes-side-panel scene-side-panel">
+      <div class="module-head character-side-head">
+        <div>
+          <h2>{{ ctx.sceneSideMode === 'tree' ? '场景卡目录' : '场景卡详情' }}</h2>
+          <p class="subtext">{{ ctx.sceneSideMode === 'tree' ? 'UserData/studio/scene' : '当前场景卡' }}</p>
+        </div>
+        <div class="side-toggle" aria-label="场景卡侧栏视图">
+          <button type="button" :class="{ active: ctx.sceneSideMode === 'tree' }" @click="ctx.sceneSideMode = 'tree'">目录</button>
+          <button type="button" :class="{ active: ctx.sceneSideMode === 'detail' }" @click="ctx.sceneSideMode = 'detail'">详情</button>
+        </div>
       </div>
-      <div class="card-type-side-row">
-        <span>资源根目录</span>
-        <code>{{ cardModeMeta?.root }}</code>
+
+      <div v-if="ctx.sceneSideMode === 'tree'" class="clothes-directory-section">
+        <div class="clothes-directory-tree">
+          <div
+            v-for="folder in ctx.sceneFolders"
+            :key="folder.id"
+            class="tree-row clothes-tree-row"
+            :class="{ active: ctx.selectedSceneFolder === folder.relativePath }"
+            :style="{ paddingLeft: `${10 + folder.depth * 18}px` }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="folder.hasChildren ? folder.expanded : undefined"
+            @click="ctx.selectSceneFolder(folder.relativePath)"
+            @keydown.enter.prevent="ctx.selectSceneFolder(folder.relativePath)"
+            @keydown.space.prevent="ctx.selectSceneFolder(folder.relativePath)"
+          >
+            <button
+              type="button"
+              class="tree-toggle clothes-tree-toggle"
+              :class="{ placeholder: !folder.hasChildren }"
+              :disabled="!folder.hasChildren"
+              :aria-label="folder.hasChildren ? `${folder.expanded ? '收起' : '展开'} ${folder.name}` : undefined"
+              @click.stop="ctx.toggleSceneFolder(folder)"
+              @keydown.enter.stop="ctx.toggleSceneFolder(folder)"
+              @keydown.space.prevent.stop="ctx.toggleSceneFolder(folder)"
+            >{{ folder.hasChildren ? (folder.expanded ? '-' : '+') : '·' }}</button>
+            <span class="tree-name clothes-folder-name">{{ folder.name }}</span>
+            <span class="clothes-folder-count">{{ folder.count }}</span>
+          </div>
+        </div>
       </div>
-      <p class="subtext">使用左侧三个卡片类型按钮切换浏览子界面。</p>
+
+      <div v-else class="clothes-detail-section">
+        <template v-if="ctx.selectedSceneCard">
+          <div class="clothes-detail-preview scene-detail-preview">
+            <img class="scene-detail-preview-image" :src="ctx.selectedSceneCard.thumbnailUrl || ctx.selectedSceneCard.coverUrl" :alt="ctx.selectedSceneCard.name + ' preview'">
+          </div>
+          <div class="tabs mod-detail-tabs clothes-detail-tabs scene-detail-tabs" role="tablist" aria-label="场景卡详情视图">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="ctx.sceneDetailTab === '详情'"
+              :class="{ active: ctx.sceneDetailTab === '详情' }"
+              @click="ctx.sceneDetailTab = '详情'"
+            >详情</button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="ctx.sceneDetailTab === '关联'"
+              :class="{ active: ctx.sceneDetailTab === '关联' }"
+              @click="ctx.sceneDetailTab = '关联'"
+            >关联</button>
+          </div>
+          <div v-if="ctx.sceneDetailTab === '详情'" class="clothes-detail-tab-panel">
+            <h2 class="clothes-detail-title">{{ ctx.selectedSceneCard.name }}</h2>
+            <p class="subtext mono clothes-detail-path">{{ ctx.selectedSceneCard.relativePath }}</p>
+            <div class="clothes-detail-meta">
+              <span>文件大小 <b>{{ ctx.formatBytes(ctx.selectedSceneCard.fileSize) }}</b></span>
+              <span>修改时间 <b>{{ ctx.selectedSceneCard.modifiedAt || '-' }}</b></span>
+            </div>
+            <button class="clothes-open-directory" type="button" @click="ctx.openSceneDirectory(ctx.selectedSceneCard.directory)">打开所在目录</button>
+          </div>
+          <div v-else-if="ctx.sceneDetailTab === '关联'" class="clothes-detail-tab-panel">
+            <div v-if="ctx.sceneLibrary.detailLoading" class="detail-inline-state">正在解析场景卡依赖...</div>
+            <div v-else-if="!ctx.selectedSceneCard.dependencies?.length" class="clothes-detail-empty">暂无关联模组。</div>
+            <div v-else class="card-dependency-browser scene-dependency-browser">
+              <div class="card-dependency-overview">
+                <span>
+                  <strong>{{ sceneDependencyDisplayCount }}</strong>项场景依赖
+                  <small v-if="ctx.sceneDependencyRemoteSummary.availableCount">可补全 {{ ctx.sceneDependencyRemoteSummary.availableCount }} 个模组</small>
+                </span>
+                <div class="card-dependency-overview-actions">
+                  <button
+                    v-if="ctx.sceneDependencyRemoteSummary.missingCount > 0 && ctx.sceneDependencyRemoteSummary.availableCount > 0"
+                    type="button"
+                    class="card-dependency-install-all"
+                    :disabled="ctx.cardDependencyRemoteBusy && !ctx.cardDependencyRemote.allTaskId"
+                    :title="ctx.cardDependencyRemote.allTaskId ? (ctx.cardDependencyRemote.allStatus === 'paused' ? '点击继续任务' : '点击暂停任务') : '安装全部可获取的缺失模组'"
+                    @click.stop="ctx.cardDependencyRemote.allTaskId ? ctx.toggleAllCardDependencies() : ctx.installAllCardDependencies()"
+                  >
+                    {{ ctx.cardDependencyRemote.allTaskId
+                      ? (ctx.cardDependencyRemote.allStatus === 'paused' ? '继续全部' : '暂停全部')
+                      : (ctx.cardDependencyRemoteBusy ? '准备中...' : '全部安装') }}
+                  </button>
+                </div>
+              </div>
+              <section
+                v-for="group in sceneDependencyGroups"
+                :key="group.key"
+                class="card-dependency-group"
+                :class="`tone-${group.tone}`"
+              >
+                <header class="card-dependency-group-head">
+                  <span class="dependency-group-title"><strong>{{ group.label }}</strong></span>
+                  <span class="dependency-group-count">{{ group.items.length }}</span>
+                </header>
+                <div class="card-dependency-list">
+                  <div
+                    v-for="dependency in group.items"
+                    :key="dependency.id || `${dependency.property}-${dependency.mod_id}`"
+                    class="card-dependency-item"
+                    :class="dependency.status.state"
+                    role="button"
+                    tabindex="0"
+                    :title="`${dependency.partLabel} · ${dependency.status.label}`"
+                    @click="ctx.openCardDependencyItem(dependency)"
+                    @keydown.enter.prevent="ctx.openCardDependencyItem(dependency)"
+                    @keydown.space.prevent="ctx.openCardDependencyItem(dependency)"
+                  >
+                    <span class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : (dependency.matched ? 'ok' : 'missing')">
+                      <LazyThumbnail
+                        v-if="dependency.item?.thumbnailUrl"
+                        :src="dependency.item.thumbnailUrl"
+                        :alt="dependency.displayName + ' thumbnail'"
+                      />
+                      <span v-else>{{ dependency.displayMode === 'mod' ? 'MOD' : (dependency.dependency_type === 'scene' ? (dependency.matched ? 'MAP' : 'MISS') : (dependency.matched ? 'ITEM' : 'MISS')) }}</span>
+                    </span>
+                    <span class="card-dependency-main">
+                      <strong>{{ dependency.displayName }}</strong>
+                      <span class="dependency-item-meta">
+                        <span class="dependency-part-label">{{ dependency.partLabel }}</span>
+                        <small>{{ dependency.sourceName }}</small>
+                        <small v-if="dependency.displayMode === 'mod'">已合并同模组缺失项</small>
+                      </span>
+                    </span>
+                    <span class="dependency-match-actions">
+                      <span
+                        v-if="dependency.status.state === 'matched'"
+                        class="dependency-match-state"
+                        :class="dependency.status.state"
+                      >
+                        {{ dependency.status.label }}
+                      </span>
+                      <template v-if="['mod-missing', 'item-missing'].includes(dependency.status.state)">
+                        <div v-if="ctx.cardDependencyInlineProgress(dependency)" class="dependency-inline-progress" aria-live="polite">
+                          <div class="dependency-inline-progress-head">
+                            <span>{{ ctx.cardDependencyInlineProgress(dependency).phase === 'download' ? '下载' : '安装' }}</span>
+                            <span class="dependency-inline-progress-actions">
+                              <strong>{{ Math.round(ctx.cardDependencyInlineProgress(dependency).phase === 'download' ? ctx.cardDependencyInlineProgress(dependency).downloadProgress : ctx.cardDependencyInlineProgress(dependency).installProgress) }}%</strong>
+                              <button
+                                type="button"
+                                class="dependency-inline-control"
+                                :title="ctx.cardDependencyRemote.statuses[ctx.normalizeCardDependencyGuid(dependency)] === 'paused' ? '继续任务' : '暂停任务'"
+                                :aria-label="ctx.cardDependencyRemote.statuses[ctx.normalizeCardDependencyGuid(dependency)] === 'paused' ? '继续任务' : '暂停任务'"
+                                @click.stop="ctx.installCardDependency(dependency)"
+                              >
+                                <svg v-if="ctx.cardDependencyRemote.statuses[ctx.normalizeCardDependencyGuid(dependency)] === 'paused'" viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M8 5.5v13l10-6.5L8 5.5Z" />
+                                </svg>
+                                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M7 5v14M17 5v14" />
+                                </svg>
+                              </button>
+                            </span>
+                          </div>
+                          <template v-if="ctx.cardDependencyInlineProgress(dependency).phase === 'download'">
+                            <div class="dependency-inline-progress-stage download">
+                              <div class="dependency-inline-progress-track"><span :style="{ width: `${ctx.cardDependencyInlineProgress(dependency).downloadProgress}%` }"></span></div>
+                              <small>{{ ctx.formatDownloadSpeed(ctx.cardDependencyInlineProgress(dependency).downloadSpeedBps) }}</small>
+                            </div>
+                          </template>
+                          <template v-else-if="ctx.cardDependencyInlineProgress(dependency).phase === 'install'">
+                            <div class="dependency-inline-progress-stage install">
+                              <div class="dependency-inline-progress-track"><span :style="{ width: `${ctx.cardDependencyInlineProgress(dependency).installProgress}%` }"></span></div>
+                              <small>正在写入索引</small>
+                            </div>
+                          </template>
+                        </div>
+                        <button
+                          v-if="ctx.cardDependencyRemote.taskIds[ctx.normalizeCardDependencyGuid(dependency)]"
+                          type="button"
+                          class="dependency-cancel-download"
+                          title="取消下载"
+                          @click.stop="ctx.cancelCardDependency(dependency)"
+                        >
+                          取消下载
+                        </button>
+                        <button
+                          v-else-if="ctx.cardDependencyRemoteFor(dependency)?.status === 'available'"
+                          type="button"
+                          class="dependency-install-button"
+                          title="安装此模组"
+                          @click.stop="ctx.installCardDependency(dependency)"
+                        >
+                          {{ ctx.cardDependencyRemote.busyGuids[ctx.normalizeCardDependencyGuid(dependency)] ? '准备中...' : '安装' }}
+                        </button>
+                        <span
+                          v-else-if="ctx.cardDependencyRemoteFor(dependency)?.status === 'unavailable'"
+                          class="dependency-unavailable-label"
+                        >
+                          无法获取
+                        </span>
+                        <span v-else class="dependency-checking-label">检查中</span>
+                        <small
+                          v-if="ctx.cardDependencyRemote.notices[ctx.normalizeCardDependencyGuid(dependency)]"
+                          class="dependency-install-notice"
+                        >
+                          {{ ctx.cardDependencyRemote.notices[ctx.normalizeCardDependencyGuid(dependency)] }}
+                        </small>
+                      </template>
+                    </span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </template>
+        <div v-else class="clothes-detail-empty">选择一张场景卡查看依赖与文件信息。</div>
+      </div>
     </aside>
   </div>
 </section>

@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
-from time import sleep, time
+from time import perf_counter, sleep, time
 from uuid import uuid4
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +79,7 @@ class TaskState:
     total_bytes: int = 0
     current_file: str = ""
     phase_message: str = ""
+    finished_at: float = 0
 
     def to_dict(self) -> dict:
         return {
@@ -101,6 +102,7 @@ class TaskState:
             "cancel_requested": self.cancel_requested,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "finished_at": self.finished_at,
         }
 
 
@@ -164,7 +166,6 @@ class TaskStore:
 task_store = TaskStore()
 SUPPORTED_TASK_TYPES = {
     "check_game_dir",
-    "search_cards",
     "extract_mods",
     "sort_mods",
     "build_card_database",
@@ -212,6 +213,11 @@ SUPPORTED_API_ROUTES = {
     "/library/clothes",
     "/library/clothes/detail",
     "/library/clothes/image",
+    "/library/scene/tree",
+    "/library/scene",
+    "/library/scene/detail",
+    "/library/scene/image",
+    "/library/scene/missing-mods",
     "/cards/database",
     "/plugins",
     "/tools/sims4/package-fbx",
@@ -223,6 +229,7 @@ SUPPORTED_API_ROUTES = {
     "/mods/database",
     "/mods/items",
     "/mods/items/filters",
+    "/mods/zipmods/authors",
     "/mods/thumbnails",
     "/mods/models/<file.glb>",
     "/mods/zipmods/<id>/diagnostics",
@@ -247,7 +254,7 @@ SUPPORTED_API_ROUTES = {
     "/tasks/<task_id>/control",
 }
 
-BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1"
 
 
 def _safe_author_directory(author: str) -> str:
@@ -399,6 +406,14 @@ def set_step_progress(task: TaskState, index: int, total: int, start: int = 5, e
     index = max(0, min(int(index or 0), total))
     task.progress = start + int(index / total * (end - start))
     task.updated_at = time()
+
+
+def format_elapsed_seconds(duration_ms: object) -> str:
+    try:
+        seconds = max(0.0, float(duration_ms or 0)) / 1000
+    except (TypeError, ValueError):
+        seconds = 0.0
+    return f"{seconds:.1f} 秒"
 
 
 def wait_for_task_resume(task: TaskState) -> None:
@@ -1079,10 +1094,6 @@ def run_task(task: TaskState, payload: dict) -> None:
             game_dir = str(payload.get("game_dir") or "")
             task.title = "Check game directory"
             task.data = {"is_valid": is_hs2_game_dir(game_dir), "game_dir": game_dir}
-        elif task.task_type == "search_cards":
-            input_dir = str(payload.get("input_dir") or "")
-            card_paths = search_ais_cards(input_dir, reporter)
-            task.data = {"card_paths": sorted(card_paths), "card_count": len(card_paths)}
         elif task.task_type == "extract_mods":
             result = extract_mods(
                 ExtractOptions(
@@ -1119,6 +1130,7 @@ def run_task(task: TaskState, payload: dict) -> None:
             mode = str(payload.get("mode") or "incremental")
             if not is_hs2_game_dir(game_dir):
                 raise ValueError("请先选择有效的 HS2 游戏目录，再创建模组数据库。")
+            database_task_started_at = perf_counter()
             reporter.title("Build mod database")
             reporter.message(f"Building mod database from: {game_dir}")
 
@@ -1139,6 +1151,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 reporter.progress(75 + value * 0.25, 100)
                 reporter.message(message)
 
+            card_database_started_at = perf_counter()
             card_stats = build_card_database(
                 Path(game_dir),
                 db_path,
@@ -1147,6 +1160,19 @@ def run_task(task: TaskState, payload: dict) -> None:
                 mode=mode,
                 affected_mod_guids=stats.get("affected_mod_guids"),
             )
+            mod_timings = stats.get("timings") if isinstance(stats.get("timings"), dict) else {}
+            card_timings = card_stats.get("timings") if isinstance(card_stats.get("timings"), dict) else {}
+            timings = {
+                "builtin_resource_index_ms": mod_timings.get("builtin_resource_index_ms", 0),
+                "zipmod_scan_ms": mod_timings.get("zipmod_scan_ms", 0),
+                "item_parse_ms": mod_timings.get("item_parse_ms", 0),
+                "database_write_ms": mod_timings.get("database_write_ms", 0),
+                "character_card_database_ms": card_timings.get(
+                    "card_database_total_ms",
+                    round((perf_counter() - card_database_started_at) * 1000, 2),
+                ),
+                "total_ms": round((perf_counter() - database_task_started_at) * 1000, 2),
+            }
             task.data = {
                 "database_path": str(db_path.resolve()),
                 "thumbnail_dir": str(thumbnail_dir.resolve()),
@@ -1155,7 +1181,17 @@ def run_task(task: TaskState, payload: dict) -> None:
                 "mode": mode,
                 "stats": stats,
                 "card_stats": card_stats,
+                "timings": timings,
             }
+            reporter.message(
+                "数据库耗时汇总："
+                f"原版资源索引 {format_elapsed_seconds(timings['builtin_resource_index_ms'])}；"
+                f"zipmod 扫描 {format_elapsed_seconds(timings['zipmod_scan_ms'])}；"
+                f"物品解析 {format_elapsed_seconds(timings['item_parse_ms'])}；"
+                f"数据库写入 {format_elapsed_seconds(timings['database_write_ms'])}；"
+                f"人物卡数据库 {format_elapsed_seconds(timings['character_card_database_ms'])}；"
+                f"总耗时 {format_elapsed_seconds(timings['total_ms'])}"
+            )
             reporter.message(f"Database created: {db_path.resolve()}")
             reporter.message(f"Thumbnail cache: {thumbnail_dir.resolve()}")
             if stats.get("thumbnail_profile_log"):
@@ -1765,6 +1801,7 @@ def run_task(task: TaskState, payload: dict) -> None:
             task.phase_progress = 100
             task.download_speed_bps = 0
         task.status = "completed"
+        task.finished_at = time()
     except RemoteDownloadCancelled as error:
         task.error = "下载已取消"
         if task.task_type == "download_card_missing_mods":
@@ -1772,6 +1809,7 @@ def run_task(task: TaskState, payload: dict) -> None:
             task.phase_message = str(error)
             task.download_speed_bps = 0
         task.status = "cancelled"
+        task.finished_at = time()
         task.messages.append("Download cancelled")
     except Exception as error:
         task.error = str(error)
@@ -1780,6 +1818,9 @@ def run_task(task: TaskState, payload: dict) -> None:
             task.phase_message = str(error)
             task.download_speed_bps = 0
         task.status = "failed"
+        task.finished_at = time()
         task.messages.append(f"[Error] {error}")
     finally:
+        if not task.finished_at:
+            task.finished_at = time()
         task.updated_at = time()

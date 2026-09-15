@@ -28,6 +28,16 @@
 - `npm run build`（同时验证回收站页面的隐藏顶部栏布局）
 - `apps/backend/tests/test_trash.py` 覆盖移动、恢复、同名冲突和永久删除。
 
+## 测试残留排查记录
+
+曾出现“每次启动应用，回收站都会新增 `Sample/old.zipmod` 和 `delete-me.png`”的现象。回收站记录中的 `source_path` 指向 `Temp\\tmp...`，说明它们不是启动流程或数据库增量建库产生的删除项，而是后端测试夹具。
+
+根因是 `test_card_library_delete.py` 和 `test_duplicate_cleanup_policy.py` 直接调用真实的删除/重复模组替换逻辑，却没有临时覆盖 `star_manager.services.trash.TRASH_ROOT`。测试夹具被移入开发运行时的 `apps/backend/runtime/trash`，临时源目录随后被清理，导致这些不可恢复的测试文件在应用下次启动时仍被回收站页面读出。
+
+当前两个测试均将 `TRASH_ROOT` 指向各自 `TemporaryDirectory` 下的 `runtime/trash`，测试结束后随临时目录一起清理；生产回收站路径和用户删除行为不变。排查时可通过回收站条目的 `source_path` 判断是否为测试残留：指向 `Temp\\tmp...` 且名称为测试夹具时，可在确认不是用户数据后清理对应条目。
+
+验证：两个受影响测试通过，并确认测试运行前后开发运行时回收站条目数量不增加；`npm run build` 与 Python 编译检查也应继续通过。
+
 ## 页面空白排查记录
 
 曾出现“回收站导航已选中，但右侧工作区完全空白”的现象。后端 `/trash` 能正常返回条目，且 `TrashView` 也已挂载；根因是回收站隐藏了全局顶部栏，却仍继承主布局的 `76px minmax(0, 1fr)` 两行网格。回收站页面被放进第一行，随后被工作区的 `overflow: hidden` 裁掉，因此连空状态也不可见。

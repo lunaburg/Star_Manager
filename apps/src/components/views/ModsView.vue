@@ -173,7 +173,7 @@ function modStatusTone(status) {
                 placeholder="输入作者关键字"
                 autocomplete="off"
                 spellcheck="false"
-                @focus="ctx.itemAuthorFilterOpen = true"
+                @focus="ctx.itemAuthorFilterOpen = true; ctx.loadItemFilters()"
                 @blur="ctx.closeItemAuthorFilterSoon"
                 @input="ctx.itemAuthorFilterOpen = true; ctx.scheduleItemSearch()"
                 @keydown.enter.prevent="ctx.applyItemFilters"
@@ -183,7 +183,7 @@ function modStatusTone(status) {
                 type="button"
                 aria-label="显示作者列表"
                 @mousedown.prevent
-                @click="ctx.itemAuthorFilterOpen = !ctx.itemAuthorFilterOpen"
+                @click="ctx.loadItemFilters(); ctx.itemAuthorFilterOpen = !ctx.itemAuthorFilterOpen"
               >
                 ▼
               </button>
@@ -243,7 +243,7 @@ function modStatusTone(status) {
                 aria-label="作者筛选"
                 placeholder="输入作者关键字"
                 autocomplete="off"
-                @focus="ctx.modAuthorFilterOpen = true"
+                @focus="ctx.modAuthorFilterOpen = true; ctx.loadZipmodAuthors()"
                 @blur="ctx.closeModAuthorFilterSoon"
                 @input="ctx.modAuthorFilterOpen = true; ctx.scheduleModAuthorFilter()"
                 @keydown.enter.prevent="ctx.applyModFilters"
@@ -253,7 +253,7 @@ function modStatusTone(status) {
                 type="button"
                 aria-label="显示作者列表"
                 @mousedown.prevent
-                @click="ctx.modAuthorFilterOpen = !ctx.modAuthorFilterOpen"
+                @click="ctx.loadZipmodAuthors(); ctx.modAuthorFilterOpen = !ctx.modAuthorFilterOpen"
               >
                 ▼
               </button>

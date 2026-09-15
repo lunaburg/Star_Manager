@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import tempfile
+from time import perf_counter
 import uuid
 import zipfile
 from pathlib import Path
@@ -25,7 +26,6 @@ from star_manager.services.mod_database_core import (
     Unity3dProvider,
     Unity3dStatus,
     ZipmodCandidate,
-    get_database_metadata,
     init_db,
     set_database_metadata,
     timestamp_to_utc,
@@ -123,7 +123,6 @@ WRITE_END_PROGRESS = 96
 FINALIZE_PROGRESS = 98
 AUTO_REBUILD_MAX_CHANGES = 200
 AUTO_REBUILD_MAX_RATIO = 0.05
-MOD_ITEM_PARSER_VERSION = "8"
 
 
 def choose_build_worker_count(primary_zipmod_count: int) -> int:
@@ -271,53 +270,6 @@ def build_candidates_from_file_stats(
         ):
             progress_callback("manifest", index, total)
     return candidates, changed_paths, stats
-
-
-def thumbnail_retry_guids(conn: sqlite3.Connection) -> set[str]:
-    return {
-        str(row["guid"])
-        for row in conn.execute(
-            """
-            SELECT DISTINCT zipmods.guid
-            FROM zipmods
-            INNER JOIN mod_items ON mod_items.zipmod_id = zipmods.id
-            WHERE zipmods.scan_status != 'stale'
-              AND mod_items.parse_status = 'ok'
-              AND (
-                    mod_items.thumbnail_status = 'error'
-                 OR (
-                        mod_items.thumbnail_status = 'missing'
-                    AND mod_items.thumb_ab != ''
-                    AND mod_items.thumb_tex != ''
-                    AND mod_items.thumbnail_error IN (
-                        'thumbnail asset not found',
-                        'thumbnail source not found: abdata/' || mod_items.thumb_ab
-                    )
-                 )
-              )
-            """
-        )
-        if str(row["guid"] or "")
-    }
-
-
-def unity3d_retry_guids(conn: sqlite3.Connection) -> set[str]:
-    return {
-        str(row["guid"])
-        for row in conn.execute(
-            """
-            SELECT DISTINCT guid
-            FROM zipmods
-            WHERE scan_status != 'stale'
-              AND (
-                    COALESCE(unity3d_status, '') IN ('missing', 'in_game', 'not_in_mod', 'error')
-                 OR COALESCE(unity3d_missing_count, 0) > 0
-                 OR COALESCE(unity3d_in_game_count, 0) > 0
-              )
-            """
-        )
-        if str(row["guid"] or "")
-    }
 
 
 def assess_database_changes(
@@ -723,6 +675,8 @@ def build_database(
     game_dir = game_dir.resolve()
     db_path = db_path.resolve()
     thumbnail_dir = thumbnail_dir.resolve()
+    build_started_at = perf_counter()
+    phase_timings: dict[str, float] = {}
     db_path.parent.mkdir(parents=True, exist_ok=True)
     thumbnail_dir.mkdir(parents=True, exist_ok=True)
 
@@ -747,6 +701,7 @@ def build_database(
         )
         force_full = str(mode or "incremental").lower() == "full"
         report(1, "Scanning original game resource lists")
+        builtin_started_at = perf_counter()
         builtin_stats = build_builtin_items_index(
             conn,
             game_dir,
@@ -754,10 +709,12 @@ def build_database(
             progress_callback=report,
             mode=mode,
         )
-        report(SCAN_PROGRESS, "Scanning mods/**/*.zipmod")
-        parser_version_changed = (
-            get_database_metadata(conn, "mod_item_parser_version") != MOD_ITEM_PARSER_VERSION
+        phase_timings["builtin_resource_index_ms"] = round(
+            (perf_counter() - builtin_started_at) * 1000,
+            2,
         )
+        report(SCAN_PROGRESS, "Scanning mods/**/*.zipmod")
+        zipmod_scan_started_at = perf_counter()
         existing_primary_paths = {
             str(row["guid"]): str(row["file_path"])
             for row in conn.execute(
@@ -831,9 +788,10 @@ def build_database(
                     guid = str(row["zipmod_guid"] or "").strip()
                     if guid:
                         provider_affected_guids.add(guid)
-        retry_thumbnail_guids = set() if force_full else thumbnail_retry_guids(conn)
-        retry_unity3d_guids = set() if force_full else unity3d_retry_guids(conn)
-        retry_guids = retry_thumbnail_guids | retry_unity3d_guids
+        phase_timings["zipmod_scan_ms"] = round(
+            (perf_counter() - zipmod_scan_started_at) * 1000,
+            2,
+        )
         primary_changed_guids = {
             guid
             for guid, primary in primary_by_guid.items()
@@ -844,9 +802,7 @@ def build_database(
             guid
             for guid, primary in primary_by_guid.items()
             if force_full
-            or parser_version_changed
             or str(primary.path) in changed_paths
-            or guid in retry_guids
             or guid in primary_changed_guids
             or guid in provider_affected_guids
         }
@@ -873,14 +829,11 @@ def build_database(
             "stale_zipmods": 0,
             "reused_zipmods": reuse_stats["reused_zipmods"],
             "changed_zipmods": reuse_stats["changed_zipmods"],
-            "thumbnail_retry_zipmods": len(retry_thumbnail_guids),
-            "unity3d_retry_zipmods": len(retry_unity3d_guids),
             "thumbnail_profile_log": str(thumbnail_profile_log_path.resolve()),
             "thumbnail_profile_run_id": thumbnail_profile_run_id,
             "affected_mod_guids": sorted(affected_mod_guids, key=str.casefold),
             "affected_mod_guid_count": len(affected_mod_guids),
             "primary_changed_guid_count": len(primary_changed_guids),
-            "parser_version_changed": parser_version_changed,
             **builtin_stats,
         }
         report(
@@ -890,6 +843,7 @@ def build_database(
                 f"{worker_count} worker{'s' if worker_count != 1 else ''}"
             ),
         )
+        item_parse_started_at = perf_counter()
         prepared_by_guid: dict[str, PreparedZipmodItems] = {}
         primary_candidates = [
             primary_by_guid[guid]
@@ -946,8 +900,13 @@ def build_database(
                     ),
                     f"Prepared {completed_count}/{total_primary_candidates} primary zipmods",
                 )
+        phase_timings["item_parse_ms"] = round(
+            (perf_counter() - item_parse_started_at) * 1000,
+            2,
+        )
         report(WRITE_START_PROGRESS, "Prepared zipmod items; writing database records")
 
+        database_write_started_at = perf_counter()
         with conn:
             conn.execute("DELETE FROM duplicate_zipmods")
 
@@ -1010,20 +969,27 @@ def build_database(
                 conn.execute("SELECT COUNT(DISTINCT guid) FROM duplicate_zipmods").fetchone()[0]
             )
             set_database_metadata(conn, "last_built_at", now)
-            set_database_metadata(conn, "mod_item_parser_version", MOD_ITEM_PARSER_VERSION)
             report(FINALIZE_PROGRESS, "Finalizing database records")
-            write_thumbnail_profile(
-                {
-                    "event": "build_end",
-                    "run_id": thumbnail_profile_run_id,
-                    "mode": mode,
-                    "game_dir": str(game_dir),
-                    "thumbnail_dir": str(thumbnail_dir),
-                    "started_at": stats_started_at,
-                    "finished_at": utc_now(),
-                    "stats": stats,
-                }
-            )
+        phase_timings["database_write_ms"] = round(
+            (perf_counter() - database_write_started_at) * 1000,
+            2,
+        )
+        stats["timings"] = {
+            **phase_timings,
+            "mod_database_total_ms": round((perf_counter() - build_started_at) * 1000, 2),
+        }
+        write_thumbnail_profile(
+            {
+                "event": "build_end",
+                "run_id": thumbnail_profile_run_id,
+                "mode": mode,
+                "game_dir": str(game_dir),
+                "thumbnail_dir": str(thumbnail_dir),
+                "started_at": stats_started_at,
+                "finished_at": utc_now(),
+                "stats": stats,
+            }
+        )
         report(100, "Database rebuild completed")
         return stats
     finally:
@@ -1110,7 +1076,6 @@ def index_single_zipmod(
                 ).fetchone()[0]
             )
             set_database_metadata(conn, "last_built_at", now)
-            set_database_metadata(conn, "mod_item_parser_version", MOD_ITEM_PARSER_VERSION)
         report(100, f"Indexed target zipmod: {zipmod_path.name}")
         return {
             "zipmod_path": str(zipmod_path),

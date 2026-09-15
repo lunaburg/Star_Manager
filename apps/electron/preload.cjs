@@ -1,6 +1,41 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+const pendingStartupLogs = [];
+const startupLogListeners = new Set();
+
+ipcRenderer.on("startup:log", (_event, payload) => {
+  if (startupLogListeners.size === 0) {
+    pendingStartupLogs.push(payload);
+    return;
+  }
+  for (const listener of startupLogListeners) listener(payload);
+});
+
+function loadStartupWallpaper() {
+  try {
+    const result = ipcRenderer.sendSync("settings:getStartupWallpaper");
+    return {
+      wallpaperPath: String(result?.wallpaperPath || "").trim(),
+      wallpaperType: ["image", "video"].includes(String(result?.wallpaperType || ""))
+        ? String(result.wallpaperType)
+        : ""
+    };
+  } catch {
+    return { wallpaperPath: "", wallpaperType: "" };
+  }
+}
+
+const startupWallpaper = loadStartupWallpaper();
+
 contextBridge.exposeInMainWorld("desktopApi", {
+  startupWallpaper,
+  notifyRendererReady: () => ipcRenderer.send("renderer:ready"),
+  onStartupLog: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    startupLogListeners.add(callback);
+    while (pendingStartupLogs.length) callback(pendingStartupLogs.shift());
+    return () => startupLogListeners.delete(callback);
+  },
   selectDirectory: (title) => ipcRenderer.invoke("dialog:selectDirectory", title),
   selectPackageFile: (title) => ipcRenderer.invoke("dialog:selectPackageFile", title),
   selectUnity3dFile: (title) => ipcRenderer.invoke("dialog:selectUnity3dFile", title),

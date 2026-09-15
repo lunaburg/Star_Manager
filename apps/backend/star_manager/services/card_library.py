@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
@@ -44,6 +45,7 @@ from star_manager.core.coordinate_card import (
     parse_coordinate_payload_parts,
     read_dotnet_string,
 )
+from star_manager.core.scene_card import inspect_scene_card_file
 from star_manager.core.character_profile import (
     CharacterProfileUpdateError,
     replace_character_card_cover_file,
@@ -68,11 +70,15 @@ CARD_ROOT_PARTS = ("UserData", "chara")
 DEFAULT_CARD_PREVIEW_DIR = runtime_root() / "card_previews"
 DEFAULT_CLOTHES_CARD_INDEX_PATH = runtime_root() / "clothes_card_index.sqlite"
 STANDARD_CARD_SIZE = (252, 352)
+SCENE_CARD_SIZE = (320, 180)
 _CLOTHES_CARD_INDEX_SCHEMA_VERSION = 1
 _CLOTHES_CARD_INDEX_SCAN_BUDGET = 96
+_CLOTHES_INDEX_JOBS: dict[str, dict[str, object]] = {}
+_CLOTHES_INDEX_JOBS_LOCK = threading.Lock()
 IGNORED_ROOT_CARD_DIRS = {"navi"}
 MANAGED_CARD_GENDER_DIRS = {"female", "male"}
 COORDINATE_ROOT_PARTS = ("UserData", "coordinate")
+SCENE_ROOT_PARTS = ("UserData", "studio", "scene")
 COORDINATE_GENDER_DIRS = {"female", "male"}
 COORDINATE_CLOTHES_PARTS = (
     "上衣",
@@ -223,6 +229,23 @@ def validate_coordinate_root(game_dir: str) -> tuple[bool, Path, str]:
     return True, root, ""
 
 
+def get_scene_root(game_dir: str) -> Path:
+    game_path = Path(game_dir)
+    userdata = find_child_dir_case_insensitive(game_path, "UserData") or game_path / "UserData"
+    studio = find_child_dir_case_insensitive(userdata, "studio") or userdata / "studio"
+    return find_child_dir_case_insensitive(studio, "scene") or studio / "scene"
+
+
+def validate_scene_root(game_dir: str) -> tuple[bool, Path, str]:
+    if not is_hs2_game_dir(game_dir):
+        return False, get_scene_root(game_dir), "请选择有效的游戏目录"
+
+    root = get_scene_root(game_dir)
+    if not root.is_dir():
+        return False, root, "未找到 UserData/studio/scene 场景卡目录"
+    return True, root, ""
+
+
 def resolve_coordinate_directory(root: Path, relative_path: str = "") -> Path:
     normalized_relative = normalize_relative_path(relative_path)
     candidate = (root / normalized_relative).resolve()
@@ -242,6 +265,28 @@ def resolve_coordinate_file(root: Path, relative_path: str) -> Path:
         raise ValueError("Clothes-card image not found.")
     if candidate.suffix.lower() != ".png":
         raise ValueError("Clothes-card image not found.")
+    return candidate
+
+
+def resolve_scene_directory(root: Path, relative_path: str = "") -> Path:
+    normalized_relative = normalize_relative_path(relative_path)
+    candidate = (root / normalized_relative).resolve()
+    resolved_root = root.resolve()
+    if candidate != resolved_root and resolved_root not in candidate.parents:
+        raise ValueError("Invalid scene-card directory.")
+    if not candidate.is_dir():
+        raise ValueError("Scene-card directory not found.")
+    return candidate
+
+
+def resolve_scene_file(root: Path, relative_path: str) -> Path:
+    normalized_relative = normalize_relative_path(relative_path)
+    candidate = (root / normalized_relative).resolve()
+    resolved_root = root.resolve()
+    if resolved_root not in candidate.parents or not candidate.is_file():
+        raise ValueError("Scene-card image not found.")
+    if candidate.suffix.lower() != ".png":
+        raise ValueError("Scene-card image not found.")
     return candidate
 
 
@@ -493,6 +538,120 @@ def _write_clothes_index_rows(
     )
 
 
+def _list_coordinate_png_files(folder: Path) -> list[tuple[Path, os.stat_result]]:
+    png_files: list[tuple[Path, os.stat_result]] = []
+    try:
+        entries = folder.iterdir()
+    except OSError:
+        return png_files
+    for file_path in entries:
+        if not file_path.is_file() or file_path.suffix.lower() != ".png":
+            continue
+        try:
+            png_files.append((file_path, file_path.stat()))
+        except OSError:
+            continue
+    png_files.sort(key=lambda item: item[0].name.casefold())
+    return png_files
+
+
+def _index_all_clothes_card_files(root: Path, index_path: Path | None = None) -> None:
+    """Validate every coordinate PNG in a background job and persist its result."""
+    conn = _open_clothes_card_index(index_path)
+    try:
+        for current_folder, directory_names, _file_names in os.walk(root):
+            folder = Path(current_folder)
+            directory_names[:] = sorted(directory_names, key=str.casefold)
+            png_files = _list_coordinate_png_files(folder)
+            directory_key = _clothes_index_relative_key(normalize_relative(folder, root))
+            root_key = _clothes_index_root_key(root)
+            current_keys = {
+                _clothes_index_relative_key(normalize_relative(file_path, root))
+                for file_path, _ in png_files
+            }
+            existing_rows = conn.execute(
+                """
+                SELECT *
+                FROM clothes_card_index
+                WHERE root_key = ? AND directory_key = ?
+                """,
+                (root_key, directory_key),
+            ).fetchall()
+            indexed_by_key = {str(row["relative_path_key"]): row for row in existing_rows}
+            stale_keys = set(indexed_by_key) - current_keys
+            if stale_keys:
+                conn.executemany(
+                    "DELETE FROM clothes_card_index WHERE root_key = ? AND relative_path_key = ?",
+                    [(root_key, key) for key in stale_keys],
+                )
+
+            scanned_rows: list[tuple[Path, os.stat_result, dict[str, object] | None]] = []
+            for file_path, stat in png_files:
+                key = _clothes_index_relative_key(normalize_relative(file_path, root))
+                row = indexed_by_key.get(key)
+                if row is not None and _clothes_index_row_matches(row, stat):
+                    continue
+                scanned_rows.append((file_path, stat, inspect_clothes_card_listing_file(file_path)))
+            with conn:
+                _write_clothes_index_rows(conn, root, scanned_rows)
+    finally:
+        conn.close()
+
+
+def _start_clothes_index_job(
+    root: Path,
+    *,
+    force: bool = False,
+    index_path: Path | None = None,
+) -> bool:
+    root_key = _clothes_index_root_key(root)
+    with _CLOTHES_INDEX_JOBS_LOCK:
+        current = _CLOTHES_INDEX_JOBS.get(root_key)
+        if current and current.get("status") == "running":
+            return True
+        if current and current.get("status") == "completed" and not force:
+            return False
+        _CLOTHES_INDEX_JOBS[root_key] = {"status": "running", "error": ""}
+
+    def run() -> None:
+        try:
+            _index_all_clothes_card_files(root, index_path)
+        except Exception as error:  # pragma: no cover - surfaced through the next tree response
+            with _CLOTHES_INDEX_JOBS_LOCK:
+                _CLOTHES_INDEX_JOBS[root_key] = {"status": "error", "error": str(error)}
+            return
+        with _CLOTHES_INDEX_JOBS_LOCK:
+            _CLOTHES_INDEX_JOBS[root_key] = {"status": "completed", "error": ""}
+
+    threading.Thread(target=run, name="star-manager-clothes-index", daemon=True).start()
+    return True
+
+
+def _clothes_index_job_status(root: Path) -> str:
+    with _CLOTHES_INDEX_JOBS_LOCK:
+        return str(_CLOTHES_INDEX_JOBS.get(_clothes_index_root_key(root), {}).get("status") or "")
+
+
+def _clothes_index_valid_counts(root: Path, index_path: Path | None = None) -> dict[str, int]:
+    root_key = _clothes_index_root_key(root)
+    conn = _open_clothes_card_index(index_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT directory_key, COUNT(*) AS valid_count
+            FROM clothes_card_index
+            WHERE root_key = ?
+              AND is_valid = 1
+              AND parser_version = ?
+            GROUP BY directory_key
+            """,
+            (root_key, _CLOTHES_CARD_INDEX_SCHEMA_VERSION),
+        ).fetchall()
+        return {str(row["directory_key"]): int(row["valid_count"] or 0) for row in rows}
+    finally:
+        conn.close()
+
+
 def _clothes_card_listing_payload(
     game_dir: str,
     root: Path,
@@ -682,25 +841,46 @@ def _clothes_card_listing_payload(
         conn.close()
 
 
-def build_clothes_card_tree(game_dir: str) -> dict:
+def build_clothes_card_tree(
+    game_dir: str,
+    *,
+    start_indexing: bool = False,
+    force_index: bool = False,
+    index_path: Path | None = None,
+) -> dict:
     is_valid, root, error = validate_coordinate_root(game_dir)
     if not is_valid:
         return invalid_payload(error)
 
-    node = build_coordinate_tree_node(root, root.resolve())
+    if start_indexing:
+        _start_clothes_index_job(root, force=force_index, index_path=index_path)
+    job_status = _clothes_index_job_status(root)
+    indexing = job_status == "running"
+    valid_counts = (
+        _clothes_index_valid_counts(root, index_path)
+        if job_status == "completed"
+        else None
+    )
+    node = build_coordinate_tree_node(root, root.resolve(), valid_counts=valid_counts)
     return {
         "ok": True,
         "is_valid_game_dir": True,
         "root": str(root),
         "tree": node,
         "total": count_coordinate_tree_cards(node),
+        "indexing": indexing,
     }
 
 
-def build_coordinate_tree_node(folder: Path, root: Path) -> dict:
+def build_coordinate_tree_node(
+    folder: Path,
+    root: Path,
+    *,
+    valid_counts: dict[str, int] | None = None,
+) -> dict:
     entries = sorted(folder.iterdir(), key=lambda item: item.name.casefold())
     children = [
-        build_coordinate_tree_node(child, root)
+        build_coordinate_tree_node(child, root, valid_counts=valid_counts)
         for child in entries
         if child.is_dir()
     ]
@@ -711,12 +891,14 @@ def build_coordinate_tree_node(folder: Path, root: Path) -> dict:
         1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png"
     )
     relative_path = normalize_relative(folder, root)
+    directory_key = _clothes_index_relative_key(relative_path)
+    exact_count = valid_counts.get(directory_key) if valid_counts is not None else None
     return {
         "id": relative_path or ".",
         "name": "服装卡" if folder.resolve() == root.resolve() else folder.name,
         "relative_path": relative_path,
-        "count": direct_png_count,
-        "count_is_candidate": True,
+        "count": direct_png_count if exact_count is None else exact_count,
+        "count_is_candidate": exact_count is None,
         "children": children,
         "has_children": bool(children),
     }
@@ -827,6 +1009,132 @@ def get_clothes_card_detail(game_dir: str, relative_path: str) -> dict:
             "dependencies": resolved_dependencies,
             "dependency_count": len(resolved_dependencies),
         },
+    }
+
+
+def _scene_card_row(game_dir: str, root: Path, card_path: Path, stat: os.stat_result) -> dict[str, object]:
+    card_relative_path = normalize_relative(card_path, root)
+    image_version = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+    image_url = (
+        "/library/scene/image?"
+        + f"game_dir={quote(str(Path(game_dir).resolve()))}&path={quote(card_relative_path)}"
+        + f"&v={quote(image_version)}"
+    )
+    return {
+        "id": card_relative_path,
+        "filename": card_path.name,
+        "name": card_path.stem,
+        "relative_path": card_relative_path,
+        "directory": normalize_relative(card_path.parent, root),
+        "absolute_path": str(card_path),
+        "thumbnail_url": image_url,
+        "cover_url": image_url + "&original=1",
+        "modified_at": int(stat.st_mtime),
+        "file_size": stat.st_size,
+    }
+
+
+def _build_scene_tree_node(folder: Path, root: Path) -> dict[str, object]:
+    entries = sorted(folder.iterdir(), key=lambda item: item.name.casefold())
+    children = [
+        _build_scene_tree_node(child, root)
+        for child in entries
+        if child.is_dir()
+    ]
+    direct_png_count = sum(
+        1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png"
+    )
+    relative_path = normalize_relative(folder, root)
+    return {
+        "id": relative_path or ".",
+        "name": "场景卡" if folder.resolve() == root.resolve() else folder.name,
+        "relative_path": relative_path,
+        "count": direct_png_count,
+        "children": children,
+        "has_children": bool(children),
+    }
+
+
+def _count_scene_tree_cards(node: dict[str, object]) -> int:
+    return int(node.get("count") or 0) + sum(
+        _count_scene_tree_cards(child) for child in node.get("children", [])
+    )
+
+
+def build_scene_card_tree(game_dir: str) -> dict:
+    is_valid, root, error = validate_scene_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    node = _build_scene_tree_node(root, root)
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "tree": node,
+        "total": _count_scene_tree_cards(node),
+    }
+
+
+def list_scene_cards(
+    game_dir: str,
+    relative_path: str = "",
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict:
+    is_valid, root, error = validate_scene_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    folder = resolve_scene_directory(root, relative_path)
+    offset = max(0, int(offset or 0))
+    if limit is not None:
+        limit = max(1, min(int(limit), 240))
+    png_files: list[tuple[Path, os.stat_result]] = []
+    for file_path in folder.iterdir():
+        if not file_path.is_file() or file_path.suffix.lower() != ".png":
+            continue
+        try:
+            png_files.append((file_path, file_path.stat()))
+        except OSError:
+            continue
+    png_files.sort(key=lambda item: item[0].name.casefold())
+    page = png_files[offset:] if limit is None else png_files[offset : offset + limit]
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "relative_path": normalize_relative(folder, root),
+        "cards": [_scene_card_row(game_dir, root, file_path, stat) for file_path, stat in page],
+        "total": len(png_files),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(page) < len(png_files),
+    }
+
+
+def get_scene_card_detail(game_dir: str, relative_path: str) -> dict:
+    is_valid, root, error = validate_scene_root(game_dir)
+    if not is_valid:
+        return invalid_payload(error)
+
+    card_path = resolve_scene_file(root, relative_path)
+    parsed = inspect_scene_card_file(card_path) or {
+        "is_scene_card": False,
+        "dependencies": [],
+        "dependency_count": 0,
+    }
+    resolved_dependencies = resolve_dependency_records(parsed.get("dependencies") or [])
+    stat = card_path.stat()
+    card = _scene_card_row(game_dir, root, card_path, stat)
+    card.update(parsed)
+    card["dependencies"] = resolved_dependencies
+    card["dependency_count"] = len(resolved_dependencies)
+    return {
+        "ok": True,
+        "is_valid_game_dir": True,
+        "root": str(root),
+        "card": card,
     }
 
 
@@ -1052,6 +1360,24 @@ def normalize_card_preview(
     output_path = normalized_card_preview_path(card_path, preview_dir, size)
     if output_path.is_file():
         return output_path
+    return normalize_card_preview_from_data(
+        card_path,
+        card_path.read_bytes(),
+        preview_dir,
+        size,
+    )
+
+
+def normalize_card_preview_from_data(
+    card_path: Path,
+    file_data: bytes,
+    preview_dir: Path = DEFAULT_CARD_PREVIEW_DIR,
+    size: tuple[int, int] = STANDARD_CARD_SIZE,
+) -> Path:
+    """Create a normalized preview without opening the card path again."""
+    output_path = normalized_card_preview_path(card_path, preview_dir, size)
+    if output_path.is_file():
+        return output_path
 
     try:
         from PIL import Image, ImageOps
@@ -1059,7 +1385,7 @@ def normalize_card_preview(
         return card_path
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(card_path) as image:
+    with Image.open(io.BytesIO(file_data)) as image:
         source = image.convert("RGBA")
         fitted = ImageOps.contain(source, size, method=Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", size, (255, 255, 255, 0))
@@ -2363,10 +2689,18 @@ def resolve_dependency_records(records: list[dict], db_path: Path = DEFAULT_DB_P
             if not isinstance(record, dict):
                 continue
             mod_id = str(dependency_record_field(record, "ModID", "mod_id") or "").strip()
+            dependency_type = str(
+                dependency_record_field(record, "DependencyType", "dependency_type") or ""
+            ).strip()
             category = dependency_record_value(dependency_record_field(record, "CategoryNo", "category_no"))
             slot = dependency_record_value(dependency_record_field(record, "Slot", "slot"))
             local_slot = dependency_record_value(dependency_record_field(record, "LocalSlot", "local_slot"))
-            item = find_dependency_item(conn, mod_id, category, slot, local_slot) if conn and mod_id else None
+            is_scene_map = dependency_type == "scene"
+            item = (
+                find_dependency_item(conn, mod_id, category, slot, local_slot)
+                if conn and mod_id and not is_scene_map
+                else None
+            )
             zipmod = find_dependency_zipmod(conn, mod_id) if conn and mod_id else None
             resolved.append(
                 {
@@ -2378,7 +2712,9 @@ def resolve_dependency_records(records: list[dict], db_path: Path = DEFAULT_DB_P
                     "category_no": category,
                     "slot": slot,
                     "local_slot": local_slot,
-                    "matched": bool(item),
+                    "dependency_type": dependency_type,
+                    "source_type": dependency_type or "mod",
+                    "matched": bool(zipmod) if is_scene_map else bool(item),
                     "zipmod": zipmod,
                     "item": item,
                 }

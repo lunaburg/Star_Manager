@@ -19,6 +19,7 @@ The renderer should not call Node, Electron, or filesystem APIs directly. Use `w
 Defined in `apps/electron/preload.cjs`.
 
 - `selectDirectory(title)`: open a native directory picker.
+- `onStartupLog(callback)`: subscribe to startup milestone log events forwarded from the Electron main process, including `ready-to-show`, `renderer-ready`, and `first-screen-shown`; events received before the renderer registers are buffered by preload and replayed; returns an unsubscribe function.
 - `selectPackageFile(title)`: open a native file picker limited to Sims 4 `.package` files.
 - `selectUnity3dFile(title)`: open a native file picker limited to `.unity3d` files for Workbench resource import.
 - `selectUnity3dExportPath(title, defaultName)`: open a native save picker for one exported `.unity3d` file.
@@ -166,7 +167,7 @@ Read and file routes:
   - Serves the normalized `252 x 352` card preview used by the character grid.
   - Add `original=1` for the detail view to receive the card's visible PNG at its actual stored resolution. This response stops at the PNG `IEND` chunk and never transfers the appended character-card payload.
 - `GET /library/clothes/tree?game_dir=`
-  - Returns the independent `UserData/coordinate` clothes-card tree. To keep first open responsive, tree `count` values are fast PNG candidate counts and `count_is_candidate=true`; these files are never inserted into the character-card SQLite index. Clothes-card validity is stored separately in the disposable runtime SQLite index `clothes_card_index.sqlite`.
+  - Returns the independent `UserData/coordinate` clothes-card tree. The first response uses fast PNG candidate counts while a backend background job validates all coordinate PNG envelopes; the frontend refreshes this tree while `indexing=true`, then the `count` values become exact `is_valid=1` clothes-card counts. The candidate phase is intentionally not marked in the tree UI. These files are never inserted into the character-card SQLite index. Clothes-card validity is stored separately in the disposable runtime SQLite index `clothes_card_index.sqlite`.
 - `GET /library/clothes?game_dir=&path=&offset=&limit=`
   - Returns a page of indexed-valid clothes cards in one coordinate folder. `offset` defaults to `0`; `limit` is optional and is capped at `240`. When the current page still has unknown or changed PNG candidates, `indexing=true`, `total=null`, `candidate_total` contains the PNG candidate count, and `has_more=true`; after the current directory is indexed, `total` becomes the exact valid clothes-card count and `total_is_candidate=false`.
   - List rows include only files whose size, `mtime_ns`, and parser version match an index row with `is_valid=1`. Unknown or changed files are checked in a bounded current-page window using lightweight envelope validation; invalid PNGs are stored as `is_valid=0` and are never returned. Once the directory is stable, ordering and pagination are executed by the SQLite index instead of rebuilding the complete page in Python. Full card metadata parsing remains deferred to `/library/clothes/detail`.
@@ -174,6 +175,16 @@ Read and file routes:
   - Returns one clothes-card envelope summary, clothing/accessory part summaries, UAR records, and KKEx plugin identifiers.
 - `GET /library/clothes/image?game_dir=&path=`
   - Serves the normalized clothes-card preview without parsing the card payload first. Add `original=1` to return only the visible PNG before the appended clothes-card envelope. Standardized previews use the runtime `card_previews` cache and HTTP immutable caching.
+- `GET /library/scene/tree?game_dir=`
+  - Returns the `UserData/studio/scene` scene-card directory tree and direct PNG counts. The tree and files are kept separate from both the character-card database and the clothes-card index.
+- `GET /library/scene?game_dir=&path=&offset=&limit=`
+  - Returns a paginated list of PNG scene cards in one scene directory. The endpoint only enumerates files and returns lightweight metadata; it does not parse scene-card payloads. `limit` is capped at `240`.
+- `GET /library/scene/detail?game_dir=&path=`
+  - Returns one scene-card file's metadata after validating that the path remains inside `UserData/studio/scene`. On demand, parses the `StudioNEOV2` scene payload and scene-level `KKEx`/UniversalAutoResolver `mapInfoGUID`, `itemInfo`, and `patternInfo`, then resolves scene-map records against zipmods and scene-item/pattern records against indexed mod items. The response includes `scene_marker`, `plugin_ids`, `dependencies`, and `dependency_count`; embedded character-card data and unrelated scene object settings are not merged into this dependency list.
+- `GET /library/scene/missing-mods?game_dir=&path=`
+  - Compares one scene card's unresolved map/item/pattern GUID dependencies with the read-only remote index at `backend/runtime/remote/remote_zipmod_index.sqlite`. It returns GUID groups split into `available` and `unavailable`, including usage counts and scene dependency locations. A remote candidate means the manifest GUID is available; after installation, the scene detail endpoint rechecks the exact item/pattern `Slot` and `LocalSlot` against the local index.
+- `GET /library/scene/image?game_dir=&path=`
+  - Serves the normalized scene-card preview using the runtime `card_previews` cache at `320 x 180`. Add `original=1` to return only the visible PNG before any appended file data.
 
 Direct mutation routes:
 
@@ -339,7 +350,8 @@ Task state shape:
   "phase_message": "",
   "cancel_requested": false,
   "created_at": 0,
-  "updated_at": 0
+  "updated_at": 0,
+  "finished_at": 0
 }
 ```
 
@@ -350,9 +362,6 @@ Current task types:
 - `check_game_dir`
   - Payload: `{ "game_dir": "D:\\HS2" }`
   - Data: `{ "is_valid": true, "game_dir": "..." }`
-- `search_cards`
-  - Payload: `{ "input_dir": "D:\\HS2\\UserData\\chara" }`
-  - Data: card path list and card count.
 - `extract_mods`
   - Payload: `{ "game_dir": "...", "input_dir": "...", "output_dir": "...", "card_paths": [], "zipmod_extract_mode": "copy | move" }`
   - Extracts zipmods required by selected character cards.
@@ -362,13 +371,14 @@ Current task types:
 - `build_mod_database`
   - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full" }`
   - Rebuilds the SQLite mod database, thumbnail cache, character-card database, and card preview cache. The frontend uses incremental mode for automatic small-change rebuilds.
+  - On success, `data.timings` reports milliseconds for `builtin_resource_index_ms`, `zipmod_scan_ms`, `item_parse_ms`, `database_write_ms`, `character_card_database_ms`, and `total_ms`. The task messages also include one human-readable seconds summary.
 - `index_single_zipmod`
   - Payload: `{ "game_dir": "D:\\HS2", "zipmod_path": "D:\\HS2\\mods\\Author\\mod.zipmod" }`
   - Indexes only the specified zipmod and its item rows. It does not scan, add, remove, or reparse any other zipmod. After indexing, it incrementally relinks only character cards that depend on the affected GUIDs; the workbench uses this task immediately after packaging. The task result includes `card_stats` when a card relink was performed.
 - `download_card_missing_mods`
   - Payload: `{ "game_dir": "D:\\HS2", "remote_ids": [123, 456] }`. The list may contain at most 100 candidates and must contain no more than one candidate for each GUID.
   - Downloads selected files from the indexed `https://sideload.betterrepack.com/download/AISHS2/` tree into `mods/Remote/`, writing a temporary `.part` file first. Each file is checked for size, ZIP CRC, and manifest GUID before being atomically installed. Existing valid files are also passed through single-zipmod indexing so a missing local database row can be repaired without a full rebuild.
-  - Up to 3 selected files are downloaded concurrently. The task then enters a separate installation phase, which runs single-zipmod indexing in order and finally relinks cards depending on the affected GUIDs. During the download phase, task state exposes `phase_progress`, `downloaded_bytes`, `total_bytes`, and `download_speed_bps` (bytes per second; the frontend displays MB/s). During installation, `phase_progress` reports installation progress and download speed is zero. The task result exposes the GUIDs in `affected_mod_guids` and the relink result in `card_stats`. DLLs and scripts inside the archive are never executed. Failed downloads are reported in task `data.failures` and their temporary files are removed. A user cancellation stops the task with status `cancelled` and removes incomplete `.part` files; files already atomically installed before cancellation are not rolled back.
+  - Up to 3 selected files are downloaded concurrently. The task then enters a separate installation phase, which runs single-zipmod indexing in order and finally relinks character cards depending on the affected GUIDs when they are indexed. Scene cards do not need a persistent dependency-table relink: their next detail request resolves against the refreshed local mod database. During the download phase, task state exposes `phase_progress`, `downloaded_bytes`, `total_bytes`, and `download_speed_bps` (bytes per second; the frontend displays MB/s). During installation, `phase_progress` reports installation progress and download speed is zero. The task result exposes the GUIDs in `affected_mod_guids` and, when applicable, the relink result in `card_stats`. DLLs and scripts inside the archive are never executed. Failed downloads are reported in task `data.failures` and their temporary files are removed. A user cancellation stops the task with status `cancelled` and removes incomplete `.part` files; files already atomically installed before cancellation are not rolled back.
 - `import_external_zipmods`
   - Payload: `{ "game_dir": "D:\\HS2", "source_dir": "D:\\Downloads\\mods" }`
   - Scans external `*.zipmod` and `*.zip` files. A `.zip` is accepted only when it is a readable archive with a root `manifest.xml` containing a GUID and actual `abdata/` content; accepted files are copied into `mods/Imported` with the target suffix normalized to `.zipmod`. The original external `.zip` is not renamed or deleted.
@@ -420,6 +430,14 @@ Current task types:
   - Payload: `{ "search": "", "kind": "", "author": "", "usage": "" }`
   - Deletes every item matching the current item-browser filters with `status=error`. The task caps one run at 1000 items, re-resolves each item before deletion, and uses the same write-back behavior as single-item deletion.
 
+### Removed task type: `search_cards`
+
+- Background: `search_cards` was a legacy wrapper around the AIS-card scanning helper. The current renderer loads the card library through `/library/cards/tree` and passes selected card paths directly to `extract_mods`, so it had no internal submission path.
+- Root cause: the task remained registered in the task bridge and documentation after the renderer flow moved to direct card-library routes and explicit selections.
+- Change: removed the task from `SUPPORTED_TASK_TYPES`, removed its dispatch branch and renderer-only result handling, and removed it from the task documentation. The shared `search_ais_cards()` helper remains because `extract_mods` still uses it as a fallback when no card paths are supplied.
+- Verification: runtime source search contains no `search_cards` task reference; the frontend still submits `extract_mods`, and its backend fallback still resolves through `search_ais_cards()`.
+- Scope: callers that manually submit `POST /tasks` with `task_type: "search_cards"` now receive the normal unsupported-task response. No current renderer flow is affected.
+
 Single-card profile mutation:
 
 - `POST /library/cards/update-profile`
@@ -465,6 +483,7 @@ Single-directory mutations:
 
 - The top global progress bar is reserved for `build_mod_database`.
 - The overview page recent-task list displays every task, including batch mod operations.
+- Recent-task rows are clickable. The renderer keeps the latest task snapshot in memory and opens a detail drawer showing status, result metrics, timing summary, timestamps, and task messages; this does not add a persistent task-history endpoint.
 - Direct HTTP mutations should update their local busy state and then refresh affected lists or diagnostics.
 - Task mutations should use `submitTask(...)`, let polling update logs/recent tasks, then refresh affected lists after completion.
 

@@ -20,7 +20,7 @@
 +--------------------------------------------------+
 ```
 
-主体使用高模糊半透明终端玻璃区域和等宽字体；日志由 `ctx.logs` 数组按顺序渲染，文字使用近黑色以保持清晰度。
+主体使用高模糊半透明终端玻璃区域和等宽字体；日志由 `ctx.logs` 数组按顺序渲染，文字使用近黑色以保持清晰度。Electron 主进程通过 IPC 转发的启动里程碑也会追加到同一日志数组，包括 `[startup] electron ready-to-show at ... ms`、`[startup] renderer renderer-ready at ... ms` 和 `[startup] renderer first-screen-shown at ... ms`。早于 Vue 监听注册的启动事件由 preload 暂存后补发。
 
 运行日志外层容器使用高模糊半透明玻璃背景，标题栏、工具栏和终端区域复用同一玻璃层。
 
@@ -61,11 +61,28 @@
 
 因此文档和 UI 不应把“日志导出、持久化筛选、自动滚动”描述成已完成能力。
 
+## Electron 首屏里程碑时间记录（2026-09-15）
+
+- **背景**：需要在运行日志页区分 Electron 的 `ready-to-show`、renderer 的 `renderer-ready` 与最终 `first-screen-shown`，定位打包版首屏偶发等待约 5 秒的问题。
+- **根因**：这些事件原先只在 Electron 主进程 stdout 中可见，且 `ready-to-show` 可能早于 Vue 注册 IPC 监听，直接转发会丢失时间点。
+- **解决方案**：主进程将三个启动里程碑通过 `startup:log` IPC 发送；preload 在监听注册前暂存事件并在 `onStartupLog` 注册时回放；运行日志页把回放和实时事件追加到现有日志数组。
+- **验证结果**：通过 `node --check electron/main.cjs`、`node --check electron/preload.cjs`、`npm run build` 和 `npm run test:electron` 验证；Electron 测试 5 项全部通过。
+- **适用边界**：这些时间点以 Electron 创建窗口后的同一计时起点为准；`first-screen-shown` 表示执行 `window.show()`，不等同于操作系统完成像素合成；日志仍是当前进程内存数据，不提供跨重启持久化。
+
+## 首屏显示门槛修复（2026-09-15）
+
+- **现象**：打包版偶发出现 `did-finish-load` 约 230 ms，但 `first-screen-shown` 直到约 5 秒才出现。
+- **根因**：窗口使用 `show: false`，原实现要求 Electron `ready-to-show` 与 renderer `renderer-ready` 同时到达；Windows 隐藏窗口场景下这两个事件可能被推迟，即使页面已经加载完成也不会显示。
+- **解决方案**：`did-finish-load`、`ready-to-show`、`renderer-ready` 中任一可靠事件都可以调用幂等的 `revealWindow(trigger)`；三个事件仍继续记录，用于区分页面加载、Electron 原生渲染和 Vue 首帧。5 秒计时器仅作为页面异常时的最终保护。
+- **验证结果**：应重点检查打包版日志中的 `renderer first-screen-shown ... (trigger=did-finish-load)`，并确认它通常紧跟 `did-finish-load`，不再出现正常加载时的 `renderer readiness timed out`。
+- **适用边界**：`first-screen-shown` 表示执行 `window.show()`，不等同于操作系统完成像素合成；若 renderer 自身加载超过 1 秒，仍需进一步缩减首屏资源或增加轻量原生占位页，不能仅靠窗口显示策略保证所有机器绝对低于 1 秒。
+
 ## 日志内容
 
 当前常见消息包括：
 
 - `Ready.`、zipmod 提取模式和后端启动状态；
+- Electron 主进程通过 IPC 转发的首屏里程碑：`electron ready-to-show`、`renderer renderer-ready` 和 `renderer first-screen-shown`；
 - 选择游戏目录和目录校验结果；
 - `Task submitted: <task_type>`；
 - 轮询得到的任务消息、进度和错误；

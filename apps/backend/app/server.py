@@ -29,21 +29,27 @@ from star_manager.services.card_library import (
     assess_character_card_folder_changes,
     build_clothes_card_tree,
     build_character_card_tree,
+    build_scene_card_tree,
     create_character_card_directory,
     delete_character_card,
     export_character_card_coordinate,
     get_character_card_detail,
     get_clothes_card_detail,
+    get_scene_card_detail,
     get_card_root,
     list_clothes_cards,
     list_character_cards,
+    list_scene_cards,
     list_character_card_tags,
     normalize_card_preview,
     replace_character_card_cover,
     rename_character_card_directory,
     resolve_card_file,
     resolve_coordinate_file,
+    resolve_scene_file,
     validate_coordinate_root,
+    validate_scene_root,
+    SCENE_CARD_SIZE,
     set_character_card_as_navi,
     set_character_card_favorite,
     set_character_card_rating,
@@ -85,7 +91,10 @@ from star_manager.services.mod_database_queries import (
     find_zipmod_paths_by_guid,
     hydrate_current_game_state_thumbnails,
 )
-from star_manager.services.remote_mod_completion import inspect_card_missing_mods
+from star_manager.services.remote_mod_completion import (
+    inspect_card_missing_mods,
+    inspect_scene_missing_mods,
+)
 from star_manager.services.model_preview import (
     import_texture2d_into_unity3d,
     list_unity3d_main_data_candidates,
@@ -290,6 +299,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
+        if route == "/library/scene/missing-mods":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                result = inspect_scene_missing_mods(game_dir, relative_path)
+            except (OSError, sqlite3.Error, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+                return
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
         if route == "/plugins":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
@@ -470,7 +491,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         if route == "/library/clothes/tree":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
-            self.send_json(build_clothes_card_tree(game_dir))
+            refresh_index = (query.get("refresh") or [""])[0] == "1"
+            self.send_json(
+                build_clothes_card_tree(
+                    game_dir,
+                    start_indexing=True,
+                    force_index=refresh_index,
+                )
+            )
             return
 
         if route == "/library/clothes":
@@ -523,6 +551,64 @@ class RequestHandler(BaseHTTPRequestHandler):
                     )
                     return
                 preview_path = normalize_card_preview(card_path)
+                allowed_root = DEFAULT_CARD_PREVIEW_DIR if preview_path != card_path else root
+                self.send_file(str(preview_path), allowed_root)
+            except (OSError, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error)}, status=404)
+            return
+
+        if route == "/library/scene/tree":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            self.send_json(build_scene_card_tree(game_dir))
+            return
+
+        if route == "/library/scene":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            offset = self.parse_int_query(query, "offset", 0)
+            limit = self.parse_optional_int_query(query, "limit")
+            try:
+                result = list_scene_cards(game_dir, relative_path, offset=offset, limit=limit)
+                self.send_json(result, status=200 if result.get("ok") else 400)
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/library/scene/detail":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                result = get_scene_card_detail(game_dir, relative_path)
+                self.send_json(result, status=200 if result.get("ok") else 404)
+            except ValueError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/library/scene/image":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            original_cover = (query.get("original") or [""])[0] == "1"
+            try:
+                valid, root, root_error = validate_scene_root(game_dir)
+                if not valid:
+                    raise ValueError(root_error or "Scene-card image not found.")
+                card_path = resolve_scene_file(root, relative_path)
+                if original_cover:
+                    stat = card_path.stat()
+                    card_data = card_path.read_bytes()
+                    png_end = find_png_end(card_data)
+                    self.send_bytes(
+                        card_data[:png_end],
+                        "image/png",
+                        etag=f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}-cover-{png_end:x}"',
+                        modified_at=stat.st_mtime,
+                    )
+                    return
+                preview_path = normalize_card_preview(card_path, size=SCENE_CARD_SIZE)
                 allowed_root = DEFAULT_CARD_PREVIEW_DIR if preview_path != card_path else root
                 self.send_file(str(preview_path), allowed_root)
             except (OSError, ValueError) as error:

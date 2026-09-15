@@ -75,25 +75,29 @@
 
 - 缓存内容是从 zipmod 或游戏 `abdata` 提取、转换得到的 PNG。
 - 键由 `zipmod_guid`、`item_id`、`thumb_ab`、`thumb_tex` 组成；数据库在 `mod_items.thumbnail_cache_path` 保存路径和状态。
-- 单次建库内还有 `UnityThumbnailBundleCache` 和 `ThumbnailSourceCache`，分别复用已解析的 Unity3D 缩略图包和同一来源的输出文件。
+- 单次建库内还有 `UnityThumbnailBundleCache` 和 `ThumbnailSourceCache`，分别复用已加载的 Unity3D 缩略图包/目标对象解码结果和同一来源的输出文件；Unity3D 包加载时不会预先解码所有图片，只有命中的 `ThumbTex` 或 fallback 对象才会执行 `obj.read()`。
 - 物品资源解析成功后会复用已有输出文件；缺失、异常或相关 zipmod 重建时按数据库状态重试。
 - 删除 PNG 是可重建操作，但 SQLite 可能暂时仍指向旧路径；删除后应执行相关模组/物品重建或重新提取缩略图。
 - 当前没有面向用户的全局“清空缩略图缓存”按钮，也没有通用的孤儿文件回收任务。
 
 实现：[`mod_database_assets.py`](../backend/star_manager/services/mod_database_assets.py)、[`mod_database_queries.py`](../backend/star_manager/services/mod_database_queries.py)。
 
-### 2.4 `card_previews/`：人物卡和服装卡标准化预览缓存
+### 2.4 `card_previews/`：人物卡、服装卡和场景卡标准化预览缓存
 
 位置：`<runtime>/card_previews/<sha1 前两位>/<sha1 接下来两位>/<sha1>.png`
 
-- 默认生成标准 `252 x 352` 的 PNG，供人物卡网格、服装卡网格和服装卡详情预览使用，避免每次直接解码原始大图。
+- 人物卡和服装卡默认生成标准 `252 x 352` 的 PNG；场景卡使用独立的 `320 x 180` 目标尺寸，供场景卡横向网格和详情预览使用，避免每次直接解码原始大图。
 - 键包含人物卡绝对路径、源文件大小、`mtime_ns` 和目标尺寸；源文件变化或尺寸变化会得到新键。
 - 服装卡复用同一目录，键同样包含服装卡绝对路径、源文件大小、`mtime_ns` 和目标尺寸；服装卡的附加信封不会被写入标准化预览。
-- `character_cards.preview_cache_path` 保存当前索引使用的路径。
+- 键包含目标尺寸，因此同一个源文件的 `252 x 352` 与 `320 x 180` 预览不会相互覆盖；`character_cards.preview_cache_path` 保存人物卡当前索引使用的路径。
 - 删除后会在下次人物卡列表/建库时重新生成；删除单张人物卡时，已知的对应预览缓存会一并删除。
 - 旧版本或路径变化造成的孤儿预览文件不会被全局自动清理，可以在后端停止后清理整个目录，再重建人物卡数据库。
 
 实现：[`card_library.py`](../backend/star_manager/services/card_library.py)、[`card_database.py`](../backend/star_manager/services/card_database.py)。
+
+#### 卡片预览加载统一规则
+
+所有卡片类型的列表预览都必须复用 `card_previews/`、`LazyThumbnail` 和可视区域虚拟渲染逻辑。列表接口只返回轻量元数据和带源文件签名的预览 URL；前端通过 `IntersectionObserver` 请求视口附近的图片，不能为渲染列表直接读取或解码原始卡片 PNG。完整卡片解析和原图请求仅允许发生在用户打开单卡详情后。新增卡片类型时，若无法遵循该规则，必须在对应页面文档和本文登记明确的性能与缓存边界。
 
 ### 2.5 `clothes_card_index.sqlite`：服装卡有效性索引
 
@@ -102,6 +106,7 @@
 - 这是独立于 `star_manager.sqlite` 的可重建 SQLite 索引，只记录 `UserData/coordinate` 下 PNG 的文件签名、轻量 `AIS_Clothes` 有效性、卡片名称、解析器版本和封面结束位置。
 - 索引键包含游戏目录根路径和服装卡相对路径；文件大小、`mtime_ns` 或解析器版本变化时重新校验。普通 PNG 和损坏文件会缓存为无效，列表接口不会返回它们。
 - 进入大目录时只校验当前页面附近的未知文件，最多 96 个候选；有效性结果会保留到下次运行，完整 KKEx/UAR 详情不写入此索引。
+- 打开服装卡目录树时，后端会在后台遍历 coordinate 子目录并复用该索引完成全量轻量校验；目录树首次显示 PNG 候选数，索引完成后改用 `is_valid=1` 的目录分组计数。前端在 `indexing=true` 期间轮询树接口，完成后自动替换数字。
 - 删除该文件不会修改游戏目录；下次打开服装卡浏览器会按需重建。它不属于模组数据库重建流程，也不保存用户收藏等状态。
 
 实现：[`card_library.py`](../backend/star_manager/services/card_library.py)。
@@ -139,6 +144,18 @@
 
 实现：[`main.cjs`](../electron/main.cjs) 的 `runWorkbenchSb3Mutation()` 和 `workbench:preprocessTemplate` IPC。
 
+### 2.9 `remote/remote_zipmod_index.sqlite`：远端模组只读索引
+
+位置：开发运行时的 `apps/backend/runtime/remote/remote_zipmod_index.sqlite`；Windows 发布版的 `Star_Manager.exe` 同级 `runtime/remote/remote_zipmod_index.sqlite`。
+
+- 该 SQLite 文件由 `build_remote_zipmod_index.py` 生成，记录可供人物卡和场景卡缺失依赖查询、下载的远端 zipmod manifest 信息。
+- 后端通过 `STAR_MANAGER_RUNTIME_DIR` 定位它，并以只读方式打开；它不是本地 `star_manager.sqlite`，也不参与本地模组建库。
+- Windows 打包时由 `apps/package.json` 的 `extraFiles` 从 `apps/backend/runtime/remote` 复制到发布目录；`package:win` 会在 electron-builder 前检查该文件存在，缺失时直接终止打包。
+- 发布版携带的是打包时的索引快照。更新远端索引后需要重新执行 Windows 打包；运行中的应用不会自动把它更新为最新版本。
+- 这是发布资源而非普通用户缓存。若需要替换，应先退出应用，用新的完整 SQLite 文件替换，再重新启动；不要在后端查询期间覆盖文件。
+
+实现：[`remote_mod_completion.py`](../backend/star_manager/services/remote_mod_completion.py)、[`build_remote_zipmod_index.py`](../scripts/build_remote_zipmod_index.py) 和 [`package.json`](../package.json)。
+
 ## 3. 前端和 HTTP 层缓存
 
 ### 3.1 工作台资料的 localStorage 回退缓存
@@ -152,9 +169,9 @@
 
 实现：[`App.vue`](../src/App.vue)、[`main.cjs`](../electron/main.cjs)。
 
-### 3.2 服装卡列表的前端状态
+### 3.2 卡片列表的前端状态
 
-`App.vue` 只在当前 renderer 会话中保留当前目录已经返回的有效服装卡文件项、分页位置和目录树。切换目录或刷新会替换对应状态；有效性和轻量卡片名称由后端的 `clothes_card_index.sqlite` 持久化，前端本身不保存解析结果。服装卡网格通过 `VirtualClothesCardGrid` 只创建视口附近的卡片 DOM，并通过 `LazyThumbnail` 的 IntersectionObserver 只请求视口附近图片；首批分页最多保留 96 条。
+`App.vue` 只在当前 renderer 会话中保留当前目录已经返回的有效人物卡/服装卡文件项、分页位置和目录树。切换目录或刷新会替换对应状态；服装卡有效性和轻量卡片名称由后端的 `clothes_card_index.sqlite` 持久化，前端本身不保存完整解析结果。人物卡和服装卡网格分别通过 `VirtualCharacterCardGrid` / `VirtualClothesCardGrid` 只创建视口附近的卡片 DOM，并通过 `LazyThumbnail` 的 IntersectionObserver 只请求视口附近图片；服装卡首批分页最多保留 96 条。
 
 ### 3.3 人物卡标签目录的 Vue 进程内缓存
 

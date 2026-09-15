@@ -1162,13 +1162,21 @@ class ThumbnailSourceCache:
 
 
 class UnityThumbnailBundle:
-    def __init__(self, images: list[tuple[str, object]], fallback_images: list[tuple[int, object]]):
+    def __init__(
+        self,
+        images: list[tuple[str, object]],
+        fallback_images: list[tuple[int, object]],
+    ):
+        # Keep ObjectReader instances instead of eagerly decoding every image in
+        # the bundle.  A thumbnail bundle can contain hundreds of textures, but
+        # each item normally needs only one of them.
         self.images = images
         self.fallback_images = fallback_images
-        self.images_by_key: dict[str, object] = {}
-        for name, image in images:
+        self.images_by_key: dict[str, list[object]] = {}
+        self._image_cache: dict[int, object | None] = {}
+        for name, asset in images:
             for key in asset_lookup_keys(name):
-                self.images_by_key.setdefault(key, image)
+                self.images_by_key.setdefault(key, []).append(asset)
 
     @classmethod
     def from_bytes(cls, bundle_bytes: bytes) -> "UnityThumbnailBundle | ThumbnailResult":
@@ -1187,34 +1195,28 @@ class UnityThumbnailBundle:
             images: list[tuple[str, object]] = []
             fallback_images: list[tuple[int, object]] = []
             for container_path, obj in env.container.items():
-                try:
-                    data = obj.read()
-                    image = getattr(data, "image", None)
-                except Exception:  # noqa: BLE001 - skip individual assets UnityPy cannot decode.
-                    continue
-                if image is None:
-                    continue
                 name = str(container_path)
-                images.append((name, image))
+                images.append((name, obj))
                 rank = fallback_thumbnail_rank(name)
                 if rank:
-                    fallback_images.append((rank, image))
+                    fallback_images.append((rank, obj))
 
             for obj in env.objects:
-                if obj.type.name not in {"Texture2D", "Sprite"}:
+                if getattr(getattr(obj, "type", None), "name", "") not in {
+                    "Texture2D",
+                    "Sprite",
+                }:
                     continue
                 try:
-                    data = obj.read()
-                    image = getattr(data, "image", None)
-                except Exception:  # noqa: BLE001 - skip individual assets UnityPy cannot decode.
+                    name = str(obj.peek_name() or "")
+                except Exception:  # noqa: BLE001 - some UnityPy readers lack peek_name.
                     continue
-                if image is None:
+                if not name:
                     continue
-                name = getattr(data, "name", "") or ""
-                images.append((str(name), image))
+                images.append((name, obj))
                 rank = fallback_thumbnail_rank(str(name))
                 if rank:
-                    fallback_images.append((rank, image))
+                    fallback_images.append((rank, obj))
             return cls(images, fallback_images)
         except Exception as exc:  # noqa: BLE001 - a broken asset should not abort DB build.
             return ThumbnailResult("", "error", f"thumbnail extract failed: {exc}")
@@ -1227,13 +1229,29 @@ class UnityThumbnailBundle:
 
     def find_image(self, thumb_tex: str) -> object | None:
         for key in asset_lookup_keys(thumb_tex):
-            image = self.images_by_key.get(key)
-            if image is not None:
-                return image
+            for asset in self.images_by_key.get(key, []):
+                image = self._read_image(asset)
+                if image is not None:
+                    return image
         if self.fallback_images:
-            _rank, image = sorted(self.fallback_images, key=lambda item: item[0])[0]
-            return image
+            for _rank, asset in sorted(self.fallback_images, key=lambda item: item[0]):
+                image = self._read_image(asset)
+                if image is not None:
+                    return image
         return None
+
+    def _read_image(self, asset: object) -> object | None:
+        """Decode one asset at most once, only after it has been selected."""
+        cache_key = id(asset)
+        if cache_key in self._image_cache:
+            return self._image_cache[cache_key]
+        try:
+            data = asset.read()
+            image = getattr(data, "image", None)
+        except Exception:  # noqa: BLE001 - skip individual assets UnityPy cannot decode.
+            image = None
+        self._image_cache[cache_key] = image
+        return image
 
 
 def find_zip_member(

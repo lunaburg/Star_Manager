@@ -40,7 +40,7 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
     ZipMemberIndex,
 )
 from star_manager.services import mod_database_assets  # noqa: E402
-from star_manager.services.mod_database import build_database, prepare_mod_items, summarize_prepared_unity3d, unity3d_retry_guids  # noqa: E402
+from star_manager.services.mod_database import build_database, prepare_mod_items, summarize_prepared_unity3d  # noqa: E402
 from star_manager.services.mod_database_queries import list_zipmods  # noqa: E402
 
 
@@ -227,6 +227,57 @@ class ThumbnailDiagnosticTests(unittest.TestCase):
 
         self.assertIsInstance(result, mod_database_assets.UnityThumbnailBundle)
         self.assertIsNotNone(result.find_image("prev"))
+
+    def test_thumbnail_bundle_decodes_only_the_selected_asset(self):
+        class ImageData:
+            def __init__(self, name):
+                self.image = object()
+                self.name = name
+
+        class LazyObject:
+            type = type("ObjType", (), {"name": "Texture2D"})()
+
+            def __init__(self, name):
+                self.name = name
+                self.peek_calls = 0
+                self.read_calls = 0
+
+            def peek_name(self):
+                self.peek_calls += 1
+                return self.name
+
+            def read(self):
+                self.read_calls += 1
+                return ImageData(self.name)
+
+        target = LazyObject("target")
+        unrelated = LazyObject("unrelated")
+
+        class LazyEnv:
+            container = {
+                "assets/target.png": target,
+                "assets/unrelated.png": unrelated,
+            }
+            objects = [target, unrelated]
+
+        class LazyUnityPy:
+            @staticmethod
+            def load(_bundle_bytes):
+                return LazyEnv()
+
+        original = mod_database_assets.UnityPy
+        try:
+            mod_database_assets.UnityPy = LazyUnityPy
+            result = mod_database_assets.UnityThumbnailBundle.from_bytes(b"bundle")
+            self.assertIsInstance(result, mod_database_assets.UnityThumbnailBundle)
+            self.assertEqual(target.read_calls, 0)
+            self.assertEqual(unrelated.read_calls, 0)
+            self.assertIsNotNone(result.find_image("target"))
+        finally:
+            mod_database_assets.UnityPy = original
+
+        self.assertEqual(target.read_calls, 1)
+        self.assertEqual(unrelated.read_calls, 0)
 
 
 class CsvEncodingTests(unittest.TestCase):
@@ -1064,23 +1115,6 @@ class ModItemPreparationTests(unittest.TestCase):
                     ("abdata/list/characustom/skin.csv", "424", "211"),
                 },
             )
-
-    def test_unity3d_missing_zipmods_are_retried_on_incremental_build(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        init_db(conn)
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO zipmods (
-                    guid, name, file_path, scan_status, last_scanned_at, created_at, updated_at,
-                    unity3d_status, unity3d_missing_count
-                )
-                VALUES ('sample.guid', 'sample', 'sample.zipmod', 'ok', '', '', '', 'missing', 1)
-                """
-            )
-
-        self.assertEqual(unity3d_retry_guids(conn), {"sample.guid"})
 
     def test_repair_zipmod_unity3d_moves_source_from_game_abdata(self):
         with TemporaryDirectory() as temp_dir:

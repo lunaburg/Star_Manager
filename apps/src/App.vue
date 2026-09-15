@@ -1,16 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import StartView from "./components/views/StartView.vue";
-import OverviewView from "./components/views/OverviewView.vue";
-import CharactersView from "./components/views/CharactersView.vue";
 import CardCoverCropper from "./components/CardCoverCropper.vue";
-import ModsView from "./components/views/ModsView.vue";
-import WorkbenchView from "./components/views/WorkbenchView.vue";
-import PluginsView from "./components/views/PluginsView.vue";
-import LogsView from "./components/views/LogsView.vue";
-import SettingsView from "./components/views/SettingsView.vue";
-import TrashView from "./components/views/TrashView.vue";
+import ViewLoading from "./components/ViewLoading.vue";
 import { getAchievementIcon } from "./achievementIcons";
+import characterCardTypeIcon from "./assets/card-type-character.svg";
+import clothesCardTypeIcon from "./assets/card-type-clothes.svg";
+import sceneCardTypeIcon from "./assets/card-type-scene.svg";
 import itemKindBottom from "./assets/item-kind-bottom.png";
 import itemKindGloves from "./assets/item-kind-gloves.png";
 import itemKindPanties from "./assets/item-kind-panties.png";
@@ -34,16 +30,22 @@ const views = [
 ];
 
 const activeView = ref("start");
+const lazyView = (loader) => defineAsyncComponent({
+  loader,
+  loadingComponent: ViewLoading,
+  delay: 0,
+  timeout: 30000
+});
 const pageComponents = {
   start: StartView,
-  overview: OverviewView,
-  characters: CharactersView,
-  mods: ModsView,
-  plugins: PluginsView,
-  workbench: WorkbenchView,
-  logs: LogsView,
-  settings: SettingsView,
-  trash: TrashView
+  overview: lazyView(() => import("./components/views/OverviewView.vue")),
+  characters: lazyView(() => import("./components/views/CharactersView.vue")),
+  mods: lazyView(() => import("./components/views/ModsView.vue")),
+  plugins: lazyView(() => import("./components/views/PluginsView.vue")),
+  workbench: lazyView(() => import("./components/views/WorkbenchView.vue")),
+  logs: lazyView(() => import("./components/views/LogsView.vue")),
+  settings: lazyView(() => import("./components/views/SettingsView.vue")),
+  trash: lazyView(() => import("./components/views/TrashView.vue"))
 };
 const activePageComponent = computed(() => pageComponents[activeView.value] || StartView);
 const cardBrowserMode = ref("character");
@@ -92,40 +94,55 @@ const workbenchWorkspacePath = ref("");
 const workbenchActiveProjectId = ref("");
 const workbenchProjects = ref([]);
 const WORKBENCH_PROFILE_CACHE_KEY = "star-manager.workbench-profile";
+const startupWallpaper = window.desktopApi?.startupWallpaper || {};
 
 const managerSettings = reactive({
   startupView: "start",
   favoriteCardTheme: "gold",
   checkDatabaseChangesOnStartup: true,
-  wallpaperPath: "",
-  wallpaperType: ""
+  wallpaperPath: String(startupWallpaper.wallpaperPath || "").trim(),
+  wallpaperType: ["image", "video"].includes(String(startupWallpaper.wallpaperType || ""))
+    ? String(startupWallpaper.wallpaperType)
+    : ""
 });
-const wallpaperDataUrl = ref("");
+const wallpaperReady = ref(!startupWallpaper.wallpaperPath);
+const wallpaperLoadFailed = ref(false);
+let rendererReadyNotified = false;
+let removeStartupLogListener = null;
 
 function wallpaperUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   if (/^(?:file|https?|data):/i.test(raw)) return raw;
   // Route local media through Electron's wallpaper:// protocol so both the
-  // dev HTTP renderer and the packaged file renderer can stream MP4 safely.
+  // dev HTTP renderer and the packaged file renderer can stream local files
+  // without waiting for a second IPC read into a data URL.
   return `wallpaper://file?path=${encodeURIComponent(raw)}`;
 }
 
-const wallpaperSource = computed(() => managerSettings.wallpaperPath
-  ? (wallpaperIsVideo.value ? wallpaperUrl(managerSettings.wallpaperPath) : (wallpaperDataUrl.value || wallpaperDefault))
-  : wallpaperDefault);
+const wallpaperSource = computed(() => {
+  if (!managerSettings.wallpaperPath || wallpaperLoadFailed.value) return wallpaperDefault;
+  return wallpaperUrl(managerSettings.wallpaperPath);
+});
 const wallpaperIsVideo = computed(() => managerSettings.wallpaperType === "video"
   || /\.mp4$/i.test(managerSettings.wallpaperPath || ""));
 
-async function refreshWallpaperPreview() {
-  wallpaperDataUrl.value = "";
-  if (!managerSettings.wallpaperPath || wallpaperIsVideo.value) return;
-  const result = await window.desktopApi?.readWallpaperImage?.(managerSettings.wallpaperPath);
-  if (result?.ok && result.dataUrl) {
-    wallpaperDataUrl.value = result.dataUrl;
-  } else if (result?.error) {
-    log(`[Wallpaper Error] ${result.error}`);
+function notifyRendererReady() {
+  if (rendererReadyNotified) return;
+  rendererReadyNotified = true;
+  window.desktopApi?.notifyRendererReady?.();
+}
+
+function handleWallpaperReady() {
+  wallpaperReady.value = true;
+}
+
+function handleWallpaperError() {
+  if (managerSettings.wallpaperPath && !wallpaperLoadFailed.value) {
+    log(`[Wallpaper Error] 无法加载壁纸：${managerSettings.wallpaperPath}`);
   }
+  wallpaperLoadFailed.value = true;
+  wallpaperReady.value = true;
 }
 
 const paths = reactive({
@@ -305,6 +322,7 @@ const filteredTrashEntries = computed(() => {
 });
 const seenTaskMessages = ref(new Set());
 const recentTasks = ref([]);
+const selectedTask = ref(null);
 const achievements = ref([]);
 const achievementPreferences = reactive({ enabled: true, notifications: true, hide_locked: false });
 const selectedAchievement = ref(null);
@@ -332,6 +350,15 @@ const selectedClothesDetail = ref(null);
 const clothesDetailTab = ref("详情");
 const clothesSearch = ref("");
 const clothesSort = ref("name");
+const sceneFolders = ref([]);
+const sceneTree = ref(null);
+const expandedSceneFolders = ref(new Set());
+const sceneCards = ref([]);
+const selectedSceneFolder = ref("");
+const selectedSceneDetailPath = ref("");
+const selectedSceneDetail = ref(null);
+const sceneDetailTab = ref("详情");
+const sceneSideMode = ref("tree");
 const cardDependencyFilter = ref("all");
 const selectedCardFolder = ref("");
 const selectedCardDetailPath = ref("");
@@ -402,6 +429,7 @@ const cardDependencyRemote = reactive({
   allTotalBytes: 0,
   allCurrentFile: ""
 });
+let cardDependencyRemoteRequestId = 0;
 const replacingCardCover = ref(false);
 const cardCoverNotice = reactive({ type: "", message: "" });
 const cardCoverCrop = reactive({
@@ -450,6 +478,8 @@ const cardTagFilter = reactive({
 let cardTagLibraryRequestId = 0;
 let clothesListRequestId = 0;
 let clothesIndexRetryTimer = 0;
+let clothesTreeRefreshTimer = 0;
+let sceneListRequestId = 0;
 const selectedCardProfileError = ref("");
 const cardProfileEditor = reactive({
   editing: false,
@@ -481,8 +511,20 @@ const clothesLibrary = reactive({
   validGameDir: false,
   root: "",
   total: null,
-  totalIsCandidate: true,
   indexing: false,
+  treeIndexing: false,
+  nextOffset: 0,
+  hasMore: false
+});
+const sceneLibrary = reactive({
+  checked: false,
+  loading: false,
+  loadingMore: false,
+  detailLoading: false,
+  error: "",
+  validGameDir: false,
+  root: "",
+  total: null,
   nextOffset: 0,
   hasMore: false
 });
@@ -493,6 +535,7 @@ const ITEM_PAGE_SIZE = 96;
 // The grid is image-first. LazyThumbnail still requests only rows near the
 // viewport; card payload parsing happens only when a user opens a detail view.
 const CLOTHES_CARD_PAGE_SIZE = 96;
+const SCENE_CARD_PAGE_SIZE = 96;
 const MOD_PAGE_SIZE = 200;
 const UNKNOWN_AUTHOR_LABEL = "未知作者";
 const POSE_ITEM_KIND_CODES = new Set(["500", "501"]);
@@ -1136,6 +1179,7 @@ const deleteModPrompt = reactive({
 });
 const missingItemPrompt = reactive({
   open: false,
+  kind: "item",
   name: "",
   modId: "",
   property: "",
@@ -1281,10 +1325,25 @@ const selectedClothesFolderRow = computed(() => (
 const clothesCardCountText = computed(() => {
   const total = clothesLibrary.total ?? selectedClothesFolderRow.value?.count;
   if (Number.isFinite(Number(total)) && Number(total) > clothesCards.value.length) {
-    const prefix = clothesLibrary.totalIsCandidate ? "候选 " : "";
-    return `${prefix}${clothesCards.value.length} / ${Number(total)}`;
+    return `${clothesCards.value.length} / ${Number(total)}`;
   }
   return String(clothesCards.value.length);
+});
+const visibleSceneCards = computed(() => [...sceneCards.value]);
+const selectedSceneCard = computed(() => (
+  selectedSceneDetail.value
+  || sceneCards.value.find((card) => card.relativePath === selectedSceneDetailPath.value)
+  || null
+));
+const selectedSceneFolderRow = computed(() => (
+  sceneFolders.value.find((folder) => folder.relativePath === selectedSceneFolder.value) || null
+));
+const sceneCardCountText = computed(() => {
+  const total = sceneLibrary.total ?? selectedSceneFolderRow.value?.count;
+  if (Number.isFinite(Number(total)) && Number(total) > sceneCards.value.length) {
+    return `${sceneCards.value.length} / ${Number(total)}`;
+  }
+  return String(sceneCards.value.length);
 });
 const visibleCardPaths = computed(() => visibleCards.value.map((card) => card.absolutePath).filter(Boolean));
 const visibleSelectedCardCount = computed(() => visibleCardPaths.value.filter((path) => selectedCards.value.has(path)).length);
@@ -1749,6 +1808,23 @@ function mapClothesCardRows(rows) {
   }));
 }
 
+function mapSceneCardRows(rows) {
+  return (rows || []).map((card) => ({
+    id: card.id,
+    name: card.name || card.filename,
+    filename: card.filename,
+    absolutePath: card.absolute_path,
+    relativePath: card.relative_path,
+    directory: card.directory || "",
+    thumbnailUrl: backendAssetUrl(card.thumbnail_url),
+    coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    modifiedTimestamp: Number(card.modified_at || 0),
+    fileSize: Number(card.file_size || 0),
+    dependencyCount: Number(card.dependency_count || 0)
+  }));
+}
+
 function flattenClothesTree(node, depth = 0, expanded = expandedClothesFolders.value) {
   if (!node) return [];
   const relativePath = node.relative_path || "";
@@ -1759,7 +1835,6 @@ function flattenClothesTree(node, depth = 0, expanded = expandedClothesFolders.v
     name: node.name,
     relativePath,
     count: Number(node.count || 0),
-    countIsCandidate: Boolean(node.count_is_candidate),
     depth,
     hasChildren,
     expanded: hasChildren && expanded.has(relativePath)
@@ -1776,6 +1851,42 @@ function collectExpandableClothesFolderPaths(node, output = new Set()) {
   return output;
 }
 
+function flattenSceneTree(node, depth = 0, expanded = expandedSceneFolders.value) {
+  if (!node) return [];
+  const relativePath = node.relative_path || "";
+  const children = Array.isArray(node.children) ? node.children : [];
+  const hasChildren = Boolean(node.has_children || children.length);
+  const row = {
+    id: node.id,
+    name: node.name,
+    relativePath,
+    count: Number(node.count || 0),
+    depth,
+    hasChildren,
+    expanded: hasChildren && expanded.has(relativePath)
+  };
+  if (!row.expanded) return [row];
+  return [row, ...children.flatMap((child) => flattenSceneTree(child, depth + 1, expanded))];
+}
+
+function collectExpandableSceneFolderPaths(node, output = new Set()) {
+  if (!node) return output;
+  const children = Array.isArray(node.children) ? node.children : [];
+  if (node.has_children || children.length) output.add(node.relative_path || "");
+  for (const child of children) collectExpandableSceneFolderPaths(child, output);
+  return output;
+}
+
+function refreshVisibleSceneFolders() {
+  sceneFolders.value = flattenSceneTree(sceneTree.value);
+}
+
+function resetSceneTree() {
+  sceneTree.value = null;
+  sceneFolders.value = [];
+  expandedSceneFolders.value = new Set();
+}
+
 function refreshVisibleClothesFolders() {
   clothesFolders.value = flattenClothesTree(clothesTree.value);
 }
@@ -1784,6 +1895,37 @@ function resetClothesTree() {
   clothesTree.value = null;
   clothesFolders.value = [];
   expandedClothesFolders.value = new Set();
+}
+
+function scheduleClothesTreeRefresh() {
+  window.clearTimeout(clothesTreeRefreshTimer);
+  clothesTreeRefreshTimer = window.setTimeout(() => {
+    clothesTreeRefreshTimer = 0;
+    if (!clothesLibrary.treeIndexing || !backendReady.value || !paths.gameDir) return;
+    void refreshClothesTreeCounts();
+  }, 500);
+}
+
+async function refreshClothesTreeCounts() {
+  if (!clothesLibrary.validGameDir || !backendReady.value || !paths.gameDir) return;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/clothes/tree?game_dir=${encodeQuery(paths.gameDir)}`
+    );
+    if (!result?.ok || !result.is_valid_game_dir) return;
+    clothesTree.value = result.tree || null;
+    clothesLibrary.treeIndexing = Boolean(result.indexing);
+    refreshVisibleClothesFolders();
+    const selectedFolder = clothesFolders.value.find(
+      (folder) => folder.relativePath === selectedClothesFolder.value
+    );
+    if (selectedFolder) {
+      clothesLibrary.total = selectedFolder.count;
+    }
+    if (clothesLibrary.treeIndexing) scheduleClothesTreeRefresh();
+  } catch (error) {
+    log(`[Clothes Tree Error] ${error.message}`);
+  }
 }
 
 function toggleClothesFolder(folder) {
@@ -1805,7 +1947,6 @@ async function selectClothesFolder(relativePath = "") {
   clothesDetailTab.value = "详情";
   clothesCards.value = [];
   clothesLibrary.total = selectedClothesFolderRow.value?.count ?? null;
-  clothesLibrary.totalIsCandidate = true;
   clothesLibrary.indexing = false;
   clothesLibrary.nextOffset = 0;
   clothesLibrary.hasMore = false;
@@ -1823,7 +1964,6 @@ async function selectClothesFolder(relativePath = "") {
     clothesCards.value = mapClothesCardRows(result.cards);
     if (result.total != null) {
       clothesLibrary.total = Number(result.total);
-      clothesLibrary.totalIsCandidate = Boolean(result.total_is_candidate);
     }
     clothesLibrary.indexing = Boolean(result.indexing);
     clothesLibrary.nextOffset = clothesCards.value.length;
@@ -1873,7 +2013,6 @@ async function loadMoreClothesCards() {
     clothesCards.value = [...clothesCards.value, ...nextCards];
     if (result.total != null) {
       clothesLibrary.total = Number(result.total);
-      clothesLibrary.totalIsCandidate = Boolean(result.total_is_candidate);
     }
     clothesLibrary.indexing = Boolean(result.indexing);
     clothesLibrary.nextOffset = offset + nextCards.length;
@@ -1896,7 +2035,7 @@ function handleClothesCardGridScroll(event) {
   void loadMoreClothesCards();
 }
 
-async function loadClothesTree() {
+async function loadClothesTree({ force = false } = {}) {
   if (clothesLibrary.loading) return;
   clothesLibrary.checked = true;
   clothesLibrary.loading = true;
@@ -1910,8 +2049,9 @@ async function loadClothesTree() {
   }
 
   try {
+    const refreshQuery = force ? "&refresh=1" : "";
     const result = await window.desktopApi?.backendRequest?.(
-      `/library/clothes/tree?game_dir=${encodeQuery(paths.gameDir)}`
+      `/library/clothes/tree?game_dir=${encodeQuery(paths.gameDir)}${refreshQuery}`
     );
     if (!result?.ok) throw new Error(result?.error || "服装卡目录读取失败");
     clothesLibrary.validGameDir = Boolean(result.is_valid_game_dir);
@@ -1923,8 +2063,10 @@ async function loadClothesTree() {
       return;
     }
     clothesTree.value = result.tree || null;
+    clothesLibrary.treeIndexing = Boolean(result.indexing);
     expandedClothesFolders.value = collectExpandableClothesFolderPaths(clothesTree.value);
     refreshVisibleClothesFolders();
+    if (clothesLibrary.treeIndexing) scheduleClothesTreeRefresh();
     const folderExists = clothesFolders.value.some((folder) => folder.relativePath === selectedClothesFolder.value);
     await selectClothesFolder(folderExists ? selectedClothesFolder.value : "");
   } catch (error) {
@@ -1942,7 +2084,7 @@ async function ensureClothesLibraryLoaded({ force = false } = {}) {
   if (!backendReady.value || !paths.gameDir) return false;
   if (!force && clothesLibrary.checked && clothesLibrary.validGameDir && clothesTree.value) return true;
   if (clothesLibrary.loading) return false;
-  await loadClothesTree();
+  await loadClothesTree({ force });
   return clothesLibrary.validGameDir && Boolean(clothesTree.value);
 }
 
@@ -1992,6 +2134,199 @@ async function handleClothesCardClick(card) {
   }
 }
 
+function toggleSceneFolder(folder) {
+  if (!folder?.hasChildren) return;
+  const next = new Set(expandedSceneFolders.value);
+  if (next.has(folder.relativePath)) next.delete(folder.relativePath);
+  else next.add(folder.relativePath);
+  expandedSceneFolders.value = next;
+  refreshVisibleSceneFolders();
+}
+
+async function selectSceneFolder(relativePath = "") {
+  const requestId = ++sceneListRequestId;
+  selectedSceneFolder.value = relativePath || "";
+  selectedSceneDetailPath.value = "";
+  selectedSceneDetail.value = null;
+  sceneDetailTab.value = "详情";
+  sceneCards.value = [];
+  sceneLibrary.total = selectedSceneFolderRow.value?.count ?? null;
+  sceneLibrary.nextOffset = 0;
+  sceneLibrary.hasMore = false;
+  sceneLibrary.loadingMore = false;
+  if (!backendReady.value || !paths.gameDir || !sceneLibrary.validGameDir) return;
+
+  sceneLibrary.loading = true;
+  sceneLibrary.error = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/scene?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedSceneFolder.value)}&offset=0&limit=${SCENE_CARD_PAGE_SIZE}`
+    );
+    if (requestId !== sceneListRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "场景卡列表读取失败");
+    sceneCards.value = mapSceneCardRows(result.cards);
+    if (result.total != null) sceneLibrary.total = Number(result.total);
+    sceneLibrary.nextOffset = sceneCards.value.length;
+    sceneLibrary.hasMore = Boolean(result.has_more);
+  } catch (error) {
+    if (requestId !== sceneListRequestId) return;
+    sceneLibrary.error = error.message;
+    sceneCards.value = [];
+    log(`[Scene Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === sceneListRequestId) sceneLibrary.loading = false;
+  }
+}
+
+async function loadMoreSceneCards() {
+  if (
+    sceneLibrary.loading
+    || sceneLibrary.loadingMore
+    || !sceneLibrary.hasMore
+    || !backendReady.value
+    || !paths.gameDir
+    || !sceneLibrary.validGameDir
+  ) return;
+
+  const requestId = sceneListRequestId;
+  const offset = sceneLibrary.nextOffset || sceneCards.value.length;
+  sceneLibrary.loadingMore = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/scene?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedSceneFolder.value)}&offset=${offset}&limit=${SCENE_CARD_PAGE_SIZE}`
+    );
+    if (requestId !== sceneListRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "更多场景卡读取失败");
+    const nextCards = mapSceneCardRows(result.cards);
+    sceneCards.value = [...sceneCards.value, ...nextCards];
+    if (result.total != null) sceneLibrary.total = Number(result.total);
+    sceneLibrary.nextOffset = offset + nextCards.length;
+    sceneLibrary.hasMore = Boolean(result.has_more);
+  } catch (error) {
+    if (requestId !== sceneListRequestId) return;
+    sceneLibrary.error = error.message;
+    log(`[Scene Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === sceneListRequestId) sceneLibrary.loadingMore = false;
+  }
+}
+
+function handleSceneCardGridScroll(event) {
+  const element = event?.currentTarget;
+  if (!element || element.scrollHeight - element.scrollTop - element.clientHeight > 900) return;
+  void loadMoreSceneCards();
+}
+
+async function loadSceneTree({ force = false } = {}) {
+  if (!force && sceneLibrary.loading) return;
+  sceneLibrary.checked = true;
+  sceneLibrary.loading = true;
+  sceneLibrary.error = "";
+  if (!backendReady.value || !paths.gameDir) {
+    sceneLibrary.validGameDir = false;
+    sceneCards.value = [];
+    resetSceneTree();
+    sceneLibrary.loading = false;
+    return;
+  }
+
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/scene/tree?game_dir=${encodeQuery(paths.gameDir)}`
+    );
+    if (!result?.ok) throw new Error(result?.error || "场景卡目录读取失败");
+    sceneLibrary.validGameDir = Boolean(result.is_valid_game_dir);
+    sceneLibrary.root = result.root || "";
+    if (!sceneLibrary.validGameDir) {
+      sceneLibrary.error = result.error || "未找到 UserData/studio/scene 场景卡目录";
+      sceneCards.value = [];
+      resetSceneTree();
+      return;
+    }
+    sceneTree.value = result.tree || null;
+    expandedSceneFolders.value = collectExpandableSceneFolderPaths(sceneTree.value);
+    refreshVisibleSceneFolders();
+    const folderExists = sceneFolders.value.some((folder) => folder.relativePath === selectedSceneFolder.value);
+    await selectSceneFolder(folderExists ? selectedSceneFolder.value : "");
+  } catch (error) {
+    sceneLibrary.validGameDir = false;
+    sceneLibrary.error = error.message;
+    sceneCards.value = [];
+    resetSceneTree();
+    log(`[Scene Cards Error] ${error.message}`);
+  } finally {
+    sceneLibrary.loading = false;
+  }
+}
+
+async function ensureSceneLibraryLoaded({ force = false } = {}) {
+  if (!backendReady.value || !paths.gameDir) return false;
+  if (!force && sceneLibrary.checked && sceneLibrary.validGameDir && sceneTree.value) return true;
+  if (sceneLibrary.loading) return false;
+  await loadSceneTree({ force });
+  return sceneLibrary.validGameDir && Boolean(sceneTree.value);
+}
+
+async function refreshSceneCards() {
+  if (sceneLibrary.loading || !sceneLibrary.validGameDir) return;
+  await ensureSceneLibraryLoaded({ force: true });
+}
+
+async function loadSelectedSceneDetail(card = selectedSceneCard.value) {
+  if (!card?.relativePath || sceneLibrary.detailLoading) return;
+  sceneLibrary.detailLoading = true;
+  const targetPath = card.relativePath;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/scene/detail?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(card.relativePath)}`
+    );
+    if (!result?.ok) throw new Error(result?.error || "场景卡详情读取失败");
+    const detail = result.card || {};
+    if (selectedSceneDetailPath.value === targetPath) {
+      selectedSceneDetail.value = {
+        ...card,
+        ...detail,
+        thumbnailUrl: backendAssetUrl(detail.thumbnail_url || detail.thumbnailUrl || card.thumbnailUrl),
+        coverUrl: backendAssetUrl(detail.cover_url || detail.coverUrl || card.coverUrl),
+        dependencies: Array.isArray(detail.dependencies)
+          ? detail.dependencies.map((dependency) => ({
+              ...dependency,
+              item: dependency.item
+                ? {
+                    ...dependency.item,
+                    kind: itemKindLabel(dependency.item.kind),
+                    thumbnailUrl: backendAssetUrl(dependency.item.thumbnail_url)
+                  }
+                : null
+            }))
+          : [],
+        modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString() : card.modifiedAt,
+        modifiedTimestamp: Number(detail.modified_at || card.modifiedTimestamp),
+        fileSize: Number(detail.file_size || card.fileSize)
+      };
+      void loadCardDependencyRemoteCandidates(targetPath, selectedSceneDetail.value.dependencies, { scene: true });
+    }
+  } catch (error) {
+    sceneLibrary.error = error.message;
+    log(`[Scene Card Detail Error] ${error.message}`);
+  } finally {
+    sceneLibrary.detailLoading = false;
+  }
+}
+
+async function handleSceneCardClick(card) {
+  if (!card?.relativePath || sceneLibrary.detailLoading) return;
+  sceneSideMode.value = "detail";
+  selectedSceneDetailPath.value = card.relativePath;
+  selectedSceneDetail.value = card;
+  cardDependencyRemote.loading = false;
+  cardDependencyRemote.error = "";
+  cardDependencyRemote.byGuid = {};
+  cardDependencyRemote.busyGuids = {};
+  cardDependencyRemote.notices = {};
+  await loadSelectedSceneDetail(card);
+}
+
 async function refreshCharacterCardsAfterDatabaseBuild() {
   if (!backendReady.value || !paths.gameDir || !cardLibrary.checked) return;
   await loadCardTree();
@@ -2027,6 +2362,84 @@ function log(message) {
 
 function formatDurationMs(durationMs) {
   return `${durationMs >= 100 ? durationMs.toFixed(0) : durationMs.toFixed(1)} ms`;
+}
+
+function formatTaskDuration(durationMs) {
+  const value = Number(durationMs);
+  if (!Number.isFinite(value) || value < 0) return "-";
+  if (value < 1000) return formatDurationMs(value);
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds - minutes * 60;
+  return `${minutes} 分 ${remainder.toFixed(1)} 秒`;
+}
+
+function taskElapsedMs(task) {
+  const recorded = Number(task?.data?.timings?.total_ms);
+  if (Number.isFinite(recorded) && recorded >= 0) return recorded;
+  const started = Number(task?.created_at);
+  const finished = Number(task?.finished_at || task?.updated_at);
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return 0;
+  return Math.max(0, (finished - started) * 1000);
+}
+
+function formatTaskTimestamp(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
+  return new Date(timestamp * 1000).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+}
+
+function taskTimingRows(task) {
+  const timings = task?.data?.timings || {};
+  if (task?.task_type === "build_mod_database") {
+    return [
+      ["原版资源索引", timings.builtin_resource_index_ms],
+      ["zipmod 扫描", timings.zipmod_scan_ms],
+      ["物品解析与缩略图", timings.item_parse_ms],
+      ["模组数据库写入", timings.database_write_ms],
+      ["人物卡数据库", timings.character_card_database_ms],
+      ["总耗时", timings.total_ms]
+    ].filter(([, value]) => Number.isFinite(Number(value)));
+  }
+  return Number.isFinite(Number(timings.total_ms))
+    ? [["总耗时", timings.total_ms]]
+    : [];
+}
+
+function taskResultRows(task) {
+  if (task?.task_type !== "build_mod_database") return [];
+  const stats = task.data?.stats || {};
+  const cardStats = task.data?.card_stats || {};
+  return [
+    ["主 zipmod", stats.primary_zipmods],
+    ["物品", stats.mod_items],
+    ["重复 zipmod", stats.duplicate_zipmods],
+    ["人物卡", cardStats.cards],
+    ["人物卡依赖", cardStats.dependencies],
+    ["缺失依赖", cardStats.missing_dependencies]
+  ].filter(([, value]) => value !== undefined && value !== null);
+}
+
+function snapshotTask(task) {
+  if (!task) return null;
+  return {
+    ...task,
+    messages: Array.isArray(task.messages) ? [...task.messages] : [],
+    data: task.data && typeof task.data === "object" ? { ...task.data } : {}
+  };
+}
+
+function openTaskDetails(task) {
+  selectedTask.value = snapshotTask(task?.task || task);
 }
 
 async function measureStep(label, action, { logStart = false } = {}) {
@@ -2106,7 +2519,9 @@ function taskSummary(task) {
   }
   if (task.task_type === "build_mod_database") {
     const zipmods = task.data?.stats?.primary_zipmods;
-    return zipmods ? `已索引 ${zipmods} 个 zipmod` : taskHint.value;
+    const elapsed = task.data?.timings?.total_ms;
+    if (!zipmods) return taskHint.value;
+    return `已索引 ${zipmods} 个 zipmod${elapsed ? ` · ${formatTaskDuration(elapsed)}` : ""}`;
   }
   if (task.task_type === "build_card_database") {
     const cards = task.data?.stats?.changed_cards;
@@ -2146,22 +2561,22 @@ function taskSummary(task) {
   if (task.task_type === "check_game_dir") {
     return task.data?.is_valid ? "目录有效" : "目录无效";
   }
-  if (task.task_type === "search_cards") {
-    return `找到 ${task.data?.card_count ?? 0} 张人物卡`;
-  }
   return task.status || "等待执行";
 }
 
 function rememberTask(task) {
   if (!task?.id) return;
+  const snapshot = snapshotTask(task);
   const item = {
     id: task.id,
     title: task.title || task.task_type || "任务",
     summary: taskSummary(task),
     label: taskStatusLabel(task),
-    badgeClass: taskStatusClass(task)
+    badgeClass: taskStatusClass(task),
+    task: snapshot
   };
   recentTasks.value = [item, ...recentTasks.value.filter((entry) => entry.id !== item.id)];
+  if (selectedTask.value?.id === task.id) selectedTask.value = snapshot;
 }
 
 function encodeQuery(value) {
@@ -2611,6 +3026,7 @@ function setCardBrowserMode(mode) {
   cardBrowserMode.value = nextMode;
   activeView.value = "characters";
   if (nextMode === "clothes") void ensureClothesLibraryLoaded();
+  if (nextMode === "scene") void ensureSceneLibraryLoaded();
 }
 
 function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind = "") {
@@ -3788,6 +4204,14 @@ async function openModItemInItemBrowser(item) {
 }
 
 async function openCardDependencyItem(dependency) {
+  if (dependency?.dependency_type === "scene") {
+    if (dependency.matched) {
+      await openPackagedMod(dependency.mod_id);
+    } else {
+      showMissingItemPrompt(dependency);
+    }
+    return;
+  }
   if (dependency?.source_type === "builtin" || dependency?.item?.source_type === "builtin") {
     return;
   }
@@ -3892,6 +4316,7 @@ function resetMissingItemPromptRemote() {
 
 function showMissingItemPrompt(dependency) {
   const name = dependency?.item?.name || dependency?.name || dependency?.mod_id || "未知物品";
+  missingItemPrompt.kind = dependency?.displayMode === "mod" ? "mod" : "item";
   missingItemPrompt.name = name;
   missingItemPrompt.modId = dependency?.mod_id || dependency?.item?.zipmod_guid || "";
   missingItemPrompt.property = dependency?.property || "";
@@ -5300,7 +5725,10 @@ async function loadItemRows({ reset = false } = {}) {
 async function ensureModDatabaseLoaded({ force = false } = {}) {
   if (libraryMode.value !== "mods") return;
   if (!backendReady.value) return;
-  if (!force && modDatabase.checked && modDatabase.exists && modRows.value.length > 0) return;
+  if (!force && modDatabase.checked && modDatabase.exists && modRows.value.length > 0) {
+    await loadZipmodAuthors();
+    return;
+  }
 
   const exists = await checkModDatabase();
   if (exists) {
@@ -5312,7 +5740,10 @@ async function ensureModDatabaseLoaded({ force = false } = {}) {
 async function ensureItemDatabaseLoaded({ force = false } = {}) {
   if (libraryMode.value !== "items") return;
   if (!backendReady.value) return;
-  if (!force && itemDatabase.checked && itemDatabase.exists && itemRows.value.length > 0) return;
+  if (!force && itemDatabase.checked && itemDatabase.exists && itemRows.value.length > 0) {
+    await loadItemFilters();
+    return;
+  }
 
   const exists = await checkModDatabase();
   if (exists) {
@@ -5411,6 +5842,8 @@ function handleModTableScroll(event) {
 function applyGameDir(selected) {
   window.clearTimeout(clothesIndexRetryTimer);
   clothesIndexRetryTimer = 0;
+  window.clearTimeout(clothesTreeRefreshTimer);
+  clothesTreeRefreshTimer = 0;
   paths.gameDir = selected || "";
   paths.inputDir = selected ? `${selected}\\UserData\\chara` : "";
   clearResourceStats();
@@ -5418,6 +5851,7 @@ function applyGameDir(selected) {
   modDatabase.exists = false;
   itemDatabase.checked = false;
   itemDatabase.exists = false;
+  zipmodAuthors.value = [];
   itemFilterAuthors.value = [];
   itemFilterKinds.value = [];
   selectedCardFolder.value = "";
@@ -5429,8 +5863,8 @@ function applyGameDir(selected) {
   clothesLibrary.validGameDir = false;
   clothesLibrary.root = "";
   clothesLibrary.total = null;
-  clothesLibrary.totalIsCandidate = true;
   clothesLibrary.indexing = false;
+  clothesLibrary.treeIndexing = false;
   clothesLibrary.nextOffset = 0;
   clothesLibrary.hasMore = false;
   resetClothesTree();
@@ -5439,6 +5873,22 @@ function applyGameDir(selected) {
   selectedClothesDetailPath.value = "";
   selectedClothesDetail.value = null;
   clothesSideMode.value = "tree";
+  sceneLibrary.checked = false;
+  sceneLibrary.loading = false;
+  sceneLibrary.loadingMore = false;
+  sceneLibrary.detailLoading = false;
+  sceneLibrary.error = "";
+  sceneLibrary.validGameDir = false;
+  sceneLibrary.root = "";
+  sceneLibrary.total = null;
+  sceneLibrary.nextOffset = 0;
+  sceneLibrary.hasMore = false;
+  resetSceneTree();
+  sceneCards.value = [];
+  selectedSceneFolder.value = "";
+  selectedSceneDetailPath.value = "";
+  selectedSceneDetail.value = null;
+  sceneSideMode.value = "tree";
 }
 
 function applyGameSetupPayload(payload) {
@@ -5550,9 +6000,17 @@ async function loadAppSettings({ loadBackendData = true } = {}) {
       ? result.settings.favoriteCardTheme
       : "gold";
     managerSettings.checkDatabaseChangesOnStartup = result.settings?.checkDatabaseChangesOnStartup !== false;
+    const previousWallpaperPath = managerSettings.wallpaperPath;
+    const previousWallpaperType = managerSettings.wallpaperType;
+    wallpaperLoadFailed.value = false;
     managerSettings.wallpaperPath = result.settings?.wallpaperPath || "";
     managerSettings.wallpaperType = result.settings?.wallpaperType || "";
-    await refreshWallpaperPreview();
+    if (
+      previousWallpaperPath !== managerSettings.wallpaperPath
+      || previousWallpaperType !== managerSettings.wallpaperType
+    ) {
+      wallpaperReady.value = !managerSettings.wallpaperPath;
+    }
     const cachedWorkbenchProfile = readWorkbenchProfileCache();
     workbenchAuthorId.value = result.settings?.workbenchAuthorId || cachedWorkbenchProfile.authorId;
     workbenchWorkspacePath.value = result.settings?.workbenchWorkspacePath || cachedWorkbenchProfile.workspacePath;
@@ -5582,9 +6040,13 @@ async function loadAppSettings({ loadBackendData = true } = {}) {
 async function selectWallpaper() {
   const selected = await window.desktopApi?.selectWallpaperFile?.("选择应用壁纸", managerSettings.wallpaperPath);
   if (!selected?.path) return;
-  managerSettings.wallpaperPath = selected.path;
-  managerSettings.wallpaperType = selected.type || (/\.mp4$/i.test(selected.path) ? "video" : "image");
-  await refreshWallpaperPreview();
+  const nextPath = String(selected.path || "").trim();
+  const nextType = selected.type || (/\.mp4$/i.test(nextPath) ? "video" : "image");
+  const wallpaperChanged = managerSettings.wallpaperPath !== nextPath || managerSettings.wallpaperType !== nextType;
+  wallpaperLoadFailed.value = false;
+  wallpaperReady.value = !wallpaperChanged;
+  managerSettings.wallpaperPath = nextPath;
+  managerSettings.wallpaperType = nextType;
   const result = await saveAppSettings();
   settingsNotice.type = result?.ok ? "success" : "error";
   settingsNotice.message = result?.ok ? "壁纸已保存" : `保存失败：${result?.error || "未知错误"}`;
@@ -5593,7 +6055,8 @@ async function selectWallpaper() {
 async function clearWallpaper() {
   managerSettings.wallpaperPath = "";
   managerSettings.wallpaperType = "";
-  wallpaperDataUrl.value = "";
+  wallpaperReady.value = true;
+  wallpaperLoadFailed.value = false;
   const result = await saveAppSettings();
   settingsNotice.type = result?.ok ? "success" : "error";
   settingsNotice.message = result?.ok ? "已恢复默认壁纸" : `保存失败：${result?.error || "未知错误"}`;
@@ -5928,9 +6391,6 @@ function applyTask(task) {
       taskHint.value = "请选择有效 HS2 目录";
     }
   }
-  if (task.task_type === "search_cards") {
-    stats.cards = task.data?.card_count ?? stats.cards;
-  }
   if (task.task_type === "extract_mods") {
     stats.zipmods = task.data?.matched_mod_count ?? stats.zipmods;
     stats.missingAbdata = task.data?.missing_abdata?.length ?? stats.missingAbdata;
@@ -6016,6 +6476,11 @@ async function openGameDirectory(relativePath) {
 async function openClothesDirectory(relativePath = "") {
   const suffix = relativePath ? `\\${relativePath}` : "";
   return openGameDirectory(`UserData\\coordinate${suffix}`);
+}
+
+async function openSceneDirectory(relativePath = "") {
+  const suffix = relativePath ? `\\${relativePath}` : "";
+  return openGameDirectory(`UserData\\studio\\scene${suffix}`);
 }
 
 async function pollTask(id, options = {}) {
@@ -7064,10 +7529,10 @@ async function toggleAllCardDependencies() {
   return toggleCardDependencyDownloadTask(taskId, cardDependencyRemote.taskGuids[taskId] || []);
 }
 
-const cardDependencyRemoteSummary = computed(() => {
+function buildDependencyRemoteSummary(dependencies) {
   const available = new Map();
   let missingCount = 0;
-  for (const dependency of selectedCardDependencies.value || []) {
+  for (const dependency of dependencies || []) {
     if (dependency?.matched) continue;
     missingCount += 1;
     const guid = normalizeCardDependencyGuid(dependency);
@@ -7081,7 +7546,13 @@ const cardDependencyRemoteSummary = computed(() => {
     availableCount: available.size,
     candidates: [...available.values()]
   };
-});
+}
+const cardDependencyRemoteSummary = computed(() => (
+  buildDependencyRemoteSummary(selectedCardDependencies.value)
+));
+const sceneDependencyRemoteSummary = computed(() => (
+  buildDependencyRemoteSummary(selectedSceneCard.value?.dependencies)
+));
 const cardDependencyRemoteBusy = computed(() => Object.keys(cardDependencyRemote.busyGuids).length > 0);
 
 function formatDownloadSpeed(bytesPerSecond) {
@@ -7104,9 +7575,11 @@ function cardDependencyInlineProgress(dependency) {
   };
 }
 
-async function loadCardDependencyRemoteCandidates(targetPath, dependencies) {
-  const card = selectedCardDetail.value;
-  if (!card?.relativePath || selectedCardDetailPath.value !== targetPath) return;
+async function loadCardDependencyRemoteCandidates(targetPath, dependencies, { scene = false } = {}) {
+  const requestId = ++cardDependencyRemoteRequestId;
+  const card = scene ? selectedSceneCard.value : selectedCardDetail.value;
+  const selectedPath = scene ? selectedSceneDetailPath.value : selectedCardDetailPath.value;
+  if (!card?.relativePath || selectedPath !== targetPath) return;
   const missingGuids = [...new Set(
     (dependencies || [])
       .filter((dependency) => !dependency?.matched)
@@ -7122,24 +7595,30 @@ async function loadCardDependencyRemoteCandidates(targetPath, dependencies) {
       game_dir: String(paths.gameDir || ""),
       path: String(card.relativePath || "")
     });
-    const result = await window.desktopApi?.backendRequest?.(`/library/cards/missing-mods?${query.toString()}`);
+    const endpoint = scene ? "/library/scene/missing-mods" : "/library/cards/missing-mods";
+    const result = await window.desktopApi?.backendRequest?.(`${endpoint}?${query.toString()}`);
     if (!result?.ok) throw new Error(result?.error || "无法读取远程模组候选");
+    if (requestId !== cardDependencyRemoteRequestId) return;
     const entries = {};
     for (const group of result.groups || []) entries[String(group.guid_norm || "").toLocaleLowerCase()] = group;
     cardDependencyRemote.byGuid = Object.fromEntries(missingGuids.map((guid) => [guid, entries[guid] || { can_download: false, reason: "远程索引中没有有效记录" }]));
     syncMissingItemPromptRemote();
   } catch (error) {
+    if (requestId !== cardDependencyRemoteRequestId) return;
     cardDependencyRemote.error = error.message;
     syncMissingItemPromptRemote();
     log(`[Cards Completion Error] ${error.message}`);
   } finally {
-    cardDependencyRemote.loading = false;
-    syncMissingItemPromptRemote();
+    if (requestId === cardDependencyRemoteRequestId) {
+      cardDependencyRemote.loading = false;
+      syncMissingItemPromptRemote();
+    }
   }
 }
 
 async function installCardDependency(dependency) {
-  const card = selectedCardDetail.value;
+  const isScene = cardBrowserMode.value === "scene";
+  const card = isScene ? selectedSceneCard.value : selectedCardDetail.value;
   const guid = normalizeCardDependencyGuid(dependency);
   if (cardDependencyRemote.taskIds[guid]) {
     await toggleCardDependencyDownload(dependency);
@@ -7158,11 +7637,15 @@ async function installCardDependency(dependency) {
         const data = finalTask.data || {};
         if (finalTask.status === "completed") {
           cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: "安装完成" };
-          await loadSelectedCardProfile(card);
-          const currentCard = selectedCardDetail.value;
+          if (isScene) await loadSelectedSceneDetail(card);
+          else await loadSelectedCardProfile(card);
+          const currentCard = isScene ? selectedSceneCard.value : selectedCardDetail.value;
           if (currentCard) {
-            currentCard.missingCount = (selectedCardDependencies.value || []).filter((item) => !item.matched).length;
-            currentCard.dependencyCount = selectedCardDependencies.value.length;
+            const dependencies = isScene
+              ? (currentCard.dependencies || [])
+              : (selectedCardDependencies.value || []);
+            currentCard.missingCount = dependencies.filter((item) => !item.matched).length;
+            currentCard.dependencyCount = dependencies.length;
           }
         } else {
           cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: finalTask.error || data.message || "安装失败" };
@@ -7182,8 +7665,9 @@ async function installCardDependency(dependency) {
 }
 
 async function installAllCardDependencies() {
-  const card = selectedCardDetail.value;
-  const summary = cardDependencyRemoteSummary.value;
+  const isScene = cardBrowserMode.value === "scene";
+  const card = isScene ? selectedSceneCard.value : selectedCardDetail.value;
+  const summary = isScene ? sceneDependencyRemoteSummary.value : cardDependencyRemoteSummary.value;
   if (!card?.relativePath || !summary.candidates.length || cardDependencyRemote.installingAll || cardDependencyRemoteBusy.value) return;
 
   const candidates = summary.candidates;
@@ -7217,11 +7701,15 @@ async function installAllCardDependencies() {
         }
         cardDependencyRemote.notices = completedNotices;
         if (finalTask.status === "completed") {
-          await loadSelectedCardProfile(card);
-          const currentCard = selectedCardDetail.value;
+          if (isScene) await loadSelectedSceneDetail(card);
+          else await loadSelectedCardProfile(card);
+          const currentCard = isScene ? selectedSceneCard.value : selectedCardDetail.value;
           if (currentCard) {
-            currentCard.missingCount = (selectedCardDependencies.value || []).filter((item) => !item.matched).length;
-            currentCard.dependencyCount = selectedCardDependencies.value.length;
+            const dependencies = isScene
+              ? (currentCard.dependencies || [])
+              : (selectedCardDependencies.value || []);
+            currentCard.missingCount = dependencies.filter((item) => !item.matched).length;
+            currentCard.dependencyCount = dependencies.length;
           }
         }
         clearCardDependencyDownloadTask(finalTask.id, guids);
@@ -7450,6 +7938,7 @@ function setCardDependencyFilter(value) {
   cardDependencyRemote.allTotalBytes = 0;
   cardDependencyRemote.allCurrentFile = "";
   missingItemPrompt.open = false;
+  missingItemPrompt.kind = "item";
   missingItemPrompt.name = "";
   missingItemPrompt.modId = "";
   missingItemPrompt.property = "";
@@ -7805,9 +8294,16 @@ async function emptyTrash() {
 
 onMounted(() => {
   const startedAt = performance.now();
+  removeStartupLogListener = window.desktopApi?.onStartupLog?.((payload) => {
+    const message = String(payload?.message || "").trim();
+    if (message) log(message);
+  });
   log("Ready.");
   log("[Mode] zipmod extract mode: Copy");
   log("[Backend] Python backend checking.");
+  // Reveal the shell after its first render. Backend and wallpaper warm-up can
+  // continue in the background without blocking the first usable frame.
+  window.requestAnimationFrame(() => notifyRendererReady());
   void (async () => {
     const backendIsReady = await waitForBackendReady();
     if (backendIsReady) {
@@ -7824,6 +8320,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  removeStartupLogListener?.();
+  removeStartupLogListener = null;
   stopCurrentGameStatePolling();
 });
 
@@ -7838,6 +8336,8 @@ const appCtx = reactive({
   achievementUnlockedCount,
   visibleAchievements,
   selectedAchievement,
+  selectedTask,
+  openTaskDetails,
   managerSettings,
   formatAchievementProgress,
   loadAchievements,
@@ -7889,6 +8389,7 @@ const appCtx = reactive({
   cardDetailTab,
   cardDependencyRemote,
   cardDependencyRemoteSummary,
+  sceneDependencyRemoteSummary,
   cardDependencyRemoteBusy,
   formatDownloadSpeed,
   cardDependencyInlineProgress,
@@ -7930,6 +8431,23 @@ const appCtx = reactive({
   loadMoreClothesCards,
   handleClothesCardGridScroll,
   clothesSideMode,
+  sceneLibrary,
+  sceneFolders,
+  sceneCards,
+  visibleSceneCards,
+  sceneCardCountText,
+  selectedSceneFolder,
+  selectedSceneCard,
+  selectedSceneDetailPath,
+  sceneDetailTab,
+  toggleSceneFolder,
+  selectSceneFolder,
+  loadSceneTree,
+  refreshSceneCards,
+  handleSceneCardClick,
+  loadMoreSceneCards,
+  handleSceneCardGridScroll,
+  sceneSideMode,
   cardProfileEditor,
   cards,
   characterSideMode,
@@ -7984,6 +8502,11 @@ const appCtx = reactive({
   favoritingCardPath,
   ratingCardPath,
   formatBytes,
+  formatTaskDuration,
+  formatTaskTimestamp,
+  taskElapsedMs,
+  taskTimingRows,
+  taskResultRows,
   formatDatabaseTime,
   formatProfileValue,
   formatPersonality,
@@ -8017,6 +8540,7 @@ const appCtx = reactive({
   libraryMode,
   loadItemRows,
   loadModRows,
+  loadZipmodAuthors,
   loadGameSetup,
   locateSourceMod,
   log,
@@ -8052,6 +8576,7 @@ const appCtx = reactive({
   openManifestEditor,
   openGameDirectory,
   openClothesDirectory,
+  openSceneDirectory,
   openModItemInItemBrowser,
   openPackagedMod,
   openSelectedModInFolder,
@@ -8183,6 +8708,9 @@ const appCtx = reactive({
   taskHint,
   taskName,
   taskPercent,
+  taskStatusClass,
+  taskStatusLabel,
+  taskSummary,
   toggleAllVisibleCards,
   toggleSelectedCardFavorite,
   setSelectedCardRating,
@@ -8239,6 +8767,10 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
       if (!clothesLibrary.checked || !clothesLibrary.validGameDir || !clothesTree.value) {
         void ensureClothesLibraryLoaded();
       }
+    } else if (mode === "scene") {
+      if (!sceneLibrary.checked || !sceneLibrary.validGameDir || !sceneTree.value) {
+        void ensureSceneLibraryLoaded();
+      }
     } else if (mode === "character" && (!cardLibrary.checked || (cardLibrary.validGameDir && !cardTree.value))) {
       loadCardTree();
     }
@@ -8248,7 +8780,7 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
 
 <template>
   <div class="app-shell">
-    <div class="wallpaper-layer" aria-hidden="true">
+    <div class="wallpaper-layer" :class="{ 'wallpaper-layer--media-pending': !wallpaperReady }" aria-hidden="true">
       <video
         v-if="wallpaperIsVideo"
         class="wallpaper-media"
@@ -8257,8 +8789,17 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
         muted
         loop
         playsinline
+        @canplay="handleWallpaperReady"
+        @error="handleWallpaperError"
       ></video>
-      <img v-else class="wallpaper-media" :src="wallpaperSource" alt="" />
+      <img
+        v-else
+        class="wallpaper-media"
+        :src="wallpaperSource"
+        alt=""
+        @load="handleWallpaperReady"
+        @error="handleWallpaperError"
+      />
       <div class="wallpaper-scrim"></div>
     </div>
     <aside class="sidebar">
@@ -8285,16 +8826,11 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
                   <path d="M7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"></path>
                 </g>
                 <g v-else-if="view.id === 'overview'">
-                  <rect x="4" y="4" width="6" height="6" rx="1"></rect>
-                  <rect x="14" y="4" width="6" height="6" rx="1"></rect>
-                  <rect x="4" y="14" width="6" height="6" rx="1"></rect>
-                  <path d="M14 20v-5M17 20v-8M20 20v-3"></path>
+                  <rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><path d="M14 20v-5M17 20v-8M20 20v-3"></path>
                 </g>
                 <g v-else-if="view.id === 'characters'">
-                  <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
-                  <rect x="6.5" y="7" width="5.2" height="6" rx="1"></rect>
-                  <circle cx="9.1" cy="9.3" r="1.1"></circle>
-                  <path d="M7.5 12a2 2 0 0 1 3.2 0M14.5 8h3M14.5 11h3M14.5 14h3M6.5 17h11"></path>
+                  <path d="M7 5.5 18.2 4a1.8 1.8 0 0 1 2 1.5l1.5 10.8a1.8 1.8 0 0 1-1.5 2L9 19.8a1.8 1.8 0 0 1-2-1.5L5.5 7.5a1.8 1.8 0 0 1 1.5-2Z"></path>
+                  <path d="M5.2 8.5 4 9a1.8 1.8 0 0 0-1 2.3l3.7 9.5a1.8 1.8 0 0 0 2.3 1l10-3.9M10 8.8l7.3-1M10.6 12.5l6.1-.8M11.2 16l3.8-.5"></path>
                 </g>
                 <g v-else-if="view.id === 'mods'">
                   <path d="m4 8 8-4 8 4-8 4-8-4Z"></path>
@@ -8308,7 +8844,8 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
                   <path d="M9.5 4H4v5.5a2.5 2.5 0 1 1 0 5V20h5.5a2.5 2.5 0 1 1 5 0H20v-5.5a2.5 2.5 0 1 0 0-5V4h-5.5a2.5 2.5 0 1 0-5 0Z"></path>
                 </g>
                 <g v-else-if="view.id === 'trash'">
-                  <path d="M5 10h14v10H5zM8 10V6h8v4M3 10h18M9 14h6"></path>
+                  <path d="M6.5 8.5h11l-.7 11a1.7 1.7 0 0 1-1.7 1.5H8.9a1.7 1.7 0 0 1-1.7-1.5l-.7-11Z"></path>
+                  <path d="M4 8.5h16M9 5h6l1 3.5H8L9 5ZM10 12v5M14 12v5"></path>
                 </g>
                 <g v-else>
                   <path d="M6 3h9l3 3v15H6V3Z"></path>
@@ -8328,11 +8865,7 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
               :aria-pressed="cardBrowserMode === 'character'"
               @click="setCardBrowserMode('character')"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
-                <circle cx="12" cy="9" r="2.2"></circle>
-                <path d="M7.5 17a4.5 4.5 0 0 1 9 0M7 7h2"></path>
-              </svg>
+              <img class="nav-card-type-image" :src="characterCardTypeIcon" alt="" aria-hidden="true">
             </button>
             <button
               class="nav-card-type-button"
@@ -8343,10 +8876,7 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
               :aria-pressed="cardBrowserMode === 'clothes'"
               @click="setCardBrowserMode('clothes')"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="m9 4 3 2 3-2 5 4-2.5 4-2-1V20H8.5v-9l-2 1L4 8l5-4Z"></path>
-                <path d="M9 4c.2 2 1.2 3 3 3s2.8-1 3-3M8.5 14h7"></path>
-              </svg>
+              <img class="nav-card-type-image" :src="clothesCardTypeIcon" alt="" aria-hidden="true">
             </button>
             <button
               class="nav-card-type-button"
@@ -8357,11 +8887,7 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
               :aria-pressed="cardBrowserMode === 'scene'"
               @click="setCardBrowserMode('scene')"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <rect x="3.5" y="4" width="17" height="16" rx="2.2"></rect>
-                <circle cx="16.5" cy="8" r="1.5"></circle>
-                <path d="m5.5 17 4.5-5 3 3 2-2 3.5 4M6 17h12"></path>
-              </svg>
+              <img class="nav-card-type-image" :src="sceneCardTypeIcon" alt="" aria-hidden="true">
             </button>
           </div>
         </div>
@@ -8956,13 +9482,13 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
             <div class="missing-item-panel-head">
               <div>
                 <span class="missing-item-kicker">DEPENDENCY CHECK</span>
-                <strong>物品缺失</strong>
+                <strong>{{ missingItemPrompt.kind === 'mod' ? '模组缺失' : '物品缺失' }}</strong>
               </div>
               <span class="missing-item-alert-mark">!</span>
             </div>
-            <p class="subtext">当前人物卡依赖的物品没有在本地物品数据库中匹配到。</p>
+            <p class="subtext">{{ missingItemPrompt.kind === 'mod' ? '当前场景卡依赖的模组没有在本地模组数据库中匹配到。' : '当前卡片依赖的物品没有在本地物品数据库中匹配到。' }}</p>
             <div class="prompt-note missing-item-note">
-              <span>物品</span>
+              <span>{{ missingItemPrompt.kind === 'mod' ? '模组' : '物品' }}</span>
               <strong>{{ missingItemPrompt.name }}</strong>
             </div>
             <div v-if="missingItemPrompt.modId" class="prompt-note">

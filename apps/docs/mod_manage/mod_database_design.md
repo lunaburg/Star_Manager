@@ -181,7 +181,7 @@ zipmod 内的 abdata/list/**/*.csv
 - 仅有 `mapinfo` 信息包时写入 `kind = __game_map_scene__`，即“地图 / 游戏本体”。
 - 两类特征同时存在时只写入一条 `kind = __game_studio_map_scene__`，即“地图 / 本体 + 工作室”。
 
-地图条目的 `MainAB` 保存场景或地图信息 `.unity3d` 路径，缩略图状态为 `ready`（前端使用地图占位图）。解析器版本写入数据库元数据；版本升级后的下一次增量建库会自动重解析一次全部 zipmod，保证新增识别规则能应用到未改动的旧文件。
+地图条目的 `MainAB` 保存场景或地图信息 `.unity3d` 路径，缩略图状态为 `ready`（前端使用地图占位图）。
 
 CSV 通常结构：
 
@@ -193,7 +193,7 @@ ID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex
 100001,0,1,物品名称,abdata,作者/主资源.unity3d,资源名,作者/缩略图资源.unity3d,thumb
 ```
 
-扫描器同时兼容部分作者工具生成的 UTF-16 LE（带 BOM）CSV。此类文件可能在表头前使用“类别编号 + 作者”等无列名元信息行，例如 `247`、`assetboye`，随后才是 `ID,Kind,Possess,Name,...` 表头。建库时会自动识别 UTF-16；前置元信息不计入物品数，第一行类别编号作为 `mod_items.kind`，数据行的 `Kind` 列不替代该类别编号。解析器版本变化后，增量建库会自动重解析已有 zipmod。
+扫描器同时兼容部分作者工具生成的 UTF-16 LE（带 BOM）CSV。此类文件可能在表头前使用“类别编号 + 作者”等无列名元信息行，例如 `247`、`assetboye`，随后才是 `ID,Kind,Possess,Name,...` 表头。建库时会自动识别 UTF-16；前置元信息不计入物品数，第一行类别编号作为 `mod_items.kind`，数据行的 `Kind` 列不替代该类别编号。
 
 每一条实际数据行表示一个物品。一个模组内可能有多个 CSV，一个 CSV 可能有多条实际数据行。一个模组的物品总数等于该模组下所有 CSV 实际数据行数量之和。
 
@@ -627,7 +627,7 @@ Summary priority is `error` > `missing` > `not_in_mod` > `in_mod` > empty. An ex
 
 **问题背景**：部分发型模组（例如 Sakuraba 风格的 CSV）除了 `MainAB` 主 Mesh 包，还通过 `TexAB` 引用外部贴图 Unity3D 包。实际资源中，`TexAB` 可能只是公共头发资源、兼容占位包或由 `MainAB` 自带纹理替代；把所有缺失 `TexAB` 都判为错误会把仍能正常显示的发型模组误报为异常。
 
-**解决方案**：CSV 解析器继续保存 `TexAB` 引用，但状态判定将缺失 `TexAB` 视为可选依赖；资源检查按“当前 zipmod → 游戏目录 → 其它 zipmod”三步执行。位于游戏公共 `abdata/chara/00`–`60` 目录的外部 `MainAB` 与 `TexAB` 不产生异常；其它游戏目录位置的外部资源和其它 zipmod 提供的资源统一标记为 `not_in_mod`，再用 `unity3d_source` 区分是否需要补入。`MainAB` 仍按必需主资源处理，但公共目录中的本体资源视为正常。解析器版本升级后，旧数据库会在下一次增量建库时重新解析。
+**解决方案**：CSV 解析器继续保存 `TexAB` 引用，但状态判定将缺失 `TexAB` 视为可选依赖；资源检查按“当前 zipmod → 游戏目录 → 其它 zipmod”三步执行。位于游戏公共 `abdata/chara/00`–`60` 目录的外部 `MainAB` 与 `TexAB` 不产生异常；其它游戏目录位置的外部资源和其它 zipmod 提供的资源统一标记为 `not_in_mod`，再用 `unity3d_source` 区分是否需要补入。`MainAB` 仍按必需主资源处理，但公共目录中的本体资源视为正常。
 
 批量补入任务会按诊断结果处理仅存在于游戏 `abdata` 且不在公共 `chara/00`–`60` 范围内的 `MainAB` 或 `TexAB`；同一个外部资源源文件被多个选中 zipmod 共用时，会分别复制到各 zipmod，并保留游戏目录中的源文件。
 

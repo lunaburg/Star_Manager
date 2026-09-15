@@ -76,12 +76,67 @@ const { ctx } = defineProps({
               <section v-if="ctx.recentTasks.length" class="panel overview-task-panel">
                 <div class="module-head"><h2>最近任务</h2></div>
                 <div class="task-list">
-                  <div v-for="task in ctx.recentTasks" :key="task.id" class="task-item">
-                    <span>{{ task.title }}<br><small>{{ task.summary }}</small></span>
-                    <span class="badge" :class="task.badgeClass">{{ task.label }}</span>
+                  <button
+                    v-for="task in ctx.recentTasks"
+                    :key="task.id"
+                    class="task-item"
+                    type="button"
+                    :aria-label="`查看任务：${task.title}`"
+                    @click="ctx.openTaskDetails(task)"
+                  >
+                    <span class="task-item-copy"><strong>{{ task.title }}</strong><small>{{ task.summary }}</small></span>
+                    <span class="task-item-status"><span class="badge" :class="task.badgeClass">{{ task.label }}</span><span class="task-item-chevron" aria-hidden="true">↗</span></span>
+                  </button>
+                </div>
+              </section>
+            </aside>
+          </div>
+          <div v-if="ctx.selectedTask" class="task-drawer-backdrop" @click.self="ctx.selectedTask = null">
+            <aside class="task-drawer" role="dialog" aria-modal="true" aria-labelledby="task-drawer-title">
+              <button class="task-drawer-close" type="button" aria-label="关闭任务详情" @click="ctx.selectedTask = null">×</button>
+              <div class="task-drawer-kicker">TASK REPORT</div>
+              <div class="task-drawer-heading">
+                <div>
+                  <h2 id="task-drawer-title">{{ ctx.selectedTask.title || ctx.selectedTask.task_type }}</h2>
+                  <code>{{ ctx.selectedTask.task_type }}</code>
+                </div>
+                <span class="badge" :class="ctx.taskStatusClass(ctx.selectedTask)">{{ ctx.taskStatusLabel(ctx.selectedTask) }}</span>
+              </div>
+              <div class="task-drawer-summary">
+                <strong>{{ ctx.taskSummary(ctx.selectedTask) }}</strong>
+                <span v-if="ctx.selectedTask.status === 'completed'">任务已完成，以下为本次执行记录。</span>
+                <span v-else-if="ctx.selectedTask.status === 'failed'">任务未完成，请查看错误信息和任务消息。</span>
+                <span v-else>任务当前状态：{{ ctx.selectedTask.status }}</span>
+              </div>
+
+              <section v-if="ctx.taskTimingRows(ctx.selectedTask).length" class="task-drawer-section">
+                <div class="task-drawer-section-head"><h3>耗时汇总</h3><span>{{ ctx.formatTaskDuration(ctx.taskElapsedMs(ctx.selectedTask)) }}</span></div>
+                <div class="task-timing-grid">
+                  <div v-for="row in ctx.taskTimingRows(ctx.selectedTask)" :key="row[0]" class="task-timing-row" :class="{ 'task-timing-row--total': row[0] === '总耗时' }">
+                    <span>{{ row[0] }}</span><strong>{{ ctx.formatTaskDuration(row[1]) }}</strong>
                   </div>
                 </div>
               </section>
+
+              <section v-if="ctx.taskResultRows(ctx.selectedTask).length" class="task-drawer-section">
+                <div class="task-drawer-section-head"><h3>完成情况</h3></div>
+                <div class="task-result-grid">
+                  <div v-for="row in ctx.taskResultRows(ctx.selectedTask)" :key="row[0]"><span>{{ row[0] }}</span><strong>{{ ctx.formatStat(row[1]) }}</strong></div>
+                </div>
+              </section>
+
+              <section class="task-drawer-section task-message-section">
+                <div class="task-drawer-section-head"><h3>任务日志</h3><span>{{ ctx.selectedTask.messages?.length || 0 }} 条</span></div>
+                <div class="task-message-list">
+                  <p v-for="(message, index) in ctx.selectedTask.messages" :key="`${index}-${message}`">{{ message }}</p>
+                  <p v-if="ctx.selectedTask.error" class="task-message-error">{{ ctx.selectedTask.error }}</p>
+                </div>
+              </section>
+
+              <dl class="task-drawer-meta">
+                <div><dt>开始时间</dt><dd>{{ ctx.formatTaskTimestamp(ctx.selectedTask.created_at) }}</dd></div>
+                <div><dt>结束时间</dt><dd>{{ ctx.formatTaskTimestamp(ctx.selectedTask.finished_at || ctx.selectedTask.updated_at) }}</dd></div>
+              </dl>
             </aside>
           </div>
           <div v-if="ctx.selectedAchievement" class="achievement-drawer-backdrop" @click.self="ctx.selectedAchievement = null">

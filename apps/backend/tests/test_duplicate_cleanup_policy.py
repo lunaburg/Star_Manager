@@ -25,6 +25,7 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
     _version_sort_key,
     delete_primary_and_promote_duplicate,
 )
+from star_manager.services import trash  # noqa: E402
 
 
 class DuplicateCleanupPolicyTests(unittest.TestCase):
@@ -191,12 +192,13 @@ class DuplicateCleanupPolicyTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            result = delete_primary_and_promote_duplicate(
-                zipmod_id,
-                duplicate_id,
-                db_path=db_path,
-                thumbnail_dir=root / "thumbs",
-            )
+            with patch.object(trash, "TRASH_ROOT", root / "runtime" / "trash"):
+                result = delete_primary_and_promote_duplicate(
+                    zipmod_id,
+                    duplicate_id,
+                    db_path=db_path,
+                    thumbnail_dir=root / "thumbs",
+                )
 
             self.assertTrue(result["ok"], result)
             self.assertFalse(primary_path.exists())

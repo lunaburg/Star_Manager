@@ -13,6 +13,8 @@
   
   因为我使用的是codex+gpt luan，不保证其它情况下的可靠运行
 
+  郑重声明：本项目不得以任何形式收费，包括赞助
+
 ![开始游戏页面](apps/docs/assets/page-screenshots/page-01-start.png)
 ![人物卡浏览器](apps/docs/assets/page-screenshots/page-03-character-cards.png)
 

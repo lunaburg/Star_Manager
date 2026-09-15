@@ -44,6 +44,10 @@ test/
 /source/
 /tmp/
 /插件/
+/.tmp-assembly.il
+/.tmp-assembly.res
+/=1
+/tmp-degenerate-uv.json
 
 # Local IDE/editor files
 .idea/

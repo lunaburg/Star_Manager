@@ -11,7 +11,7 @@
   
   “https://github.com/lunaburg/Star_Manager.git  帮我拉取这个github项目并在本地运行，帮我补全运行该项目所需的全部依赖”
   
-  因为我使用的是codex+gpt luan，不保证其它情况下的可靠运行
+  因为我使用的是codex+gpt luna，不保证其它情况下的可靠运行
 
   郑重声明：本项目不得以任何形式收费，包括赞助
 

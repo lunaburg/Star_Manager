@@ -102,7 +102,8 @@ from star_manager.services.model_preview import (
     prepare_workbench_model_preview,
     prepare_workbench_thumbnail_preview,
 )
-from star_manager.services.plugin_library import scan_bepinex_plugins, set_bepinex_plugin_enabled
+from star_manager.services.plugin_library import list_bepinex_plugin_files, scan_bepinex_plugins, set_bepinex_plugin_enabled
+from star_manager.services.game_special_settings import get_game_special_settings, set_game_special_setting
 from star_manager.services.sims4_workbench import export_sims4_package_lod0_fbx
 from star_manager.services.game_item_probe import (
     load_character_card_to_game,
@@ -322,6 +323,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                 limit=self.parse_int_query(query, "limit", 500),
                 refresh=(query.get("refresh") or [""])[0].lower() in {"1", "true", "yes"},
             )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/plugins/status":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            result = list_bepinex_plugin_files(game_dir)
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/game/special-settings":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            result = get_game_special_settings(game_dir)
             self.send_json(result, status=200 if result.get("ok") else 400)
             return
 
@@ -923,6 +938,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             result = set_bepinex_plugin_enabled(
                 str(body.get("game_dir") or ""),
                 str(body.get("relative_path") or ""),
+                bool(body.get("enabled")),
+            )
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/game/special-settings/toggle":
+            result = set_game_special_setting(
+                str(body.get("game_dir") or ""),
+                str(body.get("key") or ""),
                 bool(body.get("enabled")),
             )
             self.send_json(result, status=200 if result.get("ok") else 400)

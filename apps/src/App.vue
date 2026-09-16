@@ -95,6 +95,78 @@ const workbenchActiveProjectId = ref("");
 const workbenchProjects = ref([]);
 const WORKBENCH_PROFILE_CACHE_KEY = "star-manager.workbench-profile";
 const startupWallpaper = window.desktopApi?.startupWallpaper || {};
+const gamePluginSetup = reactive({ checking: false, status: "未检查", installedCount: 0, error: "" });
+const START_PLUGIN_DEFINITIONS = Object.freeze([
+  {
+    key: "splashScreen",
+    label: "Enable SplashScreen",
+    relativePath: "BepInEx/patchers/BepInEx.SplashScreen/BepInEx.SplashScreen.Patcher.BepInEx5.dll"
+  },
+  {
+    key: "graphicsMod",
+    label: "激活 GraphicsMod",
+    relativePath: "BepInEx/Plugins/Graphics/HS2Graphics.dll"
+  },
+  {
+    key: "dhh",
+    label: "激活 DHH",
+    relativePath: "BepInEx/Plugins/DHH_AI4.dll"
+  },
+  {
+    key: "autosave",
+    label: "启动自动保存",
+    relativePath: "BepInEx/Plugins/HS2_Plugins/HS2_Autosave.dll"
+  },
+  {
+    key: "betterAA",
+    label: "启动更好的抗锯齿",
+    relativePath: "BepInEx/Plugins/HS2_BetterAA.dll"
+  },
+  {
+    key: "povX",
+    label: "Activate PoVX",
+    relativePath: "BepInEx/Plugins/HS2_PovX.dll"
+  }
+]);
+const START_SPECIAL_SETTING_DEFINITIONS = Object.freeze([
+  {
+    key: "console",
+    kind: "special",
+    label: "激活控制台",
+    relativePath: "BepInEx/config/BepInEx.cfg"
+  },
+  {
+    key: "experimental",
+    kind: "special",
+    label: "实验模式",
+    relativePath: "BepInEx/LauncherEN/ilikebleeding.txt"
+  }
+]);
+const startPluginSettings = reactive({ loading: false, error: "", notice: "", items: [] });
+
+function resetStartPluginSettings() {
+  startPluginSettings.loading = false;
+  startPluginSettings.error = "";
+  startPluginSettings.notice = "";
+  startPluginSettings.items = [...START_PLUGIN_DEFINITIONS.map((definition) => ({ ...definition, kind: "plugin" })), ...START_SPECIAL_SETTING_DEFINITIONS].map((definition) => ({
+    ...definition,
+    installed: false,
+    enabled: false,
+    actualPath: definition.relativePath,
+    busy: false
+  }));
+}
+
+function pluginPathIdentity(value) {
+  return String(value || "")
+    .replaceAll("\\", "/")
+    .replace(/\.dll\.dl_$/i, ".dll")
+    .replace(/\.disabled$/i, "")
+    .replace(/\.dl_$/i, ".dll")
+    .toLocaleLowerCase();
+}
+
+resetStartPluginSettings();
 
 const managerSettings = reactive({
   startupView: "start",
@@ -109,6 +181,8 @@ const wallpaperReady = ref(!startupWallpaper.wallpaperPath);
 const wallpaperLoadFailed = ref(false);
 let rendererReadyNotified = false;
 let removeStartupLogListener = null;
+let backendRetryTimer = 0;
+let backendRetryInFlight = false;
 
 function wallpaperUrl(value) {
   const raw = String(value || "").trim();
@@ -150,6 +224,8 @@ const paths = reactive({
   inputDir: "",
   outputDir: ""
 });
+const directoryShortcuts = ref([]);
+const directoryShortcutPrompt = reactive({ open: false, name: "", path: "", error: "", saving: false, editingIndex: -1 });
 let settingsSaveQueue = Promise.resolve();
 
 function readWorkbenchProfileCache() {
@@ -193,6 +269,15 @@ function serializeWorkbenchProjects(projects = workbenchProjects.value) {
     projectFilePath: String(project?.projectFilePath || ""),
     createdAt: String(project?.createdAt || "")
   }));
+}
+
+function serializeDirectoryShortcuts(shortcuts = directoryShortcuts.value) {
+  return (Array.isArray(shortcuts) ? shortcuts : [])
+    .map((shortcut) => ({
+      name: String(shortcut?.name || "").trim(),
+      path: String(shortcut?.path || "").trim()
+    }))
+    .filter((shortcut) => shortcut.name && shortcut.path);
 }
 
 function mergeWorkbenchProjects(scannedProjects) {
@@ -2336,7 +2421,7 @@ function badgeClass(value) {
   if (value === "警告") return "warn";
   if (["ready", "正常", "Done", "目录有效"].includes(value)) return "ok";
   if (["thumb", "missing", "重复标识", "42%"].includes(value)) return "warn";
-  if (["error", "parse", "错误", "读取失败", "Error"].includes(value)) return "danger";
+  if (["error", "parse", "错误", "读取失败", "检查失败", "Error"].includes(value)) return "danger";
   return "neutral";
 }
 
@@ -2559,7 +2644,8 @@ function taskSummary(task) {
     return `已导入 ${task.data?.imported_count ?? 0} 个`;
   }
   if (task.task_type === "check_game_dir") {
-    return task.data?.is_valid ? "目录有效" : "目录无效";
+    if (typeof task.data?.is_valid !== "boolean") return "检查中";
+    return task.data.is_valid ? "目录有效" : "目录无效";
   }
   return task.status || "等待执行";
 }
@@ -5845,6 +5931,11 @@ function applyGameDir(selected) {
   window.clearTimeout(clothesTreeRefreshTimer);
   clothesTreeRefreshTimer = 0;
   paths.gameDir = selected || "";
+  gamePluginSetup.checking = false;
+  gamePluginSetup.status = selected ? "待检查" : "未检查";
+  gamePluginSetup.installedCount = 0;
+  gamePluginSetup.error = "";
+  resetStartPluginSettings();
   paths.inputDir = selected ? `${selected}\\UserData\\chara` : "";
   clearResourceStats();
   modDatabase.checked = false;
@@ -5889,6 +5980,119 @@ function applyGameDir(selected) {
   selectedSceneDetailPath.value = "";
   selectedSceneDetail.value = null;
   sceneSideMode.value = "tree";
+  gameDirStatus.value = selected ? "检查中" : "未选择";
+  taskHint.value = selected ? "正在检查游戏目录" : "请选择有效目录后点击重建";
+}
+
+async function ensureGamePlugins(gameDir = paths.gameDir) {
+  const normalizedGameDir = String(gameDir || "").trim();
+  if (!normalizedGameDir) return { ok: false, error: "未选择游戏目录" };
+  gamePluginSetup.checking = true;
+  gamePluginSetup.status = "检查中";
+  gamePluginSetup.installedCount = 0;
+  gamePluginSetup.error = "";
+  try {
+    const result = await window.desktopApi?.ensureGamePlugins?.(normalizedGameDir);
+    if (!result?.ok) {
+      gamePluginSetup.status = "安装失败";
+      gamePluginSetup.error = result?.error || "插件检查失败";
+      log(`[Plugins] ${gamePluginSetup.error}`);
+      return result || { ok: false, error: gamePluginSetup.error };
+    }
+    gamePluginSetup.status = "已就绪";
+    gamePluginSetup.installedCount = Number(result.installed_count || 0);
+    const installed = gamePluginSetup.installedCount;
+    log(installed > 0
+      ? `[Plugins] 已自动安装 ${installed} 个 Star Manager 插件到 ${result.destination_dir}`
+      : "[Plugins] Star Manager 三个插件均已存在（保留现有启用/禁用状态）");
+    return result;
+  } catch (error) {
+    gamePluginSetup.status = "安装失败";
+    gamePluginSetup.error = error.message;
+    log(`[Plugins] ${error.message}`);
+    return { ok: false, error: error.message };
+  } finally {
+    gamePluginSetup.checking = false;
+  }
+}
+
+async function loadStartPluginSettings(gameDir = paths.gameDir) {
+  resetStartPluginSettings();
+  const normalizedGameDir = String(gameDir || "").trim();
+  if (!normalizedGameDir) return { ok: false, error: "未选择游戏目录" };
+  startPluginSettings.loading = true;
+  try {
+    const query = new URLSearchParams({ game_dir: normalizedGameDir });
+    const [pluginResult, specialResult] = await Promise.all([
+      window.desktopApi?.backendRequest(`/plugins/status?${query.toString()}`),
+      window.desktopApi?.backendRequest(`/game/special-settings?${query.toString()}`)
+    ]);
+    if (!pluginResult?.ok) throw new Error(pluginResult?.error || "插件状态读取失败");
+    if (!specialResult?.ok) throw new Error(specialResult?.error || "特殊设置读取失败");
+    const files = Array.isArray(pluginResult.data?.items) ? pluginResult.data.items : [];
+    const byPath = new Map(files.map((item) => [pluginPathIdentity(item.relative_path), item]));
+    const pluginItems = START_PLUGIN_DEFINITIONS.map((definition) => {
+      const item = byPath.get(pluginPathIdentity(definition.relativePath));
+      return {
+        ...definition,
+        kind: "plugin",
+        installed: Boolean(item),
+        enabled: Boolean(item?.enabled),
+        actualPath: item?.relative_path || definition.relativePath,
+        busy: false
+      };
+    });
+    const specialByKey = new Map((Array.isArray(specialResult.data?.items) ? specialResult.data.items : []).map((item) => [item.key, item]));
+    const specialItems = START_SPECIAL_SETTING_DEFINITIONS.map((definition) => {
+      const item = specialByKey.get(definition.key);
+      return {
+        ...definition,
+        installed: Boolean(item?.available),
+        enabled: Boolean(item?.enabled),
+        actualPath: item?.relative_path || definition.relativePath,
+        itemError: item?.error || "",
+        busy: false
+      };
+    });
+    startPluginSettings.items = [...pluginItems, ...specialItems];
+    return { ok: true, data: { items: startPluginSettings.items } };
+  } catch (error) {
+    startPluginSettings.error = error?.message || String(error);
+    return { ok: false, error: startPluginSettings.error };
+  } finally {
+    startPluginSettings.loading = false;
+  }
+}
+
+async function toggleStartPlugin(plugin) {
+  if (!plugin?.installed || plugin.busy || !paths.gameDir) return;
+  const enabled = !plugin.enabled;
+  plugin.busy = true;
+  startPluginSettings.error = "";
+  startPluginSettings.notice = "";
+  try {
+    const result = await window.desktopApi?.backendRequest(
+      plugin.kind === "special" ? "/game/special-settings/toggle" : "/plugins/toggle",
+      {
+        method: "POST",
+        body: {
+          game_dir: paths.gameDir,
+          ...(plugin.kind === "special"
+            ? { key: plugin.key, enabled }
+            : { relative_path: plugin.actualPath, enabled })
+        }
+      }
+    );
+    if (!result?.ok) throw new Error(result?.error || "插件状态修改失败");
+    const data = result.data || {};
+    plugin.enabled = typeof data.enabled === "boolean" ? data.enabled : enabled;
+    plugin.actualPath = data.relative_path || plugin.actualPath;
+    startPluginSettings.notice = `${plugin.label}已${plugin.enabled ? "启用" : "禁用"}，请重启游戏后生效。`;
+  } catch (error) {
+    startPluginSettings.error = error?.message || String(error);
+  } finally {
+    plugin.busy = false;
+  }
 }
 
 function applyGameSetupPayload(payload) {
@@ -5950,6 +6154,7 @@ async function saveAppSettings(options = {}) {
         gameDir: paths.gameDir,
         inputDir: paths.inputDir,
         outputDir: paths.outputDir,
+        directoryShortcuts: serializeDirectoryShortcuts(),
         workbenchAuthorId: workbenchAuthorId.value,
         workbenchWorkspacePath: workbenchWorkspacePath.value,
         workbenchActiveProjectId: workbenchActiveProjectId.value,
@@ -5977,7 +6182,7 @@ async function saveAppSettings(options = {}) {
   return saveOperation;
 }
 
-async function loadAppSettings({ loadBackendData = true } = {}) {
+async function loadAppSettingsInternal({ loadBackendData = true } = {}) {
   try {
     const result = await measureStep("loadSettings", () => window.desktopApi?.loadSettings?.());
     if (!result?.ok) {
@@ -6019,14 +6224,20 @@ async function loadAppSettings({ loadBackendData = true } = {}) {
       ? result.settings.workbenchProjects
       : [];
     paths.outputDir = result.settings?.outputDir || "";
+    directoryShortcuts.value = Array.isArray(result.settings?.directoryShortcuts)
+      ? result.settings.directoryShortcuts
+      : [];
     const gameDir = result.settings?.gameDir || "";
     applyGameDir(gameDir);
-    await refreshWorkbenchProjects({ persist: true });
     activeView.value = managerSettings.startupView;
-    if (!gameDir || !loadBackendData) return;
-    await measureStep("loadGameSetup after settings", () => loadGameSetup());
+    if (!gameDir) return;
+    if (!loadBackendData) return;
     log(`[Settings] 已读取游戏目录：${gameDir}`);
-    await measureStep("check_game_dir task", () => submitTask("check_game_dir"));
+    await measureStep("check_game_dir task", () => validateGameDir());
+    await measureStep("ensureGamePlugins after settings", () => ensureGamePlugins(gameDir));
+    await measureStep("loadStartPluginSettings after settings", () => loadStartPluginSettings(gameDir));
+    await measureStep("refreshWorkbenchProjects after settings", () => refreshWorkbenchProjects({ persist: true }));
+    await measureStep("loadGameSetup after settings", () => loadGameSetup());
     await measureStep("loadCardTree after settings", () => loadCardTree());
     await measureStep("loadClothesTree after settings", () => ensureClothesLibraryLoaded());
     if (managerSettings.checkDatabaseChangesOnStartup) {
@@ -6035,6 +6246,32 @@ async function loadAppSettings({ loadBackendData = true } = {}) {
   } catch (error) {
     log(`[Settings Error] ${error.message}`);
   }
+}
+
+let appSettingsLoadPromise = null;
+let appSettingsLoadNeedsBackend = false;
+let appSettingsLoadRunningWithBackend = false;
+
+async function loadAppSettings(options = {}) {
+  const requestsBackend = options.loadBackendData !== false;
+  if (requestsBackend && !appSettingsLoadRunningWithBackend) appSettingsLoadNeedsBackend = true;
+  if (appSettingsLoadPromise) return appSettingsLoadPromise;
+
+  const operation = (async () => {
+    try {
+      do {
+        const loadBackendData = appSettingsLoadNeedsBackend;
+        appSettingsLoadNeedsBackend = false;
+        appSettingsLoadRunningWithBackend = loadBackendData;
+        await loadAppSettingsInternal({ loadBackendData });
+      } while (appSettingsLoadNeedsBackend);
+    } finally {
+      appSettingsLoadRunningWithBackend = false;
+      appSettingsLoadPromise = null;
+    }
+  })();
+  appSettingsLoadPromise = operation;
+  return operation;
 }
 
 async function selectWallpaper() {
@@ -6212,14 +6449,33 @@ async function resetSb3UtilityExecutable() {
   settingsNotice.message = result?.ok ? "SB3Utility 路径已恢复默认" : `保存失败：${result?.error || "未知错误"}`;
 }
 
+async function validateGameDir() {
+  if (!paths.gameDir) {
+    gameDirStatus.value = "未选择";
+    taskHint.value = "请选择有效目录后点击重建";
+    return null;
+  }
+  gameDirStatus.value = "检查中";
+  taskHint.value = "正在检查游戏目录";
+  log(`[Game Dir Check] submit: ${paths.gameDir}`);
+  const task = await submitTask("check_game_dir");
+  if (!task && gameDirStatus.value === "检查中") {
+    gameDirStatus.value = "检查失败";
+    taskHint.value = "后端未就绪，无法检查目录";
+  }
+  return task;
+}
+
 async function selectGameDir() {
   const selected = await window.desktopApi?.selectDirectory?.("选择 HS2 目录");
   if (!selected) return;
   applyGameDir(selected);
+  await ensureGamePlugins(selected);
+  await loadStartPluginSettings(selected);
   await saveAppSettings();
   log(`[Directory] 选择游戏目录: ${selected}`);
   await loadGameSetup();
-  await submitTask("check_game_dir");
+  await validateGameDir();
   await loadCardTree();
   await ensureClothesLibraryLoaded({ force: true });
   await checkStartupDatabaseChanges();
@@ -6287,6 +6543,32 @@ async function pingBackend({ silent = false } = {}) {
     }
     return false;
   }
+}
+
+function stopBackendRetry() {
+  if (!backendRetryTimer) return;
+  window.clearInterval(backendRetryTimer);
+  backendRetryTimer = 0;
+}
+
+function startBackendRetry() {
+  if (backendRetryTimer || backendReady.value) return;
+  backendRetryTimer = window.setInterval(async () => {
+    if (backendReady.value) {
+      stopBackendRetry();
+      return;
+    }
+    if (backendRetryInFlight) return;
+    backendRetryInFlight = true;
+    try {
+      if (await pingBackend({ silent: true })) {
+        stopBackendRetry();
+        await loadAppSettings({ loadBackendData: true });
+      }
+    } finally {
+      backendRetryInFlight = false;
+    }
+  }, 1500);
 }
 
 async function waitForBackendReady(timeoutMs = 20000) {
@@ -6386,9 +6668,12 @@ function applyTask(task) {
 
   if (task.error && task.status === "failed") log(`[Task Error] ${task.error}`);
   if (task.task_type === "check_game_dir") {
-    gameDirStatus.value = task.data?.is_valid ? "目录有效" : "目录无效";
-    if (!task.data?.is_valid) {
-      taskHint.value = "请选择有效 HS2 目录";
+    if (typeof task.data?.is_valid === "boolean") {
+      gameDirStatus.value = task.data.is_valid ? "目录有效" : "目录无效";
+      taskHint.value = task.data.is_valid ? "目录有效" : "请选择有效 HS2 目录";
+    } else if (["completed", "failed", "cancelled"].includes(task.status)) {
+      gameDirStatus.value = "检查失败";
+      taskHint.value = task.error || "目录校验任务未返回结果";
     }
   }
   if (task.task_type === "extract_mods") {
@@ -6473,6 +6758,130 @@ async function openGameDirectory(relativePath) {
   if (!result?.ok) log(`[Directory Error] ${result?.error || "无法打开目录"}: ${directoryPath}`);
 }
 
+function openDirectoryShortcutPrompt() {
+  directoryShortcutPrompt.open = true;
+  directoryShortcutPrompt.name = "";
+  directoryShortcutPrompt.path = "";
+  directoryShortcutPrompt.error = "";
+  directoryShortcutPrompt.saving = false;
+  directoryShortcutPrompt.editingIndex = -1;
+}
+
+function openDirectoryShortcutEditor(index) {
+  if (directoryShortcutPrompt.saving) return;
+  const shortcut = directoryShortcuts.value[index];
+  if (!shortcut) return;
+  directoryShortcutPrompt.open = true;
+  directoryShortcutPrompt.name = String(shortcut.name || "");
+  directoryShortcutPrompt.path = String(shortcut.path || "");
+  directoryShortcutPrompt.error = "";
+  directoryShortcutPrompt.saving = false;
+  directoryShortcutPrompt.editingIndex = index;
+}
+
+async function selectDirectoryShortcutPath() {
+  const selected = await window.desktopApi?.selectDirectory?.("选择目录");
+  if (selected) directoryShortcutPrompt.path = selected;
+}
+
+function closeDirectoryShortcutPrompt() {
+  if (directoryShortcutPrompt.saving) return;
+  directoryShortcutPrompt.open = false;
+  directoryShortcutPrompt.error = "";
+  directoryShortcutPrompt.editingIndex = -1;
+}
+
+async function saveDirectoryShortcut() {
+  if (directoryShortcutPrompt.saving) return;
+  const name = String(directoryShortcutPrompt.name || "").trim();
+  const selectedPath = String(directoryShortcutPrompt.path || "").trim();
+  if (!name || !selectedPath) {
+    directoryShortcutPrompt.error = "请填写按钮名并选择目录";
+    return;
+  }
+  const editingIndex = Number.isInteger(directoryShortcutPrompt.editingIndex)
+    ? directoryShortcutPrompt.editingIndex
+    : -1;
+  if (editingIndex < 0 && directoryShortcuts.value.length >= 24) {
+    directoryShortcutPrompt.error = "最多添加 24 个快捷目录";
+    return;
+  }
+  if (editingIndex >= directoryShortcuts.value.length) {
+    directoryShortcutPrompt.error = "快捷目录不存在或已被移除";
+    return;
+  }
+
+  const previousShortcuts = serializeDirectoryShortcuts();
+  const nextShortcuts = [...previousShortcuts];
+  if (editingIndex >= 0) nextShortcuts[editingIndex] = { name, path: selectedPath };
+  else nextShortcuts.push({ name, path: selectedPath });
+  directoryShortcuts.value = nextShortcuts;
+  directoryShortcutPrompt.saving = true;
+  directoryShortcutPrompt.error = "";
+  try {
+    const result = await saveAppSettings();
+    if (!result?.ok) {
+      directoryShortcuts.value = previousShortcuts;
+      directoryShortcutPrompt.error = result?.error || "保存失败";
+      return;
+    }
+    directoryShortcuts.value = Array.isArray(result.settings?.directoryShortcuts)
+      ? result.settings.directoryShortcuts
+      : nextShortcuts;
+    directoryShortcutPrompt.open = false;
+    directoryShortcutPrompt.error = "";
+    directoryShortcutPrompt.editingIndex = -1;
+  } catch (error) {
+    directoryShortcuts.value = previousShortcuts;
+    directoryShortcutPrompt.error = error?.message || "保存失败";
+  } finally {
+    directoryShortcutPrompt.saving = false;
+  }
+}
+
+async function deleteDirectoryShortcut() {
+  if (directoryShortcutPrompt.saving) return;
+  const index = Number.isInteger(directoryShortcutPrompt.editingIndex)
+    ? directoryShortcutPrompt.editingIndex
+    : -1;
+  const shortcut = index >= 0 ? directoryShortcuts.value[index] : null;
+  if (!shortcut) {
+    closeDirectoryShortcutPrompt();
+    return;
+  }
+  const previousShortcuts = serializeDirectoryShortcuts();
+  const nextShortcuts = previousShortcuts.filter((_item, itemIndex) => itemIndex !== index);
+  directoryShortcuts.value = nextShortcuts;
+  directoryShortcutPrompt.saving = true;
+  directoryShortcutPrompt.error = "";
+  try {
+    const result = await saveAppSettings();
+    if (!result?.ok) {
+      directoryShortcuts.value = previousShortcuts;
+      directoryShortcutPrompt.error = result?.error || "删除失败";
+      return;
+    }
+    directoryShortcuts.value = Array.isArray(result.settings?.directoryShortcuts)
+      ? result.settings.directoryShortcuts
+      : nextShortcuts;
+    directoryShortcutPrompt.open = false;
+    directoryShortcutPrompt.error = "";
+    directoryShortcutPrompt.editingIndex = -1;
+  } catch (error) {
+    directoryShortcuts.value = previousShortcuts;
+    directoryShortcutPrompt.error = error?.message || "删除失败";
+  } finally {
+    directoryShortcutPrompt.saving = false;
+  }
+}
+
+async function openDirectoryShortcut(directoryPath) {
+  const targetPath = String(directoryPath || "").trim();
+  if (!targetPath) return;
+  const result = await window.desktopApi?.openDirectory?.(targetPath);
+  if (!result?.ok) log(`[Directory Error] ${result?.error || "无法打开目录"}: ${targetPath}`);
+}
+
 async function openClothesDirectory(relativePath = "") {
   const suffix = relativePath ? `\\${relativePath}` : "";
   return openGameDirectory(`UserData\\coordinate${suffix}`);
@@ -6484,19 +6893,54 @@ async function openSceneDirectory(relativePath = "") {
 }
 
 async function pollTask(id, options = {}) {
-  const { manageBusy = true, onDone = null } = options;
-  let finalTask = null;
+  const {
+    manageBusy = true,
+    onDone = null,
+    timeoutMs = 0,
+    initialTask = null
+  } = options;
+  let finalTask = initialTask;
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : 0;
+
+  function finishPollingWithFailure(reason) {
+    const failedTask = {
+      ...(finalTask || {}),
+      id,
+      task_type: finalTask?.task_type || "unknown",
+      status: "failed",
+      error: reason,
+      messages: [...(finalTask?.messages || []), `[Error] ${reason}`],
+      data: finalTask?.data && typeof finalTask.data === "object" ? finalTask.data : {}
+    };
+    log(`[Task Error] ${reason}`);
+    applyTask(failedTask);
+    finalTask = failedTask;
+  }
+
   try {
     for (;;) {
-      const result = await window.desktopApi.backendRequest(`/tasks/${id}`);
-      if (!result.ok) {
-        log(`[Task Error] ${result.error || "unknown error"}`);
+      if (deadline && Date.now() >= deadline) {
+        finishPollingWithFailure(`任务 ${finalTask?.task_type || id} 检查超时，未返回最终结果`);
+        break;
+      }
+      let result;
+      try {
+        result = await window.desktopApi.backendRequest(`/tasks/${id}`);
+      } catch (error) {
+        finishPollingWithFailure(`任务轮询失败：${error.message}`);
+        break;
+      }
+      if (!result?.ok || !result.task) {
+        finishPollingWithFailure(result?.error || "无法读取任务最终结果");
         break;
       }
       applyTask(result.task);
       finalTask = result.task;
       if (["completed", "failed", "cancelled"].includes(result.task.status)) break;
-      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      const waitMs = deadline
+        ? Math.min(350, Math.max(0, deadline - Date.now()))
+        : 350;
+      await new Promise((resolve) => window.setTimeout(resolve, waitMs));
     }
     if (finalTask?.status === "completed") await loadAchievements({ notify: true });
     if (typeof onDone === "function" && finalTask) {
@@ -6553,7 +6997,7 @@ async function submitOrganizeAllZipmods() {
 async function submitTask(type, overrides = {}) {
   if (!(await waitForBackendReady())) {
     log(`[Task Error] 后端启动超时，无法执行 ${type}`);
-    return;
+    return null;
   }
   isBusy.value = true;
   activeAction.value = type;
@@ -6569,18 +7013,31 @@ async function submitTask(type, overrides = {}) {
       method: "POST",
       body: { task_type: type, payload: buildPayload(overrides) }
     });
-    if (!result.ok) {
-      log(`[Task Error] ${result.error || "unknown error"}`);
+    if (!result?.ok) {
+      log(`[Task Error] ${result?.error || "unknown error"}`);
       isBusy.value = false;
       activeAction.value = "";
-      return;
+      return null;
+    }
+    if (!result.task?.id) {
+      log("[Task Error] 后端未返回有效的目录校验任务");
+      isBusy.value = false;
+      activeAction.value = "";
+      return null;
+    }
+    if (type === "check_game_dir") {
+      log(`[Game Dir Check] task: ${result.task.id}`);
     }
     applyTask(result.task);
-    await pollTask(result.task.id);
+    return await pollTask(result.task.id, {
+      initialTask: result.task,
+      timeoutMs: type === "check_game_dir" ? 10000 : 0
+    });
   } catch (error) {
     log(`[Task Error] ${error.message}`);
     isBusy.value = false;
     activeAction.value = "";
+    return null;
   }
 }
 
@@ -8310,8 +8767,12 @@ onMounted(() => {
       log("[Backend] Python backend is ready.");
     } else {
       log("[Backend Error] Python backend startup timed out.");
+      startBackendRetry();
     }
     await measureStep("loadAppSettings", () => loadAppSettings({ loadBackendData: backendIsReady }));
+    if (!backendIsReady && backendReady.value && !setup.loaded) {
+      await measureStep("loadAppSettings after backend recovery", () => loadAppSettings({ loadBackendData: true }));
+    }
     if (backendIsReady) {
       await measureStep("loadAchievements", () => loadAchievements());
     }
@@ -8322,6 +8783,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   removeStartupLogListener?.();
   removeStartupLogListener = null;
+  stopBackendRetry();
   stopCurrentGameStatePolling();
 });
 
@@ -8518,6 +8980,10 @@ const appCtx = reactive({
   organizeAllPrompt,
   gameDirDisplay,
   gameDirStatus,
+  gamePluginSetup,
+  startPluginSettings,
+  loadStartPluginSettings,
+  toggleStartPlugin,
   handleCardClick,
   handleCardFolderClick,
   handleModTableScroll,
@@ -8575,6 +9041,15 @@ const appCtx = reactive({
   openManifestAuthorPrompt,
   openManifestEditor,
   openGameDirectory,
+  openDirectoryShortcut,
+  openDirectoryShortcutPrompt,
+  openDirectoryShortcutEditor,
+  selectDirectoryShortcutPath,
+  closeDirectoryShortcutPrompt,
+  saveDirectoryShortcut,
+  deleteDirectoryShortcut,
+  directoryShortcuts,
+  directoryShortcutPrompt,
   openClothesDirectory,
   openSceneDirectory,
   openModItemInItemBrowser,
@@ -8774,6 +9249,14 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
     } else if (mode === "character" && (!cardLibrary.checked || (cardLibrary.validGameDir && !cardTree.value))) {
       loadCardTree();
     }
+  }
+});
+
+watch(backendStatus, (status, previousStatus) => {
+  if (status !== "ready" || previousStatus === "ready") return;
+  stopBackendRetry();
+  if (paths.gameDir && !setup.loaded) {
+    void loadAppSettings({ loadBackendData: true });
   }
 });
 </script>
@@ -8995,6 +9478,7 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
             <span class="path-text">{{ gameDirDisplay }}</span>
           </div>
           <span class="badge" :class="badgeClass(gameDirStatus)"><span class="dot"></span>{{ gameDirStatus }}</span>
+          <span class="badge" :class="gamePluginSetup.status === '安装失败' ? 'danger' : gamePluginSetup.status === '已就绪' ? 'ok' : gamePluginSetup.status === '检查中' ? 'warn' : 'neutral'"><span class="dot"></span>{{ gamePluginSetup.checking ? "检查 Star Manager 插件" : gamePluginSetup.status }}</span>
         </div>
 
         <button class="system-status" type="button" @click="activeView = 'logs'">
@@ -9098,6 +9582,59 @@ watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
         @cancel="cancelCardCoverCrop"
         @confirm="confirmCardCoverCrop"
       />
+
+      <div
+        v-if="directoryShortcutPrompt.open"
+        class="prompt-backdrop directory-shortcut-backdrop"
+        @click.self="!directoryShortcutPrompt.saving && closeDirectoryShortcutPrompt()"
+      >
+        <div
+          class="prompt-panel directory-shortcut-panel"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="directoryShortcutPrompt.editingIndex >= 0 ? '编辑目录快捷入口' : '添加目录快捷入口'"
+          :aria-busy="directoryShortcutPrompt.saving"
+        >
+          <input
+            v-model="directoryShortcutPrompt.name"
+            class="search"
+            type="text"
+            aria-label="按钮名"
+            placeholder="按钮名"
+            maxlength="32"
+            autocomplete="off"
+            autofocus
+            :disabled="directoryShortcutPrompt.saving"
+            @keydown.enter.prevent="saveDirectoryShortcut"
+          >
+          <div class="prompt-field-row">
+            <input
+              v-model="directoryShortcutPrompt.path"
+              class="search"
+              type="text"
+              aria-label="目录路径"
+              placeholder="目录路径"
+              readonly
+              :disabled="directoryShortcutPrompt.saving"
+            >
+            <button type="button" :disabled="directoryShortcutPrompt.saving" @click="selectDirectoryShortcutPath">选择</button>
+          </div>
+          <div v-if="directoryShortcutPrompt.error" class="prompt-error">{{ directoryShortcutPrompt.error }}</div>
+          <div class="prompt-actions">
+            <button
+              v-if="directoryShortcutPrompt.editingIndex >= 0"
+              type="button"
+              class="danger-action directory-shortcut-delete"
+              :disabled="directoryShortcutPrompt.saving"
+              @click="deleteDirectoryShortcut"
+            >删除</button>
+            <button type="button" :disabled="directoryShortcutPrompt.saving" @click="closeDirectoryShortcutPrompt">取消</button>
+            <button type="button" class="primary" :disabled="directoryShortcutPrompt.saving" @click="saveDirectoryShortcut">
+              {{ directoryShortcutPrompt.saving ? "保存中…" : "保存" }}
+            </button>
+          </div>
+        </div>
+      </div>
 
         <div v-if="organizeAllPrompt.open" class="prompt-backdrop" @click.self="organizeAllPrompt.open = false">
           <div class="prompt-panel organize-all-panel">

@@ -44,7 +44,7 @@
 | 人物卡浏览索引 | `character_cards`、`character_card_dependencies` | 人物卡新增、移动、删除或大小/修改时间变化；全量建库；受影响模组 GUID 变化时重连依赖 |
 | 人物卡浏览字段缓存 | `character_cards.chara_name`、`tags_json`、`favorite`、`rating`、`metadata_file_size`、`metadata_modified_ns`、`preview_cache_path` | 文件签名变化时读取 PNG；收藏、评分、标签等单卡操作会同步索引 |
 | 人物卡标签目录缓存 | `database_metadata.character_card_tags_cache_root` + `character_cards.tags_json` | 游戏目录根路径变化、全量建库或标签写入后回填；`/library/cards/tags` 会复用有效缓存 |
-| 插件扫描缓存 | `bepinex_plugin_cache` | 以游戏目录为键，以 BepInEx DLL、`.dll.disabled`、配置和翻译文件的大小/修改时间指纹失效；`refresh=1` 强制重扫 |
+| 插件扫描缓存 | `bepinex_plugin_cache` | 以游戏目录为键，以 BepInEx DLL、`.dl_`（兼容读取历史 `.dll.disabled` 和临时 `.dll.dl_`）、配置和翻译文件的大小/修改时间指纹失效；`refresh=1` 强制重扫 |
 | 建库元数据 | `database_metadata` 中的构建时间、解析器版本和缓存根路径 | 每次对应建库或迁移更新 |
 | 本地成就状态 | `achievement_progress`、`achievement_events`、`achievement_preferences` | 由成就事件和设置操作更新；这是持久化用户状态，不是可无损删除的缓存 |
 

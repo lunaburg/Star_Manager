@@ -117,7 +117,8 @@ Read and file routes:
   - Returns character-card database status and summary counts.
 - `GET /plugins?game_dir=&search=&category=&offset=&limit=`
   - Recursively scans `BepInEx/Plugins`, `BepInEx/patchers`, and `BepInEx/core` without loading or executing DLL files. It returns DLLs with a successfully parsed `BepInPlugin` attribute and non-empty plugin GUID; ordinary dependency assemblies without that GUID are excluded.
-  - Returns assembly identity/version, BepInEx plugin GUID/name/version, functional description and its source/confidence/evidence, dependencies, process restrictions, incompatibilities, assembly references, file metadata, `enabled` state, diagnostics, and summary counts. Disabled plugins are discovered from the same scan area with the `.dll.disabled` suffix and keep the same stable `id` as their enabled DLL. Descriptions prefer `AssemblyDescription`, then correlate matching `config/*.cfg` settings with `Translation/**/*.txt` labels; known-plugin and name-based descriptions are marked separately.
+  - Returns assembly identity/version, BepInEx plugin GUID/name/version, functional description and its source/confidence/evidence, dependencies, process restrictions, incompatibilities, assembly references, file metadata, `enabled` state, diagnostics, and summary counts. Disabled plugins are discovered from the same scan area with the `.dl_` suffix (for example `Example.dl_`) and keep the same stable `id` as their enabled DLL. Historical `.dll.disabled` files remain readable, but new disable operations never create that suffix. Descriptions prefer `AssemblyDescription`, then correlate matching `config/*.cfg` settings with `Translation/**/*.txt` labels; known-plugin and name-based descriptions are marked separately.
+  - `GET /plugins/status?game_dir=` returns the fixed-file status used by the start page plugin switches, including patchers and core DLLs even when their metadata cannot be parsed.
   - The plugin library contains only DLLs with a valid `BepInPlugin` GUID. The maximum page size is 1000.
   - Results are cached in the shared SQLite database. A fingerprint of plugin DLLs, config files, and translation files invalidates stale entries automatically. Pass `refresh=1` to force a complete rescan.
 - `GET /mods/zipmods?offset=&limit=&author=&status=&usage=&guid=&zipmod_id=`
@@ -190,7 +191,12 @@ Direct mutation routes:
 
 - `POST /plugins/toggle`
   - Body: `{ "game_dir": "D:\\HS2", "relative_path": "BepInEx/Plugins/Pack/Example.dll", "enabled": false }`
-  - Enables or disables one plugin by renaming only its DLL: disabling appends `.disabled`, enabling removes that suffix. The backend accepts only files inside a configured BepInEx plugin scan area, never overwrites an existing target, and returns the new `enabled` state and relative path. The game must be restarted for the change to take effect.
+  - Enables or disables one plugin by renaming only its DLL: disabling replaces the `.dll` ending with `.dl_`, enabling restores `.dll`. Historical `.dll.disabled` and interim `.dll.dl_` files may be read and are migrated to `.dl_` when a disable operation is requested. The backend accepts only files inside a configured BepInEx plugin scan area, never overwrites an existing target, and returns the new `enabled` state and relative path. The game must be restarted for the change to take effect.
+- `GET /game/special-settings?game_dir=`
+  - Returns the start-page states for the BepInEx console and experimental Bleeding Edge Modpack mode.
+- `POST /game/special-settings/toggle`
+  - Body: `{ "game_dir": "D:\\HS2", "key": "console" | "experimental", "enabled": true }`.
+  - `console` changes only `[Logging.Console] Enabled` in `BepInEx/config/BepInEx.cfg`. `experimental` creates/removes `BepInEx/LauncherEN/ilikebleeding.txt` and reversibly moves `Sideloader Modpack - Bleeding Edge` between `mods` and `mods.experimental`; existing destinations are never overwritten.
 - `POST /tools/sims4/package-fbx`
   - Body: `{ "package_path": "E:\\Mods\\item.package", "target_dir": "D:\\Exports", "blender_executable_path": "D:\\Blender\\blender.exe" }`. `blender_executable_path` is optional; omitting it keeps static-FBX compatibility.
   - Reads one Sims 4 DBPF package, groups GEOM resources by instance ID, selects only the highest-vertex LOD0 resource in each group, and writes binary FBX 7.4 files into a new collision-safe output folder.

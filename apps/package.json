@@ -64,6 +64,13 @@
       {
         "from": "build-resources/workbench-templates/blender_transform_fbx.py",
         "to": "workbench/blender_transform_fbx.py"
+      },
+      {
+        "from": "tools/StarManager",
+        "to": "StarManager",
+        "filter": [
+          "*.dll"
+        ]
       }
     ],
     "win": {

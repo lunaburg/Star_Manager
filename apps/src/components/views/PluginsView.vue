@@ -161,7 +161,7 @@ onMounted(() => { if (ctx.paths.gameDir) scanPlugins(); });
           <header><div><span class="plugin-confirm-kicker">PLUGIN STATUS</span><h2 id="plugin-confirm-title">确认{{ confirmingPlugin.enabled ? "启用" : "禁用" }}插件？</h2></div><button type="button" class="plugin-confirm-close" aria-label="关闭" @click="cancelToggle">×</button></header>
           <p class="plugin-confirm-name">{{ confirmingPlugin.item.name }}</p>
           <code class="plugin-confirm-path">{{ confirmingPlugin.item.relative_path }}</code>
-          <p class="plugin-confirm-note">操作只会重命名 DLL 文件，{{ confirmingPlugin.enabled ? "恢复原扩展名" : "追加 .disabled 后缀" }}；游戏重启后生效。</p>
+          <p class="plugin-confirm-note">操作只会重命名 DLL 文件，{{ confirmingPlugin.enabled ? "恢复原扩展名" : "改为 .dl_ 文件名" }}；游戏重启后生效。</p>
           <footer><button type="button" class="plugin-confirm-cancel" @click="cancelToggle">取消</button><button type="button" class="plugin-confirm-submit" @click="confirmToggle">确认{{ confirmingPlugin.enabled ? "启用" : "禁用" }}</button></footer>
         </section>
       </div>

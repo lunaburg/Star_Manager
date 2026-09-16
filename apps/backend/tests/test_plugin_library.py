@@ -133,7 +133,7 @@ def test_plugin_toggle_renames_dll_and_preserves_stable_scan_identity(tmp_path, 
     assert disabled["ok"] is True
     assert disabled["data"]["enabled"] is False
     assert not dll.exists()
-    assert (dll.parent / "Toggle.dll.disabled").exists()
+    assert (dll.parent / "Toggle.dl_").exists()
 
     def fake_metadata(path):
         return plugin_library.AssemblyMetadata(
@@ -148,10 +148,10 @@ def test_plugin_toggle_renames_dll_and_preserves_stable_scan_identity(tmp_path, 
     item = scanned["data"]["items"][0]
     assert item["id"] == "bepinex/plugins/pack/toggle.dll"
     assert item["enabled"] is False
-    assert item["relative_path"].endswith("Toggle.dll.disabled")
+    assert item["relative_path"].endswith("Toggle.dl_")
 
     enabled = plugin_library.set_bepinex_plugin_enabled(
-        str(game), "BepInEx/Plugins/Pack/Toggle.dll.disabled", True
+        str(game), "BepInEx/Plugins/Pack/Toggle.dl_", True
     )
     assert enabled["ok"] is True
     assert enabled["data"]["enabled"] is True
@@ -168,9 +168,24 @@ def test_plugin_toggle_rejects_paths_outside_plugin_area_and_existing_target(tmp
 
     dll = game / "BepInEx" / "Plugins" / "Pack" / "Conflict.dll"
     dll.write_bytes(b"active")
-    (dll.parent / "Conflict.dll.disabled").write_bytes(b"disabled")
+    (dll.parent / "Conflict.dl_").write_bytes(b"disabled")
     conflict = plugin_library.set_bepinex_plugin_enabled(
         str(game), "BepInEx/Plugins/Pack/Conflict.dll", False
     )
     assert conflict["ok"] is False
     assert dll.read_bytes() == b"active"
+
+
+def test_legacy_disabled_plugin_is_migrated_to_dl_suffix(tmp_path):
+    game = _game(tmp_path)
+    legacy = game / "BepInEx" / "Plugins" / "Pack" / "Legacy.dll.disabled"
+    legacy.write_bytes(b"legacy")
+
+    migrated = plugin_library.set_bepinex_plugin_enabled(
+        str(game), "BepInEx/Plugins/Pack/Legacy.dll.disabled", False
+    )
+
+    assert migrated["ok"] is True
+    assert migrated["data"]["enabled"] is False
+    assert not legacy.exists()
+    assert (legacy.parent / "Legacy.dl_").exists()

@@ -133,7 +133,7 @@ flowchart LR
 
 插件管理扫描游戏目录下的 BepInEx 插件 DLL，并在列表中显示插件名称、GUID、版本、类型和启用状态。输入框支持按插件名称、GUID 或 DLL 搜索；选中一项后，右侧显示描述、依赖、适用进程和诊断信息，顶部按钮可以打开 BepInEx 目录。
 
-Star_Manager 不执行 DLL，也不修改插件内容或配置。单个启用/禁用操作只会在 BepInEx 插件目录中将 `Example.dll` 重命名为 `Example.dll.disabled`，或恢复原扩展名；目标文件已存在时不会覆盖，游戏重启后生效。
+Star_Manager 不执行 DLL，也不修改插件内容或配置。单个启用/禁用操作只会在 BepInEx 插件目录中将 `Example.dll` 重命名为 `Example.dl_`，或恢复原扩展名；历史 `.dll.disabled` 仅作为兼容状态读取，新的禁用操作一律使用 `.dl_`。目标文件已存在时不会覆盖，游戏重启后生效。
 
 ### 工作台
 

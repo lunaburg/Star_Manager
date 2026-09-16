@@ -28,7 +28,7 @@ const { ctx } = defineProps({
                     <h1>游戏配置</h1>
                   </div>
                 </div>
-                <div class="section">
+                <div class="section start-config-section">
                   <label class="form-row">
                     <span class="label">语言</span>
                     <select :value="ctx.setup.language" :disabled="!ctx.setup.loaded || ctx.setup.saving" @change="ctx.updateSetup('language', $event.target.value)">
@@ -62,6 +62,38 @@ const { ctx } = defineProps({
                   <button class="primary wide-action" type="button" :disabled="!ctx.setup.dirty || ctx.setup.saving || !ctx.setup.loaded" @click="ctx.saveSetup">
                     {{ ctx.setup.saving ? "保存中…" : "保存配置" }}
                   </button>
+
+                  <section class="start-plugin-settings" aria-labelledby="start-plugin-settings-title">
+                    <div class="start-plugin-settings-head">
+                      <h2 id="start-plugin-settings-title">插件设置</h2>
+                      <span>{{ ctx.startPluginSettings.loading ? "读取中…" : "重启游戏后生效" }}</span>
+                    </div>
+                    <div class="start-plugin-list">
+                      <div
+                        v-for="plugin in ctx.startPluginSettings.items"
+                        :key="plugin.key"
+                        class="start-plugin-row"
+                        :class="{ unavailable: !plugin.installed, special: plugin.kind === 'special' }"
+                        :title="plugin.itemError || plugin.relativePath"
+                      >
+                        <div class="start-plugin-copy">
+                          <strong>{{ plugin.label }}</strong>
+                        </div>
+                        <div class="start-plugin-status">
+                          <span>{{ !ctx.paths.gameDir ? "未选择目录" : plugin.itemError ? "不可用" : !plugin.installed ? "未安装" : plugin.busy ? "处理中…" : plugin.enabled ? "启用" : "禁用" }}</span>
+                          <button
+                            type="button"
+                            class="switch-button"
+                            :disabled="!ctx.paths.gameDir || !plugin.installed || plugin.busy || ctx.startPluginSettings.loading"
+                            :aria-label="plugin.label + (plugin.enabled ? '：禁用' : '：启用')"
+                            @click="ctx.toggleStartPlugin(plugin)"
+                          ><span class="switch" :class="{ on: plugin.enabled }"></span></button>
+                        </div>
+                      </div>
+                    </div>
+                    <p v-if="ctx.startPluginSettings.error" class="setup-message error">{{ ctx.startPluginSettings.error }}</p>
+                    <p v-else-if="ctx.startPluginSettings.notice" class="setup-message warning">{{ ctx.startPluginSettings.notice }}</p>
+                  </section>
                 </div>
               </section>
 
@@ -82,6 +114,41 @@ const { ctx } = defineProps({
                   <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\cap')">截图</button>
                   <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\chara\\female')">人物卡（女）</button>
                   <button type="button" :disabled="!ctx.paths.gameDir" @click="ctx.openGameDirectory('UserData\\chara\\male')">人物卡（男）</button>
+                  <div
+                    v-for="(shortcut, index) in ctx.directoryShortcuts"
+                    :key="`${shortcut.name}-${shortcut.path}-${index}`"
+                    class="quick-shortcut-row"
+                  >
+                    <button
+                      type="button"
+                      class="quick-shortcut-edit"
+                      :aria-label="`编辑快捷目录：${shortcut.name}`"
+                      :title="`编辑快捷目录：${shortcut.name}`"
+                      @click="ctx.openDirectoryShortcutEditor(index)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="m4 16.5-.7 3.2 3.2-.7L18.7 6.8a2.1 2.1 0 0 0-3-3L4 16.5Z" />
+                        <path d="m14.4 5.6 4 4" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="quick-shortcut-button"
+                      :title="shortcut.path"
+                      @click="ctx.openDirectoryShortcut(shortcut.path)"
+                    >{{ shortcut.name }}</button>
+                  </div>
+                  <button
+                    type="button"
+                    class="quick-add-button"
+                    aria-label="添加目录快捷入口"
+                    title="添加目录快捷入口"
+                    @click="ctx.openDirectoryShortcutPrompt"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
                 </div>
               </aside>
             </div>

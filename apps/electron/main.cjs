@@ -14,6 +14,10 @@ const {
   readGameSetup,
   writeGameSetup
 } = require("./game-setup.cjs");
+const {
+  ensureBundledPlugins,
+  getBundledPluginDirectory
+} = require("./game-plugins.cjs");
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL || "";
 const isDev = Boolean(rendererUrl);
@@ -195,6 +199,15 @@ function normalizeSettings(settings = {}) {
   const characterCardLoadOptions = Array.isArray(settings.characterCardLoadOptions)
     ? allowedCharacterCardLoadOptions.filter((option) => settings.characterCardLoadOptions.includes(option))
     : [...allowedCharacterCardLoadOptions];
+  const directoryShortcuts = Array.isArray(settings.directoryShortcuts)
+    ? settings.directoryShortcuts
+      .map((shortcut) => ({
+        name: String(shortcut?.name || "").trim().slice(0, 32),
+        path: String(shortcut?.path || "").trim()
+      }))
+      .filter((shortcut) => shortcut.name && shortcut.path)
+      .slice(0, 24)
+    : [];
   const workbenchProjects = Array.isArray(settings.workbenchProjects)
     ? settings.workbenchProjects
       .map((project) => ({
@@ -212,6 +225,7 @@ function normalizeSettings(settings = {}) {
     gameDir: String(settings.gameDir || ""),
     inputDir: String(settings.inputDir || ""),
     outputDir: String(settings.outputDir || ""),
+    directoryShortcuts,
     workbenchAuthorId: String(settings.workbenchAuthorId || "").trim(),
     workbenchWorkspacePath: String(settings.workbenchWorkspacePath || "").trim(),
     workbenchActiveProjectId: String(settings.workbenchActiveProjectId || "").trim(),
@@ -3833,6 +3847,19 @@ ipcMain.handle("game:saveSetup", async (_event, gameDir, setup) => {
     };
   } catch (error) {
     return { ok: false, error: `保存 setup.xml 失败：${error.message}` };
+  }
+});
+
+ipcMain.handle("game:ensurePlugins", async (_event, gameDir) => {
+  try {
+    return ensureBundledPlugins(gameDir, {
+      sourceDirectory: getBundledPluginDirectory({
+        appIsPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath
+      })
+    });
+  } catch (error) {
+    return { ok: false, error: `检查 Star Manager 插件失败：${error.message}` };
   }
 });
 

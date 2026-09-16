@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   },
   loadGameSetup: (gameDir) => ipcRenderer.invoke("game:loadSetup", gameDir),
   saveGameSetup: (gameDir, setup) => ipcRenderer.invoke("game:saveSetup", gameDir, setup),
+  ensureGamePlugins: (gameDir) => ipcRenderer.invoke("game:ensurePlugins", gameDir),
   launchGameExecutable: (launchType, gameDir) => ipcRenderer.invoke("game:launchExecutable", launchType, gameDir),
   openFbxInBlender: (blenderPath, fbxPath) => ipcRenderer.invoke("blender:openFbx", blenderPath, fbxPath),
   loadSettings: () => ipcRenderer.invoke("settings:load"),

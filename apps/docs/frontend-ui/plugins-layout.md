@@ -15,7 +15,7 @@
 - 首次进入页面或游戏目录变化时自动扫描；当前界面没有独立的强制重扫按钮。
 - 列表显示插件名、版本、类型和状态；前端会保留当前选中项。
 - 详情显示相对路径、功能说明、插件 GUID/版本、BepInEx 依赖、适用进程和解析诊断，并提供单个插件的启用/禁用按钮。
-- 启用/禁用操作需要确认，完成后直接更新当前行，不重新解析全部 DLL；禁用状态使用 `.dll.disabled` 文件名表示，游戏重启后生效。禁用插件仍保留在列表中，便于再次启用。下一次主动扫描时，文件指纹会自动识别外部变化。
+- 启用/禁用操作需要确认，完成后直接更新当前行，不重新解析全部 DLL；禁用状态使用替换 `.dll` 后缀得到的 `.dl_` 文件名表示（如 `Example.dl_`），游戏重启后生效。历史 `.dll.disabled` 文件仍可读取，但新的禁用操作一律使用 `.dl_`。禁用插件仍保留在列表中，便于再次启用。下一次主动扫描时，文件指纹会自动识别外部变化。
 - 空状态区分未选择游戏目录、准备扫描、没有匹配结果和扫描失败。
 
 ### 插件管理页面控件玻璃化记录（2026-09-12）
@@ -65,7 +65,7 @@
 
 ## 缓存
 
-扫描结果复用主 SQLite 文件中的 `bepinex_plugin_cache` 表。缓存指纹包含启用/禁用形态的插件 DLL、配置和翻译文件；文件大小或修改时间发生变化时自动失效。后端支持 `refresh=1` 强制重扫，供 UI 或排障使用。
+扫描结果复用主 SQLite 文件中的 `bepinex_plugin_cache` 表。缓存指纹包含启用/禁用形态的插件 DLL（包括 `.dl_`、历史 `.dll.disabled` 和临时 `.dll.dl_`）、配置和翻译文件；文件大小或修改时间发生变化时自动失效。后端支持 `refresh=1` 强制重扫，供 UI 或排障使用。
 
 ## 当前边界
 
@@ -78,5 +78,6 @@
 - `apps/src/components/views/PluginsView.vue`
 - `apps/backend/star_manager/services/plugin_library.py`
 - `apps/backend/app/server.py`：`GET /plugins`
+- `apps/backend/app/server.py`：`GET /plugins/status`
 - `apps/backend/app/server.py`：`POST /plugins/toggle`
 - `apps/backend/star_manager/services/mod_database_core.py`：`bepinex_plugin_cache` schema

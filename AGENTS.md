@@ -42,11 +42,11 @@ When gathering project context or learning how the app works, check the project 
 - `apps/docs/frontend-ui/character-card-favorite-effects.md`: current configurable favorite-card themes, card/title styling, overflowing-name scrolling, and removal of legacy effect settings. Consult when changing character-card favorite visuals.
 - `apps/docs/frontend-ui/overview-layout.md`: overview dashboard structure and suggested actions.
 - `apps/docs/frontend-ui/runtime-log-layout.md`: runtime log page behavior, Electron first-screen milestones, and the non-blocking reveal-window startup rule.
-- `apps/docs/frontend-ui/start-layout.md`: start page and setup/game-launch workflows.
+- `apps/docs/frontend-ui/start-layout.md`: start page, persisted HS2 directory validation, backend-ready recovery, setup/game-launch workflows, and directory shortcuts.
 - `apps/docs/frontend-ui/workbench-layout.md`: workbench project lifecycle, CSV item model, Unity3D template selection, MainData preprocessing, resource write-back, retained Sims 4 Package-to-FBX capability, and current limits. Consult when changing workbench tools, project files, CSV behavior, Unity3D resources, or Sims 4 extraction UI.
 - `apps/docs/frontend-ui/plugins-layout.md`: BepInEx plugin scan scope, metadata display, cache behavior, and current read-only boundary. Consult when changing plugin inventory or plugin diagnostics.
 - `apps/docs/frontend-ui/settings-layout.md`: manager settings, persistence fields, achievement preferences, export directories, and Blender integration. Consult when changing settings or startup behavior.
-- `apps/docs/frontend-ui/ui-style.md`: visual style and interaction rules.
+- `apps/docs/frontend-ui/ui-style.md`: visual style, interaction rules, and the minimal-text constraint for UI copy.
 - `apps/docs/packaging-windows.md`: Windows Electron/Python packaging flow, output paths, verification commands, and packaging warnings. Consult when building or troubleshooting distributable exe output.
 - `apps/docs/electron-process-lifecycle.md`: Electron single-instance behavior, Windows backend process-tree cleanup, exit waiting, and lifecycle boundaries. Consult when changing app startup, backend launch, or shutdown behavior.
 - `apps/docs/electron-process-lifecycle.md`: Electron single-instance behavior, Windows backend process-tree cleanup, exit waiting, and lifecycle boundaries. Consult when changing app startup, backend launch, or shutdown behavior.

@@ -101,6 +101,14 @@ The packaging configuration lives in the `build` field of `apps/package.json`. T
 - `package.json`
 - `build/backend/star_manager_backend.exe` as `resources/backend/star_manager_backend.exe`
 - `backend/runtime/remote/**/*` as `runtime/remote/**/*` (the read-only remote mod index)
+- `tools/StarManager/*.dll` as `resources/StarManager/*.dll` (the three manager companion plugins)
+
+The three bundled plugins are installed by the Electron main process into the selected
+game directory's `BepInEx/Plugins/` folder. The package does not overwrite an existing
+same-name DLL; an existing `.dl_` or historical `.dll.disabled` file is also treated as installed so a user's
+disabled-plugin choice is preserved. The check runs when a game directory is selected and
+when the saved directory is restored at application startup. Missing `BepInEx` and
+`Plugins` directories are created as needed.
 
 ## Verification
 
@@ -110,6 +118,9 @@ After packaging, confirm the expected files exist:
 Test-Path .\release\win-unpacked\Star_Manager.exe
 Test-Path .\release\win-unpacked\resources\backend\star_manager_backend.exe
 Test-Path .\release\win-unpacked\runtime\remote\remote_zipmod_index.sqlite
+Test-Path .\release\win-unpacked\resources\StarManager\StarManager.CardMetadata.dll
+Test-Path .\release\win-unpacked\resources\StarManager\StarManager.CharacterCardReadProbe.dll
+Test-Path .\release\win-unpacked\resources\StarManager\StarManager.GameItemProbe.dll
 Test-Path .\release\win-unpacked\resources\app.asar.unpacked\node_modules
 Get-ChildItem .\release\win-unpacked\runtime -Recurse -File | Select-Object -ExpandProperty FullName
 ```

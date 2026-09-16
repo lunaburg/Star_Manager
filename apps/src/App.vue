@@ -142,12 +142,11 @@ const START_SPECIAL_SETTING_DEFINITIONS = Object.freeze([
     relativePath: "BepInEx/LauncherEN/ilikebleeding.txt"
   }
 ]);
-const startPluginSettings = reactive({ loading: false, error: "", notice: "", items: [] });
+const startPluginSettings = reactive({ loading: false, error: "", items: [] });
 
 function resetStartPluginSettings() {
   startPluginSettings.loading = false;
   startPluginSettings.error = "";
-  startPluginSettings.notice = "";
   startPluginSettings.items = [...START_PLUGIN_DEFINITIONS.map((definition) => ({ ...definition, kind: "plugin" })), ...START_SPECIAL_SETTING_DEFINITIONS].map((definition) => ({
     ...definition,
     installed: false,
@@ -172,6 +171,9 @@ const managerSettings = reactive({
   startupView: "start",
   favoriteCardTheme: "gold",
   checkDatabaseChangesOnStartup: true,
+  databaseWorkerCount: 1,
+  databaseWorkerLimit: 1,
+  databaseLogicalProcessorCount: 1,
   wallpaperPath: String(startupWallpaper.wallpaperPath || "").trim(),
   wallpaperType: ["image", "video"].includes(String(startupWallpaper.wallpaperType || ""))
     ? String(startupWallpaper.wallpaperType)
@@ -179,6 +181,10 @@ const managerSettings = reactive({
 });
 const wallpaperReady = ref(!startupWallpaper.wallpaperPath);
 const wallpaperLoadFailed = ref(false);
+const databaseWorkerOptions = computed(() => Array.from(
+  { length: Math.max(1, Number(managerSettings.databaseWorkerLimit) || 1) },
+  (_value, index) => index + 1
+));
 let rendererReadyNotified = false;
 let removeStartupLogListener = null;
 let backendRetryTimer = 0;
@@ -2565,32 +2571,39 @@ function latestTaskMessage(task) {
   return messages.length ? String(messages[messages.length - 1] || "") : "";
 }
 
+const DATABASE_TASK_STAGE_DURATIONS = [
+  { label: "原版资源索引", seconds: 2.5 },
+  { label: "zipmod 扫描", seconds: 70.6 },
+  { label: "物品解析与缩略图", seconds: 472.9 },
+  { label: "模组数据库写入", seconds: 1.1 },
+  { label: "人物卡数据库", seconds: 65.9 }
+];
+const DATABASE_TASK_TOTAL_SECONDS = DATABASE_TASK_STAGE_DURATIONS.reduce(
+  (total, stage) => total + stage.seconds,
+  0
+);
+let databaseTaskElapsedSeconds = 0;
+const DATABASE_TASK_STAGE_BOUNDARIES = DATABASE_TASK_STAGE_DURATIONS.map((stage) => {
+  databaseTaskElapsedSeconds += stage.seconds;
+  return {
+    label: stage.label,
+    // The backend task state is rounded to one decimal place. Keep the
+    // label boundary in the same space so a boundary update does not switch
+    // stages one polling tick too early or too late.
+    end: Number((databaseTaskElapsedSeconds / DATABASE_TASK_TOTAL_SECONDS * 100).toFixed(1))
+  };
+});
+
+function databaseTaskStage(task) {
+  const rawProgress = Number(task?.progress);
+  const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : 0;
+  return DATABASE_TASK_STAGE_BOUNDARIES.find((stage) => progress <= stage.end)?.label
+    || DATABASE_TASK_STAGE_BOUNDARIES.at(-1).label;
+}
+
 function databaseTaskHint(task) {
-  const message = latestTaskMessage(task);
-  const prepared = message.match(/^Prepared (\d+)\/(\d+) primary zipmods/);
-  if (prepared) return `提取物品与缩略图 ${prepared[1]}/${prepared[2]}`;
-
-  const indexed = message.match(/^Indexed (\d+)\/(\d+) zipmods; (\d+) items/);
-  if (indexed) return `已索引 ${indexed[1]}/${indexed[2]} 个 zipmod，${indexed[3]} 个物品`;
-
-  const found = message.match(/^Found (\d+) zipmod files/);
-  if (found) return `找到 ${found[1]} 个 zipmod 文件`;
-
-  const cardIndexed = message.match(/^Indexed (\d+)\/(\d+) character cards/);
-  if (cardIndexed) return `已索引人物卡依赖 ${cardIndexed[1]}/${cardIndexed[2]}`;
-
-  const preparing = message.match(/^Preparing (\d+) primary zipmods/);
-  if (preparing) return `准备解析 ${preparing[1]} 个主 zipmod`;
-
-  if (message.startsWith("Building character card database")) return "正在构建人物卡依赖库";
-  if (message.startsWith("Character card database rebuild completed")) return "人物卡数据库已创建";
-  if (message.startsWith("Scanning UserData/chara")) return "扫描人物卡";
-  if (message.startsWith("Scanning ")) return "扫描 zipmod 文件";
-  if (message.startsWith("Prepared zipmod items")) return "物品数据已准备";
-  if (message.startsWith("Finalizing ")) return "正在收尾";
-  if (message.startsWith("Database rebuild completed")) return "数据库已创建";
-  if (message.startsWith("Building mod database")) return "正在读取游戏目录";
-  return "正在处理";
+  if (task?.status === "queued") return "等待后端开始处理";
+  return databaseTaskStage(task);
 }
 
 function taskSummary(task) {
@@ -6069,7 +6082,6 @@ async function toggleStartPlugin(plugin) {
   const enabled = !plugin.enabled;
   plugin.busy = true;
   startPluginSettings.error = "";
-  startPluginSettings.notice = "";
   try {
     const result = await window.desktopApi?.backendRequest(
       plugin.kind === "special" ? "/game/special-settings/toggle" : "/plugins/toggle",
@@ -6087,7 +6099,6 @@ async function toggleStartPlugin(plugin) {
     const data = result.data || {};
     plugin.enabled = typeof data.enabled === "boolean" ? data.enabled : enabled;
     plugin.actualPath = data.relative_path || plugin.actualPath;
-    startPluginSettings.notice = `${plugin.label}已${plugin.enabled ? "启用" : "禁用"}，请重启游戏后生效。`;
   } catch (error) {
     startPluginSettings.error = error?.message || String(error);
   } finally {
@@ -6169,6 +6180,7 @@ async function saveAppSettings(options = {}) {
         startupView: managerSettings.startupView,
         favoriteCardTheme: managerSettings.favoriteCardTheme,
         checkDatabaseChangesOnStartup: managerSettings.checkDatabaseChangesOnStartup,
+        databaseWorkerCount: managerSettings.databaseWorkerCount,
         wallpaperPath: managerSettings.wallpaperPath,
         wallpaperType: managerSettings.wallpaperType,
         clearSb3UtilityExecutablePath: options.clearSb3UtilityExecutablePath === true
@@ -6205,6 +6217,18 @@ async function loadAppSettingsInternal({ loadBackendData = true } = {}) {
       ? result.settings.favoriteCardTheme
       : "gold";
     managerSettings.checkDatabaseChangesOnStartup = result.settings?.checkDatabaseChangesOnStartup !== false;
+    managerSettings.databaseWorkerLimit = Math.max(
+      1,
+      Number(result.settings?.databaseWorkerLimit) || 1
+    );
+    managerSettings.databaseLogicalProcessorCount = Math.max(
+      1,
+      Number(result.settings?.databaseLogicalProcessorCount) || managerSettings.databaseWorkerLimit * 2
+    );
+    const savedDatabaseWorkerCount = Number(result.settings?.databaseWorkerCount);
+    managerSettings.databaseWorkerCount = Number.isInteger(savedDatabaseWorkerCount)
+      ? Math.min(managerSettings.databaseWorkerLimit, Math.max(1, savedDatabaseWorkerCount))
+      : managerSettings.databaseWorkerLimit;
     const previousWallpaperPath = managerSettings.wallpaperPath;
     const previousWallpaperType = managerSettings.wallpaperType;
     wallpaperLoadFailed.value = false;
@@ -6305,6 +6329,15 @@ async function updateManagerSetting(key, value) {
   const result = await saveAppSettings();
   settingsNotice.type = result?.ok ? "success" : "error";
   settingsNotice.message = result?.ok ? "设置已保存" : `保存失败：${result?.error || "未知错误"}`;
+}
+
+async function updateDatabaseWorkerCount(value) {
+  const requested = Number(value);
+  const limit = Math.max(1, Number(managerSettings.databaseWorkerLimit) || 1);
+  const normalized = Number.isInteger(requested)
+    ? Math.min(limit, Math.max(1, requested))
+    : limit;
+  await updateManagerSetting("databaseWorkerCount", normalized);
 }
 
 async function updatePortablePackageCompress(value) {
@@ -6615,6 +6648,22 @@ function buildPayload(overrides = {}) {
     zipmod_extract_mode: String(extractMode.value || "copy"),
     ...overrides
   });
+}
+
+const DATABASE_WORKER_TASK_TYPES = new Set([
+  "build_mod_database",
+  "build_card_database",
+  "index_single_zipmod",
+  "download_card_missing_mods",
+  "import_external_zipmods",
+  "organize_all_zipmods_by_author"
+]);
+
+function buildTaskPayload(type, overrides = {}) {
+  const taskOverrides = DATABASE_WORKER_TASK_TYPES.has(type)
+    ? { worker_count: managerSettings.databaseWorkerCount, ...overrides }
+    : overrides;
+  return buildPayload(taskOverrides);
 }
 
 function applyTask(task) {
@@ -7011,7 +7060,7 @@ async function submitTask(type, overrides = {}) {
   try {
     const result = await window.desktopApi.backendRequest("/tasks", {
       method: "POST",
-      body: { task_type: type, payload: buildPayload(overrides) }
+      body: { task_type: type, payload: buildTaskPayload(type, overrides) }
     });
     if (!result?.ok) {
       log(`[Task Error] ${result?.error || "unknown error"}`);
@@ -7048,7 +7097,7 @@ async function submitTaskInBackground(type, overrides = {}, onDone = null, onSta
   log(`[UI] ${type} submitted`);
   const result = await window.desktopApi.backendRequest("/tasks", {
     method: "POST",
-    body: { task_type: type, payload: buildPayload(overrides) }
+    body: { task_type: type, payload: buildTaskPayload(type, overrides) }
   });
   if (!result.ok) {
     throw new Error(result.error || "unknown error");
@@ -8801,11 +8850,13 @@ const appCtx = reactive({
   selectedTask,
   openTaskDetails,
   managerSettings,
+  databaseWorkerOptions,
   formatAchievementProgress,
   loadAchievements,
   resetAchievementHistory,
   updateAchievementPreference,
   updateManagerSetting,
+  updateDatabaseWorkerCount,
   wallpaperSource,
   wallpaperIsVideo,
   selectWallpaper,

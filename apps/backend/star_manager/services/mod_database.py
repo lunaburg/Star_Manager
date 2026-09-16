@@ -111,8 +111,6 @@ from star_manager.services.card_library import (
 )
 
 
-MULTI_THREAD_THRESHOLD = 1000
-MAX_BUILD_WORKERS = 8
 SCAN_PROGRESS = 5
 FOUND_PROGRESS = 12
 DISCOVER_END_PROGRESS = 7
@@ -123,13 +121,23 @@ WRITE_END_PROGRESS = 96
 FINALIZE_PROGRESS = 98
 AUTO_REBUILD_MAX_CHANGES = 200
 AUTO_REBUILD_MAX_RATIO = 0.05
+MAX_DATABASE_WORKERS = 8
 
 
-def choose_build_worker_count(primary_zipmod_count: int) -> int:
-    if primary_zipmod_count <= MULTI_THREAD_THRESHOLD:
-        return 1
-    cpu_count = os.cpu_count() or 1
-    return max(2, min(MAX_BUILD_WORKERS, cpu_count))
+def get_build_worker_limit() -> int:
+    """Return the safe configurable worker limit for mod database builds."""
+    cpu_count = max(1, os.cpu_count() or 1)
+    return max(1, min(MAX_DATABASE_WORKERS, cpu_count // 2))
+
+
+def choose_build_worker_count(requested_worker_count: int | str | None = None) -> int:
+    """Clamp the configured worker count without considering task size."""
+    worker_limit = get_build_worker_limit()
+    try:
+        requested = int(requested_worker_count) if requested_worker_count is not None else worker_limit
+    except (TypeError, ValueError):
+        requested = worker_limit
+    return max(1, min(worker_limit, requested))
 
 
 def calculate_progress(current: int, total: int, start: int, end: int) -> float:
@@ -667,6 +675,7 @@ def build_database(
     thumbnail_dir: Path,
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
+    worker_count: int | str | None = None,
 ) -> dict[str, object]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
@@ -816,7 +825,7 @@ def build_database(
         affected_mod_guids = (
             replaced_item_guids | removed_guids | previous_guids_for_changed_paths
         )
-        worker_count = choose_build_worker_count(len(primary_by_guid))
+        actual_worker_count = choose_build_worker_count(worker_count)
 
         stats = {
             "zipmod_files": len(candidates),
@@ -834,13 +843,15 @@ def build_database(
             "affected_mod_guids": sorted(affected_mod_guids, key=str.casefold),
             "affected_mod_guid_count": len(affected_mod_guids),
             "primary_changed_guid_count": len(primary_changed_guids),
+            "worker_count": actual_worker_count,
+            "worker_limit": get_build_worker_limit(),
             **builtin_stats,
         }
         report(
             PREPARE_START_PROGRESS,
             (
                 f"Preparing {len(primary_by_guid)} primary zipmods with "
-                f"{worker_count} worker{'s' if worker_count != 1 else ''}"
+                f"{actual_worker_count} worker{'s' if actual_worker_count != 1 else ''}"
             ),
         )
         item_parse_started_at = perf_counter()
@@ -851,8 +862,8 @@ def build_database(
             if guid in replaced_item_guids
         ]
         total_primary_candidates = len(primary_candidates)
-        if worker_count > 1:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        if actual_worker_count > 1:
+            with ThreadPoolExecutor(max_workers=actual_worker_count) as executor:
                 future_to_candidate = {
                     executor.submit(
                         prepare_mod_items,

@@ -4,6 +4,7 @@ const { Worker } = require("node:worker_threads");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { terminateProcessTree } = require("./backend-process.cjs");
@@ -43,6 +44,7 @@ const gameExecutables = {
   vr: "HoneySelect2VR.exe"
 };
 const DEFAULT_SB3UTILITY_EXECUTABLE_PATH = String(process.env.STAR_MANAGER_SB3UTILITY_EXE || "");
+const MAX_DATABASE_WORKERS = 8;
 
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -175,6 +177,17 @@ function legacySettingsPath() {
   return candidate.toLowerCase() === settingsPath().toLowerCase() ? "" : candidate;
 }
 
+function getDatabaseWorkerCapacity() {
+  const availableProcessors = typeof os.availableParallelism === "function"
+    ? os.availableParallelism()
+    : os.cpus().length;
+  const logicalProcessorCount = Math.max(1, Number(availableProcessors) || 1);
+  return {
+    logicalProcessorCount,
+    workerLimit: Math.max(1, Math.min(MAX_DATABASE_WORKERS, Math.floor(logicalProcessorCount / 2)))
+  };
+}
+
 function settingsReadPath() {
   const canonicalPath = settingsPath();
   if (fs.existsSync(canonicalPath)) {
@@ -199,6 +212,14 @@ function normalizeSettings(settings = {}) {
   const characterCardLoadOptions = Array.isArray(settings.characterCardLoadOptions)
     ? allowedCharacterCardLoadOptions.filter((option) => settings.characterCardLoadOptions.includes(option))
     : [...allowedCharacterCardLoadOptions];
+  const databaseWorkerCapacity = getDatabaseWorkerCapacity();
+  const requestedDatabaseWorkerCount = Number(settings.databaseWorkerCount);
+  const databaseWorkerCount = Number.isInteger(requestedDatabaseWorkerCount)
+    ? Math.min(
+      databaseWorkerCapacity.workerLimit,
+      Math.max(1, requestedDatabaseWorkerCount)
+    )
+    : databaseWorkerCapacity.workerLimit;
   const directoryShortcuts = Array.isArray(settings.directoryShortcuts)
     ? settings.directoryShortcuts
       .map((shortcut) => ({
@@ -241,6 +262,9 @@ function normalizeSettings(settings = {}) {
     startupView: allowedStartupViews.has(startupView) ? startupView : "start",
     favoriteCardTheme: allowedFavoriteCardThemes.has(favoriteCardTheme) ? favoriteCardTheme : "gold",
     checkDatabaseChangesOnStartup: settings.checkDatabaseChangesOnStartup !== false,
+    databaseWorkerCount,
+    databaseWorkerLimit: databaseWorkerCapacity.workerLimit,
+    databaseLogicalProcessorCount: databaseWorkerCapacity.logicalProcessorCount,
     wallpaperPath: String(settings.wallpaperPath || "").trim(),
     wallpaperType: ["image", "video"].includes(String(settings.wallpaperType || ""))
       ? String(settings.wallpaperType)
@@ -3684,13 +3708,15 @@ async function findWorkbenchOldZipmodsByGuid(guid, gameDir) {
 async function indexWorkbenchModDatabase(gameDir, zipmodPath, onProgress) {
   const normalizedGameDir = path.resolve(String(gameDir || ""));
   const normalizedZipmodPath = path.resolve(String(zipmodPath || ""));
+  const configuredWorkerCount = loadSettingsFile()?.settings?.databaseWorkerCount;
   const submitted = await fetchBackend("/tasks", {
     method: "POST",
     body: {
       task_type: "index_single_zipmod",
       payload: {
         game_dir: normalizedGameDir,
-        zipmod_path: normalizedZipmodPath
+        zipmod_path: normalizedZipmodPath,
+        worker_count: configuredWorkerCount
       }
     }
   });

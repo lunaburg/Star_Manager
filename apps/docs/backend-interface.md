@@ -375,11 +375,14 @@ Current task types:
   - Payload: `{ "input_dir": "...", "output_dir": "...", "delete_empty": false }`
   - Sorts zipmods by manifest metadata.
 - `build_mod_database`
-  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full" }`
+  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1 }`; `worker_count` is clamped by the backend to the range `1..min(8, floor(available logical processors / 2))`.
   - Rebuilds the SQLite mod database, thumbnail cache, character-card database, and card preview cache. The frontend uses incremental mode for automatic small-change rebuilds.
+  - Mod item preparation and character-card preparation always use the configured worker count; neither stage is reduced because the current task is small. SQLite writes remain serialized on the main thread.
+  - On success, `data.stats.worker_count` and `data.stats.worker_limit` report the effective worker count and the current machine limit.
+  - The top-bar task progress is a fixed weighted estimate from the reference run: builtin resource index 0.41%, zipmod scan 11.52%, item parsing and thumbnails 77.15%, database write 0.18%, and character-card database 10.75%. The task still reports the underlying phase timings separately and finishes at 100%.
   - On success, `data.timings` reports milliseconds for `builtin_resource_index_ms`, `zipmod_scan_ms`, `item_parse_ms`, `database_write_ms`, `character_card_database_ms`, and `total_ms`. The task messages also include one human-readable seconds summary.
 - `index_single_zipmod`
-  - Payload: `{ "game_dir": "D:\\HS2", "zipmod_path": "D:\\HS2\\mods\\Author\\mod.zipmod" }`
+  - Payload: `{ "game_dir": "D:\\HS2", "zipmod_path": "D:\\HS2\\mods\\Author\\mod.zipmod", "worker_count": 1 }`; the worker count is used when relinking affected character cards.
   - Indexes only the specified zipmod and its item rows. It does not scan, add, remove, or reparse any other zipmod. After indexing, it incrementally relinks only character cards that depend on the affected GUIDs; the workbench uses this task immediately after packaging. The task result includes `card_stats` when a card relink was performed.
 - `download_card_missing_mods`
   - Payload: `{ "game_dir": "D:\\HS2", "remote_ids": [123, 456] }`. The list may contain at most 100 candidates and must contain no more than one candidate for each GUID.
@@ -393,8 +396,8 @@ Current task types:
   - Before indexing copied zipmods, recursively searches `abdata` directories under the import source folder. When a copied zipmod references a missing `abdata/**/*.unity3d`, the matching loose unity3d file is moved into the zipmod at that referenced path.
   - Also scans external `*.png` files. `【AIS_Chara】` character cards are copied into `UserData/chara/female/imported`, while `【AIS_Clothes】` clothes cards are copied into `UserData/coordinate/female/imoprted`; ordinary PNG images are skipped. The task result reports them separately through `card_imported_count` / `imported_cards` and `coordinate_imported_count` / `imported_coordinates`.
 - `build_card_database`
-  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full" }`
-  - Rebuilds only the character-card database and card preview cache.
+  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1 }`; `worker_count` follows the same `1..min(8, floor(available logical processors / 2))` limit as `build_mod_database`.
+  - Rebuilds only the character-card database and card preview cache, using the configured worker count for card parsing and preview preparation.
 - `bulk_export_zipmods`
   - Payload: `{ "zipmod_ids": [1, 2], "target_dir": "...", "mode": "copy | move" }`
   - Exports selected zipmods preserving the original mods tree, and also exports repairable external item main `.unity3d` files from game `abdata` under their original `abdata/...` paths.

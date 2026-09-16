@@ -2021,6 +2021,30 @@ small {
   font-weight: 700;
 }
 
+.start-view .start-config-section select {
+  border: 1px solid rgba(255, 255, 255, .62);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .28);
+  background: color-mix(in srgb, var(--surface-clean) 28%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .64), 0 4px 12px rgba(53, 77, 91, .06);
+  -webkit-backdrop-filter: blur(10px) saturate(1.04);
+  backdrop-filter: blur(10px) saturate(1.04);
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.start-view .start-config-section select:hover,
+.start-view .start-config-section select:focus-visible {
+  border-color: rgba(103, 169, 183, .58);
+  background: rgba(255, 255, 255, .42);
+  background: color-mix(in srgb, var(--surface-clean) 42%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 0 12px rgba(255, 255, 255, .24);
+}
+
+.start-view .start-config-section select:disabled {
+  background: rgba(255, 255, 255, .18);
+  opacity: .58;
+}
+
 .toggle-row {
   width: 100%;
   min-height: 36px;
@@ -2033,6 +2057,29 @@ small {
   border-radius: 6px;
   background: var(--surface-soft);
   box-shadow: none;
+}
+
+.start-view .start-config-section .toggle-row {
+  border: 1px solid rgba(255, 255, 255, .62);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .24);
+  background: color-mix(in srgb, var(--surface-clean) 24%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62), 0 4px 12px rgba(53, 77, 91, .06);
+  -webkit-backdrop-filter: blur(10px) saturate(1.04);
+  backdrop-filter: blur(10px) saturate(1.04);
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.start-view .start-config-section .toggle-row:not(:disabled):hover,
+.start-view .start-config-section .toggle-row:not(:disabled):focus-visible {
+  border-color: rgba(103, 169, 183, .58);
+  background: rgba(255, 255, 255, .38);
+  background: color-mix(in srgb, var(--surface-clean) 38%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 0 12px rgba(255, 255, 255, .24);
+}
+
+.start-view .start-config-section .toggle-row:disabled {
+  opacity: .58;
 }
 
 .toggle-row.compact {
@@ -2066,30 +2113,29 @@ small {
   left: 23px;
 }
 
+.start-view .start-config-section .switch {
+  border: 1px solid rgba(126, 143, 157, .24);
+  background: rgba(255, 255, 255, .58);
+  box-shadow: inset 0 1px 2px rgba(74, 95, 106, .12);
+}
+
+.start-view .start-config-section .switch::after {
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 1px 4px rgba(53, 77, 91, .16);
+}
+
+.start-view .start-config-section .switch.on {
+  border-color: rgba(103, 169, 183, .48);
+  background: rgba(158, 216, 255, .58);
+  background: color-mix(in srgb, var(--teal) 58%, transparent);
+}
+
 .start-plugin-settings {
   display: grid;
   gap: 8px;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid rgba(126, 143, 157, .22);
-}
-
-.start-plugin-settings-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.start-plugin-settings-head h2 {
-  margin: 0;
-  color: #274454;
-  font-size: 13px;
-}
-
-.start-plugin-settings-head span {
-  color: var(--muted);
-  font-size: 10px;
 }
 
 .start-plugin-list {
@@ -2189,6 +2235,7 @@ small {
 
 .start-view .wide-action {
   border: 0;
+  border-radius: 10px;
   background: rgba(158, 216, 255, .48);
   background: color-mix(in srgb, var(--teal) 48%, transparent);
   -webkit-backdrop-filter: blur(8px) saturate(1.04);
@@ -2211,6 +2258,118 @@ small {
 
 .start-view .wide-action:not(:disabled):active {
   transform: translateY(1px);
+}
+
+/* 开始页配置控件的紧凑尺寸；插件设置也纳入同一组控件密度。 */
+.start-view .start-config-section > .form-row {
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.start-view .start-config-section > .form-row > .label {
+  white-space: nowrap;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.start-view .start-config-section select {
+  height: 27px;
+  min-height: 27px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.start-view .start-config-section > .toggle-row {
+  height: 27px;
+  min-height: 27px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.start-view .start-config-section > .toggle-row .switch {
+  width: 31.5px;
+  height: 16.5px;
+}
+
+.start-view .start-config-section > .toggle-row .switch::after {
+  top: 2.25px;
+  left: 2.25px;
+  width: 12px;
+  height: 12px;
+}
+
+.start-view .start-config-section > .toggle-row .switch.on::after {
+  left: 17.25px;
+}
+
+.start-view .start-config-section > .wide-action {
+  height: 27px;
+  min-height: 27px;
+  margin-top: 10px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.start-view .start-config-section .start-plugin-settings {
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 7px;
+}
+
+.start-view .start-config-section .start-plugin-list {
+  gap: 6px;
+}
+
+.start-view .start-config-section .start-plugin-row {
+  min-height: 27px;
+  padding: 4.5px 4px;
+  border-radius: 6px;
+  gap: 4px;
+}
+
+.start-view .start-config-section .start-plugin-copy {
+  gap: 1px;
+}
+
+.start-view .start-config-section .start-plugin-copy strong {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.start-view .start-config-section .start-plugin-status {
+  gap: 3px;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.start-view .start-config-section .switch-button {
+  width: 31.5px;
+  height: 16.5px;
+  min-height: 16.5px;
+  line-height: 0;
+}
+
+.start-view .start-config-section .start-plugin-status .switch {
+  width: 31.5px;
+  height: 16.5px;
+}
+
+.start-view .start-config-section .start-plugin-status .switch::after {
+  top: 2.25px;
+  left: 2.25px;
+  width: 12px;
+  height: 12px;
+}
+
+.start-view .start-config-section .start-plugin-status .switch.on::after {
+  left: 17.25px;
 }
 
 .setup-message {
@@ -3794,7 +3953,8 @@ small {
 
 .settings-section--startup,
 .settings-section--wallpaper,
-.settings-section--blender {
+.settings-section--blender,
+.settings-section--database {
   background:
     linear-gradient(120deg, rgba(255, 245, 251, .3), rgba(225, 246, 253, .23)),
     color-mix(in srgb, var(--bg-color) 24%, transparent);
@@ -12622,10 +12782,8 @@ tbody tr:hover td {
 @keyframes task-drawer-in { from { transform: translateX(100%); opacity: .72; } }
 .task-drawer-close { position: absolute; top: calc(var(--titlebar-height) + 16px); right: 18px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid rgba(126, 143, 157, .36); border-radius: 10px; background: rgba(255, 255, 255, .32); color: #274454; box-shadow: 0 3px 10px rgba(53, 77, 91, .08); font-size: 23px; line-height: 1; }
 .task-drawer-close:hover { border-color: rgba(20, 126, 145, .58); background: rgba(255, 255, 255, .58); }
-.task-drawer-kicker { color: #397b91; font: 900 10px/1 var(--mono); letter-spacing: .16em; }
-.task-drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 12px; padding-right: 42px; }
+.task-drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 0; padding-right: 42px; }
 .task-drawer-heading h2 { margin: 0; color: #193847; font-size: 25px; line-height: 1.15; }
-.task-drawer-heading code { display: block; margin-top: 7px; overflow-wrap: anywhere; color: #66808d; font: 11px/1.45 var(--mono); }
 .task-drawer-heading .badge { flex: 0 0 auto; margin-top: 2px; }
 .task-drawer-summary { display: grid; gap: 5px; margin: 22px 0 6px; padding: 15px 16px; border: 1px solid rgba(126, 143, 157, .28); border-radius: 12px; background: rgba(255, 255, 255, .34); background: color-mix(in srgb, var(--surface-clean) 34%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68), 0 5px 16px rgba(53, 77, 91, .06); }
 .task-drawer-summary strong { color: #274454; font-size: 14px; }
@@ -12652,20 +12810,22 @@ tbody tr:hover td {
 .task-drawer-meta div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(126, 143, 157, .18); font-size: 11px; }
 .task-drawer-meta dt { color: var(--muted); }
 .task-drawer-meta dd { margin: 0; overflow-wrap: anywhere; color: #274454; font-family: var(--mono); text-align: right; }
-.achievement-drawer-backdrop { position: fixed; z-index: 40; inset: 0; background: rgba(22, 20, 18, .22); }
-.achievement-drawer { position: absolute; top: 0; right: 0; width: min(420px, 92vw); height: 100%; padding: calc(var(--titlebar-height) + 38px) 28px 38px; border-left: 2px solid #171514; background: linear-gradient(180deg, #fffdf5, #f3f8ff); box-shadow: -10px 0 0 rgba(23,21,20,.12); animation: achievement-drawer-in .2s ease-out; }
+.achievement-drawer-backdrop { position: fixed; z-index: 40; inset: 0; background: rgba(34, 48, 57, .16); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.achievement-drawer { position: absolute; top: 0; right: 0; width: min(420px, 92vw); height: 100%; padding: calc(var(--titlebar-height) + 38px) 28px 38px; border-left: 1px solid var(--glass-border); background: var(--glass-background-fallback); background: color-mix(in srgb, var(--bg-color) 28%, transparent); box-shadow: -18px 0 42px rgba(53, 77, 91, .16), inset 1px 0 0 rgba(255, 255, 255, .32); -webkit-backdrop-filter: blur(26px) saturate(1.08); backdrop-filter: blur(26px) saturate(1.08); animation: achievement-drawer-in .2s ease-out; }
 @keyframes achievement-drawer-in { from { transform: translateX(100%); } }
-.achievement-close { position: absolute; top: calc(var(--titlebar-height) + 18px); right: 18px; width: 34px; padding: 0; box-shadow: none; font-size: 24px; }
+.achievement-close { position: absolute; top: calc(var(--titlebar-height) + 18px); right: 18px; width: 34px; height: 34px; padding: 0; border: 1px solid rgba(126, 143, 157, .42); border-radius: 10px; background: rgba(255, 255, 255, .28); color: #274454; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62), 0 4px 12px rgba(53, 77, 91, .08); font-size: 24px; }
+.achievement-close:hover { border-color: rgba(20, 126, 145, .58); background: rgba(255, 255, 255, .48); }
 .achievement-drawer-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 16px; padding-right: 34px; }
 .achievement-drawer-heading { min-width: 0; }
-.achievement-drawer h2 { margin: 0; font-size: 28px; }
-.achievement-detail-stat { display: grid; gap: 5px; margin: 24px 0; padding: 18px; border: 1px solid #171514; background: #fff; }
-.achievement-detail-stat strong { font: 800 20px/1.2 var(--mono); }
-.achievement-detail-stat span { color: #716b65; font-size: 12px; }
-.achievement-drawer dl { display: grid; gap: 0; border-top: 1px solid #c9c3ba; }
-.achievement-drawer dl div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid #c9c3ba; font-size: 12px; }
-.achievement-drawer dt { color: #716b65; }
-.achievement-drawer dd { margin: 0; font-weight: 700; }
+.achievement-drawer h2 { margin: 0; color: #274454; font-size: 28px; }
+.achievement-drawer > p { color: #516b77; line-height: 1.5; }
+.achievement-detail-stat { display: grid; gap: 5px; margin: 24px 0; padding: 18px; border: 1px solid rgba(255, 255, 255, .58); border-radius: 12px; background: rgba(255, 255, 255, .24); background: color-mix(in srgb, var(--surface-clean) 24%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .66), 0 5px 16px rgba(53, 77, 91, .06); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.achievement-detail-stat strong { color: #274454; font: 800 20px/1.2 var(--mono); }
+.achievement-detail-stat span { color: #66808d; font-size: 12px; }
+.achievement-drawer dl { display: grid; gap: 0; border-top: 1px solid rgba(126, 143, 157, .24); }
+.achievement-drawer dl div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(126, 143, 157, .18); font-size: 12px; }
+.achievement-drawer dt { color: var(--muted); }
+.achievement-drawer dd { margin: 0; color: #274454; font-weight: 700; }
 .achievement-toast { position: fixed; z-index: 60; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 12px; width: 320px; padding: 14px; text-align: left; border: 2px solid #171514; background: #fff8ce; box-shadow: 6px 6px 0 #171514; animation: achievement-toast-in .25s ease-out; }
 @keyframes achievement-toast-in { from { transform: translateY(20px); opacity: 0; } }
 .achievement-toast > span:last-child { display: grid; gap: 2px; }

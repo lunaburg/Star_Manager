@@ -35,15 +35,24 @@ from star_manager.services.mod_database_core import (
 )
 
 
-CARD_DATABASE_MAX_WORKERS = 4
 _CACHE_UNSET = object()
+MAX_DATABASE_WORKERS = 8
 
 
-def choose_card_database_worker_count(card_count: int) -> int:
-    """Choose a conservative worker count for filesystem/card parsing work."""
-    if card_count <= 1:
-        return 1
-    return min(CARD_DATABASE_MAX_WORKERS, max(1, os.cpu_count() or 1))
+def get_card_database_worker_limit() -> int:
+    """Use the same capped worker limit as mod database builds."""
+    cpu_count = max(1, os.cpu_count() or 1)
+    return max(1, min(MAX_DATABASE_WORKERS, cpu_count // 2))
+
+
+def choose_card_database_worker_count(requested_worker_count: int | str | None = None) -> int:
+    """Clamp the configured worker count without considering card count."""
+    worker_limit = get_card_database_worker_limit()
+    try:
+        requested = int(requested_worker_count) if requested_worker_count is not None else worker_limit
+    except (TypeError, ValueError):
+        requested = worker_limit
+    return max(1, min(worker_limit, requested))
 
 
 def build_card_database(
@@ -53,6 +62,7 @@ def build_card_database(
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
     affected_mod_guids: Iterable[str] | None = None,
+    worker_count: int | str | None = None,
 ) -> dict[str, object]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
@@ -87,7 +97,8 @@ def build_card_database(
         "changed_cards": 0,
         "relinked_cards": 0,
         "untouched_cards": 0,
-        "worker_count": choose_card_database_worker_count(len(card_paths)),
+        "worker_count": choose_card_database_worker_count(worker_count),
+        "worker_limit": get_card_database_worker_limit(),
         "timings": {
             "card_scan_ms": scan_duration_ms,
         },

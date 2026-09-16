@@ -24,7 +24,7 @@
 
 | 文档 | 解决的问题 |
 | --- | --- |
-| [数据库变动检测](mod_database_change_detection.md) | 新增、移除、修改、重复 GUID、stale 和依赖重连 |
+| [数据库变动检测](mod_database_change_detection.md) | 新增、移除、修改、重复 GUID、建库线程数、stale 和依赖重连 |
 | [模组异常分类](mod_exception_catalog.md) | 异常类型、触发条件、UI 标题和当前修复入口 |
 
 ### 3. 需要处理角色卡时阅读解析细节

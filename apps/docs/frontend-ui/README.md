@@ -13,7 +13,7 @@
 | 顺序 | 文档 | 解决的问题 |
 | --- | --- | --- |
 | 1 | [前端 UI 架构](frontend-ui-architecture.md) | 页面清单、实现基线和整体产品假设 |
-| 2 | [主布局](main-layout.md) | Electron/Vue 应用外壳、全局导航选中态、顶部栏和共享后端上下文 |
+| 2 | [主布局](main-layout.md) | Electron/Vue 应用外壳、全局导航选中态、顶部栏、按实测耗时加权的数据库任务进度和共享后端上下文 |
 | 3 | [UI 风格规范](ui-style.md) | 颜色、控件、卡片、界面文字极简原则、风险状态、空状态和响应式原则 |
 
 ### 2. 再进入具体页面
@@ -30,7 +30,7 @@
 | 插件管理 | [插件管理布局](plugins-layout.md) | BepInEx 扫描、元数据、缓存和 `.dl_` 单插件启停 |
 | 工作台 | [工作台](workbench-layout.md) | 工程生命周期、CSV、Unity3D 模板、资源写回和 Sims 4 工具 |
 | 运行日志 | [运行日志布局](runtime-log-layout.md) | 隐藏全局顶部栏；任务进度、运行消息、Electron 首屏里程碑、首屏显示门槛诊断、筛选和导出占位行为 |
-| 设置 | [设置页布局](settings-layout.md) | 启动偏好、成就、导出目录、收藏主题和 Blender 配置 |
+| 设置 | [设置页布局](settings-layout.md) | 启动偏好、数据库建库线程数、成就、导出目录、收藏主题和 Blender 配置 |
 | 回收站 | [回收站](../trash-recycle-bin.md) | runtime/trash 下的人物卡与模组恢复、永久删除、筛选、测试残留隔离和独立可滚动工作区 |
 
 ### 3. 按修改任务查找

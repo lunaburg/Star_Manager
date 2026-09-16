@@ -59,15 +59,8 @@ const { ctx } = defineProps({
                   </button>
                   <p v-if="ctx.setup.error" class="setup-message error">{{ ctx.setup.error }}</p>
                   <p v-else-if="ctx.setup.warning" class="setup-message warning">{{ ctx.setup.warning }}</p>
-                  <button class="primary wide-action" type="button" :disabled="!ctx.setup.dirty || ctx.setup.saving || !ctx.setup.loaded" @click="ctx.saveSetup">
-                    {{ ctx.setup.saving ? "保存中…" : "保存配置" }}
-                  </button>
 
-                  <section class="start-plugin-settings" aria-labelledby="start-plugin-settings-title">
-                    <div class="start-plugin-settings-head">
-                      <h2 id="start-plugin-settings-title">插件设置</h2>
-                      <span>{{ ctx.startPluginSettings.loading ? "读取中…" : "重启游戏后生效" }}</span>
-                    </div>
+                  <section class="start-plugin-settings" aria-label="插件设置">
                     <div class="start-plugin-list">
                       <div
                         v-for="plugin in ctx.startPluginSettings.items"
@@ -92,8 +85,10 @@ const { ctx } = defineProps({
                       </div>
                     </div>
                     <p v-if="ctx.startPluginSettings.error" class="setup-message error">{{ ctx.startPluginSettings.error }}</p>
-                    <p v-else-if="ctx.startPluginSettings.notice" class="setup-message warning">{{ ctx.startPluginSettings.notice }}</p>
                   </section>
+                  <button class="primary wide-action" type="button" :disabled="!ctx.setup.dirty || ctx.setup.saving || !ctx.setup.loaded" @click="ctx.saveSetup">
+                    {{ ctx.setup.saving ? "保存中…" : "保存配置" }}
+                  </button>
                 </div>
               </section>
 

@@ -258,7 +258,79 @@ SUPPORTED_API_ROUTES = {
     "/tasks/<task_id>/control",
 }
 
-BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-weighted-database-progress-v1"
+
+# The database task's top-bar progress is a weighted estimate of the phase
+# timings captured in the UI reference run. The mod database service reports
+# its own 0..100 phase scale, so the bridge maps that scale into the first four
+# weighted phases before the character-card database takes the remaining share.
+DATABASE_PHASE_DURATIONS_SECONDS = {
+    "builtin_resource_index": 2.5,
+    "zipmod_scan": 70.6,
+    "item_parse": 472.9,
+    "database_write": 1.1,
+    "character_card_database": 65.9,
+}
+DATABASE_TOTAL_DURATION_SECONDS = sum(DATABASE_PHASE_DURATIONS_SECONDS.values())
+DATABASE_PHASE_ENDS = {}
+_database_progress_total = 0.0
+for _database_phase, _database_duration in DATABASE_PHASE_DURATIONS_SECONDS.items():
+    _database_progress_total += _database_duration
+    DATABASE_PHASE_ENDS[_database_phase] = (
+        _database_progress_total / DATABASE_TOTAL_DURATION_SECONDS * 100
+    )
+DATABASE_MOD_DATABASE_PROGRESS_END = DATABASE_PHASE_ENDS["database_write"]
+
+
+def weighted_mod_database_progress(value: float) -> float:
+    """Map the mod-database service progress to the screenshot's time weights."""
+    raw_progress = max(0.0, min(100.0, float(value or 0)))
+    phase_ranges = (
+        (0.0, 5.0, 0.0, DATABASE_PHASE_ENDS["builtin_resource_index"]),
+        (
+            5.0,
+            12.0,
+            DATABASE_PHASE_ENDS["builtin_resource_index"],
+            DATABASE_PHASE_ENDS["zipmod_scan"],
+        ),
+        (
+            12.0,
+            15.0,
+            DATABASE_PHASE_ENDS["zipmod_scan"],
+            DATABASE_PHASE_ENDS["zipmod_scan"],
+        ),
+        (
+            15.0,
+            70.0,
+            DATABASE_PHASE_ENDS["zipmod_scan"],
+            DATABASE_PHASE_ENDS["item_parse"],
+        ),
+        (
+            70.0,
+            72.0,
+            DATABASE_PHASE_ENDS["item_parse"],
+            DATABASE_PHASE_ENDS["item_parse"],
+        ),
+        (
+            72.0,
+            100.0,
+            DATABASE_PHASE_ENDS["item_parse"],
+            DATABASE_PHASE_ENDS["database_write"],
+        ),
+    )
+    for raw_start, raw_end, weighted_start, weighted_end in phase_ranges:
+        if raw_progress <= raw_end:
+            fraction = (raw_progress - raw_start) / (raw_end - raw_start)
+            return weighted_start + fraction * (weighted_end - weighted_start)
+    return DATABASE_MOD_DATABASE_PROGRESS_END
+
+
+def weighted_character_card_database_progress(value: float) -> float:
+    """Map character-card progress to the final weighted database phase."""
+    raw_progress = max(0.0, min(100.0, float(value or 0)))
+    return DATABASE_MOD_DATABASE_PROGRESS_END + raw_progress / 100 * (
+        100 - DATABASE_MOD_DATABASE_PROGRESS_END
+    )
 
 
 def _safe_author_directory(author: str) -> str:
@@ -444,6 +516,7 @@ def rebuild_affected_character_cards(
     preview_dir: Path,
     affected_mod_guids,
     reporter: WorkflowReporter,
+    worker_count: int | str | None = None,
 ) -> dict | None:
     guids = sorted(
         {
@@ -466,6 +539,7 @@ def rebuild_affected_character_cards(
         lambda _value, message: reporter.message(message),
         mode="incremental",
         affected_mod_guids=guids,
+        worker_count=worker_count,
     )
 
 
@@ -688,6 +762,13 @@ def _ais_card_marker(source_path: Path) -> str | None:
         return read_card_marker(extract_png_extra_data(source_path))
     except Exception:
         return None
+
+
+def _database_worker_options(payload: dict) -> dict[str, object]:
+    """Forward the configured database worker count when a task supplies it."""
+    if "worker_count" not in payload:
+        return {}
+    return {"worker_count": payload.get("worker_count")}
 
 
 def _duplicate_ids_for_guid(guid: str, db_path: Path) -> list[int]:
@@ -938,7 +1019,14 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
             reporter.progress(25 + value * 0.45, 100)
             reporter.message(message)
 
-        build_database(game_dir, db_path, thumbnail_dir, report_database_progress, mode="incremental")
+        build_database(
+            game_dir,
+            db_path,
+            thumbnail_dir,
+            report_database_progress,
+            mode="incremental",
+            **_database_worker_options(payload),
+        )
 
     imported: list[dict] = []
     promoted: list[dict] = []
@@ -1037,9 +1125,23 @@ def _import_external_zipmods(task: TaskState, payload: dict, reporter: WorkflowR
     if copied or imported_cards:
         reporter.message("Refreshing database after duplicate decisions")
         if copied:
-            build_database(game_dir, db_path, thumbnail_dir, lambda _value, message: reporter.message(message), mode="incremental")
+            build_database(
+                game_dir,
+                db_path,
+                thumbnail_dir,
+                lambda _value, message: reporter.message(message),
+                mode="incremental",
+                **_database_worker_options(payload),
+            )
         reporter.message("Refreshing character card dependencies after import")
-        build_card_database(game_dir, db_path, preview_dir, lambda _value, message: reporter.message(message), mode="incremental")
+        build_card_database(
+            game_dir,
+            db_path,
+            preview_dir,
+            lambda _value, message: reporter.message(message),
+            mode="incremental",
+            **_database_worker_options(payload),
+        )
 
     return {
         "ok": True,
@@ -1139,7 +1241,7 @@ def run_task(task: TaskState, payload: dict) -> None:
             reporter.message(f"Building mod database from: {game_dir}")
 
             def report_database_progress(value: int, message: str) -> None:
-                reporter.progress(value * 0.75, 100)
+                reporter.progress(weighted_mod_database_progress(value), 100)
                 reporter.message(message)
 
             stats = build_database(
@@ -1148,11 +1250,12 @@ def run_task(task: TaskState, payload: dict) -> None:
                 thumbnail_dir,
                 report_database_progress,
                 mode=mode,
+                worker_count=payload.get("worker_count"),
             )
             reporter.message("Building character card database")
 
             def report_card_database_progress(value: int, message: str) -> None:
-                reporter.progress(75 + value * 0.25, 100)
+                reporter.progress(weighted_character_card_database_progress(value), 100)
                 reporter.message(message)
 
             card_database_started_at = perf_counter()
@@ -1163,6 +1266,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 report_card_database_progress,
                 mode=mode,
                 affected_mod_guids=stats.get("affected_mod_guids"),
+                worker_count=payload.get("worker_count"),
             )
             mod_timings = stats.get("timings") if isinstance(stats.get("timings"), dict) else {}
             card_timings = card_stats.get("timings") if isinstance(card_stats.get("timings"), dict) else {}
@@ -1229,6 +1333,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 preview_dir,
                 stats.get("affected_mod_guids"),
                 reporter,
+                worker_count=payload.get("worker_count"),
             )
             task.data = {
                 "database_path": str(db_path.resolve()),
@@ -1286,6 +1391,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 preview_dir,
                 task.data.get("affected_mod_guids"),
                 reporter,
+                worker_count=payload.get("worker_count"),
             )
             if card_stats is not None:
                 task.data["card_stats"] = card_stats
@@ -1315,6 +1421,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 preview_dir,
                 report_card_database_progress,
                 mode=mode,
+                worker_count=payload.get("worker_count"),
             )
             task.data = {
                 "database_path": str(db_path.resolve()),
@@ -1406,6 +1513,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR)),
                 report_database_progress,
                 mode="incremental",
+                **_database_worker_options(payload),
             )
             result["stats"] = stats
             task.data = result

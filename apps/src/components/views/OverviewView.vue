@@ -94,11 +94,9 @@ const { ctx } = defineProps({
           <div v-if="ctx.selectedTask" class="task-drawer-backdrop" @click.self="ctx.selectedTask = null">
             <aside class="task-drawer" role="dialog" aria-modal="true" aria-labelledby="task-drawer-title">
               <button class="task-drawer-close" type="button" aria-label="关闭任务详情" @click="ctx.selectedTask = null">×</button>
-              <div class="task-drawer-kicker">TASK REPORT</div>
               <div class="task-drawer-heading">
                 <div>
                   <h2 id="task-drawer-title">{{ ctx.selectedTask.title || ctx.selectedTask.task_type }}</h2>
-                  <code>{{ ctx.selectedTask.task_type }}</code>
                 </div>
                 <span class="badge" :class="ctx.taskStatusClass(ctx.selectedTask)">{{ ctx.taskStatusLabel(ctx.selectedTask) }}</span>
               </div>

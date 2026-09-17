@@ -66,13 +66,38 @@ function toggleAssemblyGroup(groupKey) {
 }
 
 function assemblySlotKey(group, item) {
+  if (group.key === "accessories") return `accessories:${item.partIndex}`;
   return `${group.key}:${item.partIndex}:${item.categoryNo}`;
 }
 
-async function selectAssemblySlot(group, item) {
+function assemblySlotTitle(group, item) {
+  if (group.key === "accessories") return "右键选择饰品部位，点击后筛选该部位饰品";
+  return `点击以筛选可装配到${ctx.gameCurrentSlotLabel(item)}的物品`;
+}
+
+function handleAssemblySlotContextMenu(group, item, event) {
+  if (group.key !== "accessories") return;
+  ctx.openAssemblyAccessoryPartMenu(item, event, group.key);
+}
+
+async function selectAssemblySlot(group, item, event = null) {
   const key = assemblySlotKey(group, item);
   const selected = await ctx.selectAssemblySlot(item, group.key);
-  if (selected) selectedAssemblySlotKey.value = key;
+  if (selected) {
+    selectedAssemblySlotKey.value = key;
+    return;
+  }
+  if (group.key === "accessories" && event && Number(event.clientX) > 0) {
+    ctx.openAssemblyAccessoryPartMenu(item, event, group.key);
+  }
+}
+
+async function assignAccessoryPart(categoryNo) {
+  const menu = ctx.assemblyAccessoryPartMenu;
+  const groupKey = menu?.groupKey || "accessories";
+  const item = menu?.item;
+  const assigned = await ctx.assignAssemblyAccessoryPart(categoryNo);
+  if (assigned && item) selectedAssemblySlotKey.value = assemblySlotKey({ key: groupKey }, item);
 }
 
 async function handleItemClick(row) {
@@ -588,14 +613,15 @@ function modStatusTone(status) {
                     <div v-if="(ctx.currentGameState[group.key] || []).length" class="assembly-slot-list">
                       <article
                         v-for="item in (ctx.currentGameState[group.key] || [])"
-                        :key="`${group.key}-${item.partIndex}-${item.categoryNo}`"
+                        :key="assemblySlotKey(group, item)"
                         class="assembly-slot-row"
                         :class="{ empty: Number(item.localSlot || 0) === 0, selected: selectedAssemblySlotKey === assemblySlotKey(group, item) }"
                         role="button"
                         tabindex="0"
                         :aria-pressed="selectedAssemblySlotKey === assemblySlotKey(group, item)"
-                        :title="`点击以筛选可装配到${ctx.gameCurrentSlotLabel(item)}的物品`"
-                          @click="selectAssemblySlot(group, item)"
+                        :title="assemblySlotTitle(group, item)"
+                          @click="selectAssemblySlot(group, item, $event)"
+                          @contextmenu.prevent="handleAssemblySlotContextMenu(group, item, $event)"
                           @keydown.enter.prevent="selectAssemblySlot(group, item)"
                           @keydown.space.prevent="selectAssemblySlot(group, item)"
                       >
@@ -639,7 +665,7 @@ function modStatusTone(status) {
           <template v-else-if="ctx.libraryMode === 'items'">
             <div class="drawer-hero item-drawer-hero mod-detail-hero">
               <span class="drawer-thumb" :aria-label="ctx.selectedItem.name + ' thumbnail'">
-                <img v-if="ctx.selectedItem.thumbnailUrl && ctx.selectedItem.status === 'ready'" :src="ctx.selectedItem.thumbnailUrl" :alt="ctx.selectedItem.name + ' preview'">
+                <img v-if="ctx.selectedItem.thumbnailUrl && (ctx.isStudioItem(ctx.selectedItem) || ctx.selectedItem.status === 'ready')" :src="ctx.selectedItem.thumbnailUrl" :alt="ctx.selectedItem.name + ' preview'">
               </span>
               <div class="drawer-hero-content">
                 <h3>{{ ctx.selectedItem.name }}</h3>
@@ -676,6 +702,10 @@ function modStatusTone(status) {
                 <div class="kv mod-kv"><span>包标识</span><strong>{{ ctx.selectedItem.raw.zipmod_guid || "-" }}</strong></div>
                 <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '地图编号' : '物品 ID' }}</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.id }}</strong></div>
                 <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '地图注册表' : '分类表' }}</span><strong>{{ ctx.selectedItem.raw.csv_path || ctx.selectedItem.kind }}</strong></div>
+                <template v-if="ctx.isStudioItem(ctx.selectedItem)">
+                  <div class="kv mod-kv"><span>Group</span><strong>{{ ctx.selectedItem.raw.studio_group_name || '-' }} <small class="mono">{{ ctx.selectedItem.raw.studio_group_id || '' }}</small></strong></div>
+                  <div class="kv mod-kv"><span>Category</span><strong>{{ ctx.selectedItem.raw.studio_category_name || '-' }} <small class="mono">{{ ctx.selectedItem.raw.studio_category_id || '' }}</small></strong></div>
+                </template>
                 <div class="kv mod-kv"><span>{{ ctx.isMapSceneItem(ctx.selectedItem) ? '场景资源' : '依赖 Unity3D' }}</span><button type="button" class="unity3d-export-link mono" :disabled="ctx.exportingUnity3dItemId === ctx.selectedItem.id || !ctx.selectedItem.raw?.main_ab" :title="`点击复制导出 Unity3D：${ctx.itemUnity3dFileName(ctx.selectedItem)}`" :aria-label="`点击复制导出 Unity3D：${ctx.itemUnity3dFileName(ctx.selectedItem)}`" @click="ctx.exportItemUnity3d(ctx.selectedItem)"><span>{{ ctx.exportingUnity3dItemId === ctx.selectedItem.id ? '导出中...' : ctx.itemUnity3dFileName(ctx.selectedItem) }}</span><span class="unity3d-export-icon" aria-hidden="true">⇩</span></button></div>
               </div>
             </div>
@@ -722,6 +752,7 @@ function modStatusTone(status) {
               </div>
               <template v-else>
               <ModelPreview
+                v-if="ctx.itemSupportsModelPreview(ctx.selectedItem)"
                 ref="modelPreview"
                 :item-id="ctx.selectedItem.id"
                 :auto-load="selectedItemIsClothing"
@@ -735,20 +766,20 @@ function modStatusTone(status) {
                   <span class="item-tools-count">3 项</span>
                 </div>
                 <div class="item-tools-list">
-                  <div class="item-tool-card">
+                  <div v-if="!ctx.isStudioItem(ctx.selectedItem)" class="item-tool-card">
                     <div class="item-tool-copy">
                       <strong>使用 SB3Utility 打开</strong>
                     </div>
                     <button type="button" :disabled="ctx.openingUnity3dItemId === ctx.selectedItem.id" @click="ctx.openItemUnity3d(ctx.selectedItem)">{{ ctx.openingUnity3dItemId === ctx.selectedItem.id ? "打开中..." : "打开" }}</button>
                   </div>
-                  <div class="item-tool-card">
+                  <div v-if="!ctx.isStudioItem(ctx.selectedItem)" class="item-tool-card">
                     <div class="item-tool-copy">
                       <strong>重建缩略图</strong>
                     </div>
                     <span class="item-tool-status" :class="{ ready: ctx.selectedItem.raw.thumbnail_status === 'ready' }">{{ ctx.selectedItem.raw.thumbnail_status || "未知" }}</span>
                     <button type="button" :disabled="ctx.repairingThumbnailItemId === ctx.selectedItem.id" @click="openThumbnailChoice">{{ ctx.repairingThumbnailItemId === ctx.selectedItem.id ? "导入中..." : "重建" }}</button>
                   </div>
-                  <div class="item-tool-card">
+                  <div v-if="!ctx.isStudioItem(ctx.selectedItem)" class="item-tool-card">
                     <div class="item-tool-copy">
                       <strong>批量缩略图工具</strong>
                     </div>
@@ -818,12 +849,12 @@ function modStatusTone(status) {
                 <div v-else class="related-item-list">
                   <button v-for="item in ctx.selectedModItems" :key="item.id" type="button" class="related-item" @click="ctx.openModItemInItemBrowser(item)">
                     <span class="related-thumb" :class="ctx.badgeClass(item.status)">
-                      <LazyThumbnail v-if="item.thumbnailUrl && item.status === 'ready'" :src="item.thumbnailUrl" :alt="item.name + ' preview'" />
+                      <LazyThumbnail v-if="item.thumbnailUrl && (ctx.isStudioItem(item) || item.status === 'ready')" :src="item.thumbnailUrl" :alt="item.name + ' preview'" />
                       <span v-else>{{ item.status === "ready" ? (ctx.isMapSceneItem(item) ? "MAP" : "PNG") : "MISS" }}</span>
                     </span>
                     <div class="related-item-main">
                       <strong>{{ item.name }}</strong>
-                      <p class="subtext mono">{{ item.kind }}</p>
+                      <p class="subtext mono">{{ ctx.relatedItemCategoryLabel(item) }}</p>
                     </div>
                     <span class="badge" :class="ctx.badgeClass(item.status)">{{ item.status }}</span>
                   </button>
@@ -946,6 +977,36 @@ function modStatusTone(status) {
           {{ ctx.itemGameApplySpec(ctx.itemContextMenu.item).reason }}
         </div>
         <button v-if="!ctx.itemContextMenu.item?.isBuiltin" type="button" class="item-context-action" role="menuitem" @click="ctx.locateSourceMod(ctx.itemContextMenu.item); ctx.closeItemContextMenu()">定位来源模组</button>
+      </div>
+    </div>
+    <div
+      v-if="ctx.assemblyAccessoryPartMenu?.open"
+      class="item-context-backdrop"
+      @mousedown.self="ctx.closeAssemblyAccessoryPartMenu"
+      @contextmenu.prevent
+    >
+      <div
+        class="item-context-menu assembly-accessory-part-menu"
+        :style="{ left: `${ctx.assemblyAccessoryPartMenu.x}px`, top: `${ctx.assemblyAccessoryPartMenu.y}px` }"
+        role="menu"
+        aria-label="选择饰品部位"
+        @mousedown.stop
+      >
+        <div class="item-context-heading">饰品部位</div>
+        <div class="item-context-name">应用到该配饰栏</div>
+        <div class="assembly-accessory-part-grid">
+          <button
+            v-for="option in ctx.gameAccessoryPartOptions"
+            :key="option.categoryNo"
+            type="button"
+            class="assembly-accessory-part-option"
+            :class="{ selected: ctx.assemblyAccessoryPartMenu.categoryNo === option.categoryNo }"
+            role="menuitem"
+            @click="assignAccessoryPart(option.categoryNo)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
       </div>
     </div>
     <div v-if="ctx.itemAccessoryPrompt?.open" class="prompt-backdrop" @click.self="ctx.closeItemAccessoryPrompt">

@@ -528,10 +528,11 @@ def database_status(
                       )
                       OR EXISTS (
                           SELECT 1
-                          FROM mod_items mi
-                          WHERE mi.zipmod_id = zipmods.id
-                            AND mi.parse_status = 'ok'
-                            AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
+                            FROM mod_items mi
+                            WHERE mi.zipmod_id = zipmods.id
+                              AND mi.parse_status = 'ok'
+                              AND COALESCE(mi.item_domain, 'mod') != 'studio'
+                              AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                             AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                       )
                   )
@@ -802,6 +803,7 @@ def list_zipmods(
                     FROM mod_items mi
                     WHERE mi.zipmod_id = zipmods.id
                       AND mi.parse_status = 'ok'
+                      AND COALESCE(mi.item_domain, 'mod') != 'studio'
                       AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                       AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                 )
@@ -828,6 +830,7 @@ def list_zipmods(
                         FROM mod_items mi
                         WHERE mi.zipmod_id = zipmods.id
                           AND mi.parse_status = 'ok'
+                          AND COALESCE(mi.item_domain, 'mod') != 'studio'
                           AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                           AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                     )
@@ -853,6 +856,7 @@ def list_zipmods(
                         FROM mod_items mi
                         WHERE mi.zipmod_id = zipmods.id
                           AND mi.parse_status = 'ok'
+                          AND COALESCE(mi.item_domain, 'mod') != 'studio'
                           AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                           AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                     )
@@ -913,6 +917,7 @@ def list_zipmods(
                     FROM mod_items mi
                     WHERE mi.zipmod_id = zipmods.id
                       AND mi.parse_status = 'ok'
+                      AND COALESCE(mi.item_domain, 'mod') != 'studio'
                       AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                       AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                 )
@@ -987,6 +992,7 @@ def list_zipmods(
                            FROM mod_items mi
                              WHERE mi.zipmod_id = zipmods.id
                                AND mi.parse_status = 'ok'
+                               AND COALESCE(mi.item_domain, 'mod') != 'studio'
                                AND TRIM(COALESCE(mi.kind, '')) NOT IN ('500', '501')
                                AND (mi.thumbnail_status = '' OR mi.thumbnail_status NOT IN ('ready', 'ok'))
                        ) AS thumbnail_issue_count
@@ -1401,6 +1407,7 @@ def list_mod_items(
                     AND COALESCE(mod_items.unity3d_status, '') NOT IN ('missing', 'error')
                     AND (
                         mod_items.thumbnail_status IN ('ready', 'ok')
+                        OR mod_items.item_domain = 'studio'
                         OR TRIM(COALESCE(mod_items.kind, '')) IN ('500', '501')
                     )
                     """
@@ -1414,6 +1421,7 @@ def list_mod_items(
                     """
                     mod_items.parse_status = 'ok'
                     AND COALESCE(mod_items.unity3d_status, '') NOT IN ('missing', 'error')
+                    AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
                     AND TRIM(COALESCE(mod_items.kind, '')) NOT IN ('500', '501')
                     AND (mod_items.thumbnail_status = '' OR mod_items.thumbnail_status NOT IN ('ready', 'ok'))
                     """
@@ -1455,6 +1463,8 @@ def list_mod_items(
                        mod_items.name, mod_items.kind, mod_items.zipmod_author AS author,
                        mod_items.zipmod_guid, mod_items.item_id, mod_items.csv_path,
                        mod_items.main_ab, mod_items.main_data, mod_items.thumb_tex,
+                       mod_items.item_domain, mod_items.studio_group_id, mod_items.studio_group_name,
+                       mod_items.studio_category_id, mod_items.studio_category_name,
                        zipmods.name AS source_mod, zipmods.file_name AS source_file_name,
                        '' AS game_dir, '' AS source_path, '' AS source_asset,
                        '' AS main_manifest, '' AS thumb_ab, mod_items.thumbnail_error,
@@ -1532,6 +1542,8 @@ def list_mod_items(
                        ? AS author, '' AS zipmod_guid, builtin_items.item_id,
                        builtin_items.source_path AS csv_path,
                        builtin_items.main_ab, builtin_items.main_data, builtin_items.thumb_tex,
+                       'builtin' AS item_domain, '' AS studio_group_id, '' AS studio_group_name,
+                       '' AS studio_category_id, '' AS studio_category_name,
                        ? AS source_mod, '' AS source_file_name,
                        builtin_items.game_dir, builtin_items.source_path, builtin_items.source_asset,
                        builtin_items.main_manifest, builtin_items.thumb_ab,
@@ -1605,6 +1617,11 @@ def list_mod_items(
                         "thumb_ab": row["thumb_ab"],
                         "thumb_tex": row["thumb_tex"],
                         "thumbnail_error": row["thumbnail_error"],
+                        "item_domain": row["item_domain"],
+                        "studio_group_id": row["studio_group_id"],
+                        "studio_group_name": row["studio_group_name"],
+                        "studio_category_id": row["studio_category_id"],
+                        "studio_category_name": row["studio_category_name"],
                     }
                 )
                 continue
@@ -1617,7 +1634,7 @@ def list_mod_items(
                     "status": row["status"],
                     "thumbnail_status": row["thumbnail_status"],
                     "thumbnail_cache_path": row["thumbnail_cache_path"],
-                    "thumbnail_url": (
+                    "thumbnail_url": "" if row["item_domain"] == "studio" else (
                         thumbnail_url_for_cache_path(row["thumbnail_cache_path"])
                         or thumbnail_recovery_url_for_item(
                             row["id"],
@@ -1638,6 +1655,11 @@ def list_mod_items(
                     "item_id": row["item_id"],
                     "csv_path": row["csv_path"],
                     "main_ab": row["main_ab"],
+                    "item_domain": row["item_domain"],
+                    "studio_group_id": row["studio_group_id"],
+                    "studio_group_name": row["studio_group_name"],
+                    "studio_category_id": row["studio_category_id"],
+                    "studio_category_name": row["studio_category_name"],
                 }
             )
         return {

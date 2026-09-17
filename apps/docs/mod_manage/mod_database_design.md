@@ -7,7 +7,7 @@
 当前阶段按模组、物品和游戏原版资源三个索引域组织：
 
 - `zipmods`：通过读取 zipmod 内的 `manifest.xml` 构建，记录模组级信息。
-- `mod_items`：通过读取 zipmod 或解包目录中的 CSV 构建，记录物品级信息；也承载可识别的非物品资源登记，例如 kPlug 地图场景。
+- `mod_items`：通过读取 zipmod 或解包目录中的 CSV 构建，记录物品级信息；也承载可识别的非物品资源登记，例如 kPlug 地图场景和 Studio 自定义物品。
 - `builtin_items`：通过扫描当前游戏目录 `abdata/list/characustom/*.unity3d` 中的 `ChaListData` 构建，记录原版服装、配饰等可与 Coordinate 匹配的物品及其缩略图/资源状态。
 
 真实数据来源仍然是文件系统、zipmod、`manifest.xml` 和 CSV。数据库只保存扫描后的索引、解析状态和必要的定位信息，方便前端列表、搜索、筛选和详情展示。
@@ -175,6 +175,8 @@ zipmod 内的 abdata/list/**/*.csv
 解包模组目录下的 abdata/list/**/*.csv
 ```
 
+Studio 自定义物品额外扫描 `abdata/studio/info/**/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`。适配器先建立 Group/Category 映射，再解析 ItemList；Studio 行统一写入 `kind = __studio_item__`、`item_domain = studio`，作为物品库单一一级“Studio”类别。`BigCategory` / `MidCategory` 仅用于详情显示，不参与筛选、排序或角色服装依赖匹配。
+
 此外，扫描器识别 `abdata/studio/info/kPlug/Map_kPlug.csv` 中以 `MAPMOD` 标记的地图登记行，以及 `abdata/map/list/mapinfo/*.unity3d` 本体地图信息包：
 
 - 仅有 kPlug 注册时写入 `kind = __map_scene__`，即“地图 / 工作室”。
@@ -215,6 +217,11 @@ zipmod_author       模组作者，辅助索引
 csv_path            记录当前物品信息保存在模组文件夹的哪个csv中
 item_id             CSV 的 ID 字段 
 kind                CSV 元信息第一行的列表类别值，只记录白名单类别
+item_domain         mod / studio；Studio 物品使用 studio
+studio_group_id     Studio ItemList.BigCategory，普通物品为空
+studio_group_name   Studio ItemGroup 映射得到的名称，普通物品为空
+studio_category_id  Studio ItemList.MidCategory，普通物品为空
+studio_category_name Studio ItemCategory 映射得到的名称，普通物品为空
 name                CSV 的 Name 字段 （物品在游戏中的名字）
 main_manifest       CSV 的 MainManifest 字段 （unity3d文件根路径）
 main_ab             CSV 的 MainAB 字段 （unity3d文件路径）
@@ -291,15 +298,17 @@ updated_at          最近更新时间
 
 ### 唯一性
 
-推荐用 `zipmods.guid + item_id` 定义唯一物品。`zipmods.guid` 标识物品所属模组，`item_id` 对应 CSV 的 `ID` 字段；同一个模组内，同一个 `item_id` 应视为同一个物品。
+推荐用 `zipmods.guid + kind + csv_path + item_id` 定义唯一物品。`zipmods.guid` 标识物品所属模组，`item_id` 对应 CSV 的 `ID` 字段，`csv_path` 保留列表来源。Studio 的多个 ItemList 可以复用局部 ID，且所有 Studio 项共用 `kind = __studio_item__`，因此不能省略 `csv_path`。
 
 ```text
-unique(zipmod_guid, item_id)
+unique(zipmod_guid, kind, csv_path, item_id)
 ```
 
-`csv_path` 用于记录该物品来自哪个 CSV，作为来源定位和诊断信息，不参与物品业务唯一性。若扫描时发现同一 `zipmod_guid + item_id` 出现在多个 CSV 或多行中，应记录为重复物品状态或诊断项，由后续规则决定保留哪一条。
+`csv_path` 用于记录该物品来自哪个 CSV，作为来源定位和唯一性的一部分。若扫描时发现同一 `zipmod_guid + kind + csv_path + item_id` 出现在多行中，应记录为重复物品状态或诊断项，由后续规则决定保留哪一条。
 
 缩略图缓存是 `mod_items` 的派生字段，不单独建立缩略图数据库。构建数据库时根据 `thumb_ab` 和 `thumb_tex` 提取缩略图，缓存到运行时缩略图目录，并把缓存地址写入 `thumbnail_cache_path`。如果提取失败，不应阻断 `mod_items` 入库，而是写入 `thumbnail_status` 和 `thumbnail_error`。
+
+Studio 物品不显示缩略图：建库时不读取 `abdata/studio_thumbnails/`、不解析 Unity3D 贴图，也不生成缓存；其字段固定为 `thumbnail_status = not_applicable`、空缓存路径和空缩略图 URL。它们不计入缩略图异常、告警或修复任务。
 
 可建立索引：
 
@@ -635,12 +644,20 @@ Summary priority is `error` > `missing` > `not_in_mod` > `in_mod` > empty. An ex
 
 **适用边界**：当前只把字段值以 `.unity3d` 结尾的 `TexAB` 作为外部贴图引用；缺失 `TexAB` 不作为错误，公共目录范围仅按 `chara/00`–`chara/60` 的目录名识别，且该范围对 `MainAB` 和 `TexAB` 均适用。`ThumbAB` 仍属于缩略图依赖，只有与 `MainAB` 共用且主资源不可读时才升级为主 Unity3D 错误。扫描仍按 CSV 引用定位，不会把 mod 内未被引用的孤立 `.unity3d` 自动计入。
 
+### Studio 物品不计入模组缩略图缺失（2026-09-17）
+
+- 背景：包含工作室物品的 zipmod 会被标成警告，并出现在“缩略图缺失”筛选中；用户截图中 `milk217b021` 关联物品只有 Studio 条目，仍被记为缩略图问题。
+- 根因：物品浏览和诊断已经把 `item_domain = studio` 排除在缩略图问题外，但模组列表的 `thumbnail_issue_count`、`status=thumbnail/warning/abnormal` 仍把 Studio 的 `not_applicable` 当成缺失。
+- 解决方案：模组级缩略图计数和筛选统一忽略 Studio 物品；纯 Studio 模组不再因此进入警告或缩略图缺失筛选。
+- 验证结果：`StudioItemQueryTests` 覆盖 zipmod 计数和 `thumbnail/warning/normal` 筛选；相关查询测试通过。
+- 适用边界：只影响模组级缩略图问题统计与筛选。真实缺少缩略图的服装/头发等物品仍会标记警告。
+
 ### Zipmod display and filter status
 
 The renderer maps each zipmod row to a display state:
 
 - `错误`: `scan_status` is `missing_manifest`, `invalid`, or `invalid_manifest`; or `unity3d_status` is `missing` / `error`; or `unity3d_missing_count > 0`.
-- `警告`: author is empty; or `unity3d_not_in_mod_count > 0` (including `game_abdata` and `other_zipmod`); or there are duplicate zipmods for the same GUID; or `thumbnail_issue_count > 0`.
+- `警告`: author is empty; or `unity3d_not_in_mod_count > 0` (including `game_abdata` and `other_zipmod`); or there are duplicate zipmods for the same GUID; or `thumbnail_issue_count > 0`. Studio items (`item_domain = studio`) are not counted as thumbnail issues.
 - `正常`: `scan_status = ok` and no earlier error/warning condition matched.
 - `读取失败`: `scan_status = error`.
 - `已失效`: `scan_status = stale`.
@@ -650,5 +667,6 @@ Backend zipmod list filters use similar but not identical query groups:
 - `status=normal`: `scan_status = ok`, author is present, no duplicate GUID, no thumbnail issue items, no missing/error Unity3D, and no `in_game`/`not_in_mod` Unity3D references.
 - `status=abnormal`: any non-`ok` scan status, empty author, missing/error Unity3D, any Unity3D resource outside the current zipmod, duplicate GUID, or thumbnail issue item.
 - `status=warning`: empty author, any Unity3D resource outside the current zipmod, duplicate GUID, or thumbnail issue item.
+- Thumbnail issue filters and `thumbnail_issue_count` ignore Studio items, because they do not use thumbnails.
 - `status=error`: `scan_status = missing_manifest`, `unity3d_status = missing/error`, or `unity3d_missing_count > 0`.
 - `status=read_error`: the zipmod scan cannot read a manifest GUID, including missing `manifest.xml`, invalid manifest XML, missing/empty `<guid>`, or unreadable/bad zip files. This replaces the older separate `missing_manifest` and `read_error` filter entries in the UI.

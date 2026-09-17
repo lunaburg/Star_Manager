@@ -15,6 +15,8 @@ import itemKindSocks from "./assets/item-kind-socks.png";
 import itemKindTights from "./assets/item-kind-tights.png";
 import itemKindTop from "./assets/item-kind-top.png";
 import itemKindUnderwear from "./assets/item-kind-underwear.png";
+import mapSceneDefaultThumbnail from "./assets/item-kind-map-default.png";
+import studioItemDefaultThumbnail from "./assets/item-kind-studio-default.png";
 import brandLogo from "../build-resources/brand-logo.png";
 import wallpaperDefault from "./assets/wallpaper-default.jpg";
 
@@ -593,6 +595,7 @@ const selectedSceneDetail = ref(null);
 const sceneDetailTab = ref("详情");
 const sceneSideMode = ref("tree");
 const cardDependencyFilter = ref("all");
+const cardFavoriteFilter = ref(false);
 const selectedCardFolder = ref("");
 const selectedCardDetailPath = ref("");
 const characterSideMode = ref("tree");
@@ -775,6 +778,7 @@ const POSE_ITEM_KIND_CODES = new Set(["500", "501"]);
 const MAP_SCENE_KIND = "__map_scene__";
 const GAME_MAP_SCENE_KIND = "__game_map_scene__";
 const DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__";
+const STUDIO_ITEM_KIND = "__studio_item__";
 const MAP_SCENE_KIND_CODES = new Set([MAP_SCENE_KIND, GAME_MAP_SCENE_KIND, DUAL_MAP_SCENE_KIND]);
 const MAP_SCENE_FILTER_KIND = "__map_filter__";
 const MAP_SCENE_FILTER_KINDS = [MAP_SCENE_FILTER_KIND];
@@ -898,8 +902,13 @@ const GAME_CURRENT_GROUPS = [
   { key: "hairs", label: "头发栏位", description: "后发、前发、侧发与扩展发" },
   { key: "faces", label: "面部栏位", description: "脸模、眼睛与妆容细节" },
   { key: "bodies", label: "身体栏位", description: "身体肌肤、彩绘与身体细节" },
-  { key: "accessories", label: "配饰栏位", description: "角色当前占用的配饰槽" }
+  { key: "accessories", label: "配饰栏位", description: "20 个通用饰品槽，每个槽可装配 13 种部位之一" }
 ];
+const GAME_ACCESSORY_NONE_CATEGORY_NO = 350;
+const GAME_ACCESSORY_PART_OPTIONS = Object.entries(GAME_ACCESSORY_SLOT_LABELS).map(([categoryNo, label]) => ({
+  categoryNo: Number(categoryNo),
+  label
+}));
 const GAME_ACCESSORY_SLOT_OPTIONS = Array.from({ length: 20 }, (_, slotNo) => ({
   value: slotNo,
   label: `配饰槽 ${slotNo + 1}（slotNo ${slotNo}）`
@@ -926,6 +935,7 @@ const ITEM_KIND_LABELS = {
   [MAP_SCENE_KIND]: "地图 / 工作室",
   [GAME_MAP_SCENE_KIND]: "地图 / 本体",
   [DUAL_MAP_SCENE_KIND]: "地图 / 本体 + 工作室",
+  [STUDIO_ITEM_KIND]: "Studio",
   8: "男/身体/人体彩绘",
   110: "男/面部/眼睛",
   111: "男/面部/眉毛",
@@ -1029,6 +1039,14 @@ const TOPBAR_KIND_GROUPS = [
       { key: "map", label: "地图", kinds: [MAP_SCENE_FILTER_KIND] },
       { key: "pattern", label: "图案", kinds: ["348"] }
     ]
+  },
+  {
+    key: "studio",
+    label: "Studio",
+    tone: "studio",
+    categories: [
+      { key: "studio", label: "Studio", kinds: [STUDIO_ITEM_KIND] }
+    ]
   }
 ];
 
@@ -1088,20 +1106,8 @@ const POSE_ITEM_THUMBNAILS = {
   <text x="14" y="24" fill="#55233a" font-family="Verdana, sans-serif" font-size="14" font-weight="700">F</text>
 </svg>`)
 };
-const MAP_SCENE_THUMBNAIL = svgDataUrl(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
-  <defs>
-    <linearGradient id="bg" x1="12" y1="8" x2="84" y2="88" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1c4b67"/>
-      <stop offset="1" stop-color="#9b77d8"/>
-    </linearGradient>
-  </defs>
-  <rect width="96" height="96" rx="14" fill="url(#bg)"/>
-  <path d="M13 66 33 43l15 16 14-23 21 30v16H13Z" fill="#d9f4ff" opacity=".92"/>
-  <path d="m22 67 11-24 8 16 12-29 8 29 14-11" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
-  <circle cx="72" cy="23" r="8" fill="#dffbff" opacity=".9"/>
-  <text x="13" y="27" fill="#fff" font-family="Verdana, sans-serif" font-size="13" font-weight="700">MAP</text>
-</svg>`);
+const MAP_SCENE_THUMBNAIL = mapSceneDefaultThumbnail;
+const STUDIO_ITEM_THUMBNAIL = studioItemDefaultThumbnail;
 const itemRows = ref([]);
 const modRows = ref([]);
 const selectedItem = ref(null);
@@ -1112,6 +1118,7 @@ const itemGameNotice = reactive({ type: "", message: "" });
 const itemFacePrompt = reactive({ open: false, item: null, facePartNo: 0, busy: false, error: "" });
 const itemBodyPrompt = reactive({ open: false, item: null, bodyPartNo: 0, busy: false, error: "" });
 const assemblyMode = ref(false);
+const assemblyUiActive = computed(() => assemblyMode.value && isItemLibraryView.value);
 watch([isItemLibraryView, assemblyMode], () => {
   if (!isItemLibraryView.value || assemblyMode.value) {
     itemKindLevel.value = "categories";
@@ -1128,6 +1135,16 @@ const assemblyTargetSlot = reactive({
   hairSlotNo: null,
   facePartNo: null,
   bodyPartNo: null
+});
+const assemblyAccessorySlotTypes = reactive({});
+const assemblyAccessoryPartMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  slotNo: null,
+  groupKey: "accessories",
+  categoryNo: null,
+  item: null
 });
 const currentGameState = reactive({
   loading: false,
@@ -1259,12 +1276,23 @@ watch(assemblyMode, () => {
   assemblyCharacterPickerOpen.value = false;
 });
 
+watch(assemblyUiActive, (active) => {
+  if (!active) {
+    assemblyCharacterPickerOpen.value = false;
+    closeAssemblyAccessoryPartMenu();
+  }
+});
+
 watch([
   () => assemblyContext.scene,
   () => assemblyContext.available,
   () => currentGameState.available
 ], () => {
   assemblyCharacterPickerOpen.value = false;
+  if (!assemblyContext.available || !currentGameState.available) {
+    resetAssemblyAccessorySlotTypes();
+    closeAssemblyAccessoryPartMenu();
+  }
 });
 let currentGameStatePollTimer = null;
 let currentGameStateRequestSeq = 0;
@@ -1501,12 +1529,12 @@ const cardTagPromptLibraryTags = computed(() => {
     .filter((tag) => !query || tag.toLocaleLowerCase().includes(query))
     .sort((left, right) => left.localeCompare(right, "zh-CN"));
 });
-const visibleCards = computed(() => {
+const baseVisibleCards = computed(() => {
   if (cardDependencyFilter.value === "missing") {
     return cards.value.filter((card) => Number(card.missingCount || 0) > 0);
   }
-  if (cardDependencyFilter.value === "favorite") {
-    return cards.value.filter((card) => card.favorite);
+  if (cardDependencyFilter.value === "normal") {
+    return cards.value.filter((card) => Number(card.missingCount || 0) === 0);
   }
   if (cardDependencyFilter.value.startsWith("tag:")) {
     const targetTag = cardDependencyFilter.value.slice(4).toLocaleLowerCase();
@@ -1517,12 +1545,19 @@ const visibleCards = computed(() => {
   }
   return cards.value;
 });
+const visibleCards = computed(() => {
+  if (!cardFavoriteFilter.value) return baseVisibleCards.value;
+  return baseVisibleCards.value.filter((card) => card.favorite);
+});
 const cardBrowserCountText = computed(() => {
+  if (cardFavoriteFilter.value) {
+    return `收藏 ${visibleCards.value.length} / ${baseVisibleCards.value.length}`;
+  }
   if (cardDependencyFilter.value === "missing") {
     return `依赖缺失 ${visibleCards.value.length} / ${cards.value.length}`;
   }
-  if (cardDependencyFilter.value === "favorite") {
-    return `已收藏 ${visibleCards.value.length} / ${cards.value.length}`;
+  if (cardDependencyFilter.value === "normal") {
+    return `正常 ${visibleCards.value.length} / ${cards.value.length}`;
   }
   if (cardDependencyFilter.value.startsWith("tag:")) {
     if (cardTagFilter.scope === "library") {
@@ -3312,7 +3347,6 @@ async function refreshCurrentCardFolder() {
 }
 
 function setLibraryMode(mode) {
-  if (mode !== "items" && assemblyMode.value) setAssemblyMode(false);
   libraryMode.value = mode;
   if (mode === "items") {
     exitModBulkMode();
@@ -3328,8 +3362,27 @@ function isPoseItemKind(kind) {
   return POSE_ITEM_KIND_CODES.has(String(kind || "").trim());
 }
 
-function itemFallbackThumbnailUrl(kind) {
+const NO_MODEL_PREVIEW_KIND_CODES = new Set(
+  TOPBAR_KIND_GROUPS.flatMap((group) =>
+    group.categories
+      .filter((category) => ["face", "body", "pose", "pattern"].includes(category.key))
+      .flatMap((category) => category.kinds.map((kind) => String(kind)))
+  )
+);
+
+function itemKindCode(item) {
+  return String(item?.kindCode || item?.raw?.kind || "").trim();
+}
+
+function itemSupportsModelPreview(item) {
+  if (!item) return false;
+  if (isMapSceneItem(item)) return true;
+  return !NO_MODEL_PREVIEW_KIND_CODES.has(itemKindCode(item));
+}
+
+function itemFallbackThumbnailUrl(kind, itemDomain = "") {
   const key = String(kind || "").trim();
+  if (String(itemDomain || "").trim() === "studio" || key === STUDIO_ITEM_KIND) return STUDIO_ITEM_THUMBNAIL;
   if (MAP_SCENE_KIND_CODES.has(key)) return MAP_SCENE_THUMBNAIL;
   return POSE_ITEM_THUMBNAILS[key] || "";
 }
@@ -3344,9 +3397,10 @@ function setCardBrowserMode(mode) {
   if (nextMode === "scene") void ensureSceneLibraryLoaded();
 }
 
-function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind = "") {
+function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind = "", itemDomain = "mod") {
   if (unity3dStatus === "missing" || unity3dStatus === "error") return "error";
   if (status && status !== "ok") return "parse";
+  if (itemDomain === "studio") return "ready";
   if (isPoseItemKind(kind)) return "ready";
   if (thumbnailStatus && thumbnailStatus !== "ready" && thumbnailStatus !== "ok") return "thumb";
   return "ready";
@@ -3354,6 +3408,18 @@ function normalizeItemStatus(status, thumbnailStatus, unity3dStatus = "", kind =
 
 function isMapSceneItem(item) {
   return MAP_SCENE_KIND_CODES.has(String(item?.kindCode || item?.raw?.kind || "").trim());
+}
+
+function isStudioItem(item) {
+  return String(item?.itemDomain || item?.raw?.item_domain || "").trim() === "studio";
+}
+
+function relatedItemCategoryLabel(item) {
+  if (!isStudioItem(item)) return item?.kind || "-";
+  const group = String(item?.raw?.studio_group_name || item?.raw?.studio_group_id || "").trim();
+  const category = String(item?.raw?.studio_category_name || item?.raw?.studio_category_id || "").trim();
+  if (group && category) return group + "/" + category;
+  return group || category || item?.kind || "Studio";
 }
 
 function itemKindLabel(kind) {
@@ -3367,20 +3433,25 @@ function itemKindLabel(kind) {
 function mapModItemRow(row) {
   const sourceType = String(row.source_type || "mod").trim() || "mod";
   const isBuiltin = sourceType === "builtin";
-  const thumbnailUrl = backendAssetUrl(row.thumbnail_url) || itemFallbackThumbnailUrl(row.kind);
+  const itemDomain = String(row.item_domain || (isBuiltin ? "builtin" : "mod")).trim() || "mod";
+  const thumbnailUrl = itemDomain === "studio"
+    ? itemFallbackThumbnailUrl(row.kind, itemDomain)
+    : backendAssetUrl(row.thumbnail_url) || itemFallbackThumbnailUrl(row.kind, itemDomain);
   return {
     id: isBuiltin ? `builtin:${row.id}` : row.id,
     dbId: row.id,
     zipmodId: row.zipmod_id || null,
     sourceType,
     isBuiltin,
-    status: normalizeItemStatus(row.status, row.thumbnail_status, row.unity3d_status, row.kind),
+    status: normalizeItemStatus(row.status, row.thumbnail_status, row.unity3d_status, row.kind, itemDomain),
     name: row.name || `(item ${row.item_id || row.id})`,
     kind: itemKindLabel(row.kind),
     kindCode: row.kind || "",
     author: row.author || (isBuiltin ? "游戏本体" : "-"),
     sourceMod: row.source_mod || (isBuiltin ? "游戏本体" : row.zipmod_guid) || "-",
     thumbnailUrl,
+    itemDomain,
+    isStudio: itemDomain === "studio",
     fallbackThumbnail: !backendAssetUrl(row.thumbnail_url) && Boolean(thumbnailUrl),
     raw: row
   };
@@ -3711,6 +3782,8 @@ function resetAssemblyContext(error = "") {
   Object.assign(assemblyContext, normalizeAssemblyContext(null), { error });
   resetAssemblyCharacterTarget();
   resetAssemblyTargetSlot();
+  resetAssemblyAccessorySlotTypes();
+  closeAssemblyAccessoryPartMenu();
   resetCurrentGameState();
   itemGameNotice.type = "";
   itemGameNotice.message = "";
@@ -3797,6 +3870,8 @@ async function selectAssemblyCharacter(target, character = null) {
     resetAssemblyCharacterTarget();
   }
   resetAssemblyTargetSlot();
+  resetAssemblyAccessorySlotTypes();
+  closeAssemblyAccessoryPartMenu();
   itemGameNotice.type = "";
   itemGameNotice.message = "";
   const state = currentStateForAssemblyTarget();
@@ -3828,6 +3903,76 @@ function resetAssemblyTargetSlot() {
   });
 }
 
+function resetAssemblyAccessorySlotTypes() {
+  Object.keys(assemblyAccessorySlotTypes).forEach((slotNo) => {
+    delete assemblyAccessorySlotTypes[slotNo];
+  });
+}
+
+function closeAssemblyAccessoryPartMenu() {
+  assemblyAccessoryPartMenu.open = false;
+  assemblyAccessoryPartMenu.slotNo = null;
+  assemblyAccessoryPartMenu.groupKey = "accessories";
+  assemblyAccessoryPartMenu.categoryNo = null;
+  assemblyAccessoryPartMenu.item = null;
+}
+
+function accessorySlotNoFromItem(item) {
+  const slotNo = Number(item?.partIndex);
+  return Number.isInteger(slotNo) && slotNo >= 0 && slotNo <= 19 ? slotNo : null;
+}
+
+function isAccessoryCategoryNo(categoryNo) {
+  return GAME_ACCESSORY_CATEGORY_NOS.has(String(categoryNo));
+}
+
+function isAccessorySlotItem(item, groupKey = "") {
+  return String(groupKey || "") === "accessories"
+    || String(item?.partType || "") === "accessory"
+    || Number(item?.categoryNo) === GAME_ACCESSORY_NONE_CATEGORY_NO
+    || isAccessoryCategoryNo(item?.categoryNo);
+}
+
+function assignedAccessoryCategoryNo(slotNo) {
+  const assigned = Number(assemblyAccessorySlotTypes[slotNo]);
+  return isAccessoryCategoryNo(assigned) ? assigned : null;
+}
+
+function accessoryCategoryNoForItem(item) {
+  const slotNo = accessorySlotNoFromItem(item);
+  const assigned = slotNo == null ? null : assignedAccessoryCategoryNo(slotNo);
+  if (assigned != null) return assigned;
+  const current = Number(item?.categoryNo);
+  return isAccessoryCategoryNo(current) ? current : null;
+}
+
+function openAssemblyAccessoryPartMenu(item, event, groupKey = "accessories") {
+  if (!assemblyMode.value || !item || !event) return;
+  const slotNo = accessorySlotNoFromItem(item);
+  if (slotNo == null) return;
+  const menuWidth = 332;
+  const menuHeight = 236;
+  assemblyAccessoryPartMenu.item = item;
+  assemblyAccessoryPartMenu.slotNo = slotNo;
+  assemblyAccessoryPartMenu.groupKey = String(groupKey || "accessories");
+  assemblyAccessoryPartMenu.categoryNo = accessoryCategoryNoForItem(item);
+  assemblyAccessoryPartMenu.x = Math.max(8, Math.min(Number(event.clientX) || 8, window.innerWidth - menuWidth - 8));
+  assemblyAccessoryPartMenu.y = Math.max(8, Math.min(Number(event.clientY) || 8, window.innerHeight - menuHeight - 8));
+  assemblyAccessoryPartMenu.open = true;
+}
+
+async function assignAssemblyAccessoryPart(categoryNo) {
+  const nextCategoryNo = Number(categoryNo);
+  const slotNo = assemblyAccessoryPartMenu.slotNo;
+  const item = assemblyAccessoryPartMenu.item;
+  const groupKey = assemblyAccessoryPartMenu.groupKey || "accessories";
+  if (!isAccessoryCategoryNo(nextCategoryNo) || slotNo == null || !item) return false;
+  assemblyAccessorySlotTypes[slotNo] = nextCategoryNo;
+  assemblyAccessoryPartMenu.categoryNo = nextCategoryNo;
+  closeAssemblyAccessoryPartMenu();
+  return selectAssemblySlot(item, groupKey);
+}
+
 function facePartNoFromCurrentItem(item) {
   const categoryNo = Number(item?.categoryNo);
   const partIndex = Number(item?.partIndex);
@@ -3847,11 +3992,16 @@ function bodyPartNoFromCurrentItem(item) {
 }
 
 function gameCurrentSlotLabel(item) {
+  if (isAccessorySlotItem(item)) {
+    const accessoryCategoryNo = accessoryCategoryNoForItem(item);
+    if (accessoryCategoryNo != null) return `${GAME_ACCESSORY_SLOT_LABELS[accessoryCategoryNo]}配饰`;
+    const slotNo = accessorySlotNoFromItem(item);
+    return slotNo == null ? "配饰栏位" : `配饰槽 ${slotNo + 1}`;
+  }
   const categoryNo = Number(item?.categoryNo);
   if (GAME_CLOTHING_SLOT_LABELS[categoryNo]) return `${GAME_CLOTHING_SLOT_LABELS[categoryNo]}栏位`;
   const hairSlot = gameHairSlotOption(categoryNo);
   if (hairSlot) return `${hairSlot.label}栏位`;
-  if (GAME_ACCESSORY_SLOT_LABELS[categoryNo]) return `${GAME_ACCESSORY_SLOT_LABELS[categoryNo]}配饰`;
   return GAME_CURRENT_SLOT_LABELS[categoryNo] || `CategoryNo ${categoryNo || "-"}`;
 }
 
@@ -3878,6 +4028,8 @@ function setAssemblyMode(enabled) {
   stopCurrentGameStatePolling();
   assemblyMode.value = nextValue;
   resetAssemblyTargetSlot();
+  resetAssemblyAccessorySlotTypes();
+  closeAssemblyAccessoryPartMenu();
   itemGameNotice.type = "";
   itemGameNotice.message = "";
   itemGameApply.error = "";
@@ -3898,9 +4050,6 @@ function setAssemblyMode(enabled) {
 
 async function selectAssemblySlot(item, groupKey = "") {
   if (!assemblyMode.value || !item) return false;
-  const categoryNo = Number(item.categoryNo);
-  if (!Number.isSafeInteger(categoryNo) || categoryNo <= 0) return false;
-
   const normalizedGroupKey = String(groupKey || {
     hair: "hairs",
     clothes: "clothes",
@@ -3908,8 +4057,24 @@ async function selectAssemblySlot(item, groupKey = "") {
     body: "bodies",
     accessory: "accessories"
   }[String(item.partType || "")] || "");
+  const isAccessoryGroup = isAccessorySlotItem(item, normalizedGroupKey);
+  let categoryNo = Number(item.categoryNo);
+  let accessorySlotNo = null;
+  if (isAccessoryGroup) {
+    accessorySlotNo = accessorySlotNoFromItem(item);
+    if (accessorySlotNo == null) return false;
+    const resolvedCategoryNo = accessoryCategoryNoForItem(item);
+    if (resolvedCategoryNo == null) {
+      itemGameNotice.type = "info";
+      itemGameNotice.message = "请先右键该配饰栏，选择要装配的饰品部位。";
+      return false;
+    }
+    categoryNo = resolvedCategoryNo;
+  } else if (!Number.isSafeInteger(categoryNo) || categoryNo <= 0) {
+    return false;
+  }
+
   const hairSlot = gameHairSlotOption(categoryNo);
-  const accessorySlotNo = Number(item.partIndex);
   const facePartNo = facePartNoFromCurrentItem(item);
   const bodyPartNo = bodyPartNoFromCurrentItem(item);
   Object.assign(assemblyTargetSlot, {
@@ -3918,12 +4083,7 @@ async function selectAssemblySlot(item, groupKey = "") {
     partIndex: Number.isSafeInteger(Number(item.partIndex)) ? Number(item.partIndex) : null,
     categoryNo,
     label: gameCurrentSlotLabel(item),
-    accessorySlotNo: GAME_ACCESSORY_CATEGORY_NOS.has(String(categoryNo))
-      && Number.isInteger(accessorySlotNo)
-      && accessorySlotNo >= 0
-      && accessorySlotNo <= 19
-      ? accessorySlotNo
-      : null,
+    accessorySlotNo: isAccessoryGroup ? accessorySlotNo : null,
     hairSlotNo: hairSlot?.value ?? null,
     facePartNo: GAME_FACE_EYE_CATEGORY_NOS.has(String(categoryNo)) ? facePartNo : null,
     bodyPartNo: GAME_BODY_PAINT_CATEGORY_NOS.has(String(categoryNo)) ? bodyPartNo : null
@@ -4284,6 +4444,9 @@ async function applyItemToGame(item, { accessorySlotNo = null, hairSlotNo = null
       if (command.status === "succeeded") {
         itemGameNotice.type = "success";
         itemGameNotice.message = `已将「${item.name}」发送到当前角色。游戏资源加载可能还需要片刻。`;
+        if (spec.type === "accessory" && Number.isInteger(accessorySlotNo)) {
+          assemblyAccessorySlotTypes[accessorySlotNo] = spec.categoryNo;
+        }
         if (assemblyMode.value) void refreshCurrentGameState({ silent: true });
         const mappingLabel = spec.isBuiltin ? `localSlot=${spec.localSlot}` : `slot=${spec.originalSlot}`;
         const slotLabel = spec.type === "accessory"
@@ -5088,6 +5251,7 @@ const missingThumbnailTargetItems = computed(() => {
   const sourceId = Number(selectedItem.value?.id || 0);
   return itemRows.value.filter((item) => {
     if (Number(item.id) === sourceId) return false;
+    if (item.itemDomain === "studio") return false;
     const thumbnailStatus = String(item.raw?.thumbnail_status || "");
     return item.status === "thumb" || !["ready", "ok"].includes(thumbnailStatus);
   });
@@ -8657,7 +8821,7 @@ async function loadSelectedCardToGame() {
 
 function setCardDependencyFilter(value) {
   const normalizedValue = String(value || "");
-  cardDependencyFilter.value = ["missing", "favorite"].includes(normalizedValue) || normalizedValue.startsWith("tag:")
+  cardDependencyFilter.value = ["missing", "normal"].includes(normalizedValue) || normalizedValue.startsWith("tag:")
     ? normalizedValue
     : "all";
   cardTagFilter.search = cardDependencyFilter.value.startsWith("tag:")
@@ -8670,6 +8834,10 @@ function setCardDependencyFilter(value) {
   if (cardTagFilter.scope === "library" && cardDependencyFilter.value.startsWith("tag:")) {
     void loadLibraryCardsByTag(cardDependencyFilter.value.slice(4));
   }
+  resetCardFilterSelectionState();
+}
+
+function resetCardFilterSelectionState() {
   selectedCards.value = new Set();
   selectedCardDetailPath.value = "";
   selectedCardProfile.value = null;
@@ -8707,6 +8875,11 @@ function setCardDependencyFilter(value) {
   missingItemPrompt.property = "";
   resetMissingItemPromptRemote();
   cardBulkMode.value = false;
+}
+
+function toggleCardFavoriteFilter() {
+  cardFavoriteFilter.value = !cardFavoriteFilter.value;
+  resetCardFilterSelectionState();
 }
 
 async function exportSelectedCardCoordinate() {
@@ -9174,6 +9347,7 @@ const appCtx = reactive({
   cardTagFilterSuggestions,
   cardTagOptions,
   cardDependencyFilter,
+  cardFavoriteFilter,
   cardDependencyExportPrompt,
   cardDetailTab,
   cardDependencyRemote,
@@ -9335,6 +9509,9 @@ const appCtx = reactive({
   loadItemFilters,
   workbenchItemCategoryOptions,
   isMapSceneItem,
+  isStudioItem,
+  itemSupportsModelPreview,
+  relatedItemCategoryLabel,
   itemRows,
   itemTab,
   launchExecutable,
@@ -9455,6 +9632,8 @@ const appCtx = reactive({
   currentGameState,
   gameCurrentGroups: GAME_CURRENT_GROUPS,
   gameAccessorySlotOptions: GAME_ACCESSORY_SLOT_OPTIONS,
+  gameAccessoryPartOptions: GAME_ACCESSORY_PART_OPTIONS,
+  assemblyAccessoryPartMenu,
   itemGameApplySpec,
   itemGameApplyLabel,
   gameCurrentSlotLabel,
@@ -9462,6 +9641,9 @@ const appCtx = reactive({
   setAssemblyMode,
   selectAssemblyCharacter,
   selectAssemblySlot,
+  openAssemblyAccessoryPartMenu,
+  closeAssemblyAccessoryPartMenu,
+  assignAssemblyAccessoryPart,
   applyAssemblyItem,
   refreshCurrentGameState,
   openItemContextMenu,
@@ -9504,6 +9686,7 @@ const appCtx = reactive({
   setItemViewMode,
   setCardBrowserMode,
   setCardDependencyFilter,
+  toggleCardFavoriteFilter,
   setCardTagScope,
   toggleCardTagPromptTag,
   toggleBulkCardTagPromptTag,
@@ -9593,7 +9776,6 @@ watch(cardBrowserMode, (mode, previousMode) => {
 }, { flush: "sync" });
 
 watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
-  if (assemblyMode.value && view !== "mods") setAssemblyMode(false);
   if (view === "trash" && status === "ready") {
     void loadTrash();
   }
@@ -9760,9 +9942,9 @@ watch(backendStatus, (status, previousStatus) => {
       </nav>
     </aside>
 
-    <main class="main" :class="{ 'assembly-mode-main': assemblyMode, 'item-library-main': isItemLibraryView && !assemblyMode, 'character-library-main': activeView === 'characters', 'plugin-library-main': activeView === 'plugins', 'workbench-main': activeView === 'workbench', 'runtime-log-main': activeView === 'logs', 'settings-main': activeView === 'settings', 'trash-main': activeView === 'trash' }">
-      <header v-if="activeView !== 'characters' && activeView !== 'plugins' && activeView !== 'workbench' && activeView !== 'logs' && activeView !== 'settings' && activeView !== 'trash'" class="topbar" :class="{ 'assembly-topbar': assemblyMode, 'topbar-item-library': isItemLibraryView && !assemblyMode }">
-        <template v-if="assemblyMode">
+    <main class="main" :class="{ 'assembly-mode-main': assemblyUiActive, 'item-library-main': isItemLibraryView && !assemblyMode, 'character-library-main': activeView === 'characters', 'plugin-library-main': activeView === 'plugins', 'workbench-main': activeView === 'workbench', 'runtime-log-main': activeView === 'logs', 'settings-main': activeView === 'settings', 'trash-main': activeView === 'trash' }">
+      <header v-if="activeView !== 'characters' && activeView !== 'plugins' && activeView !== 'workbench' && activeView !== 'logs' && activeView !== 'settings' && activeView !== 'trash'" class="topbar" :class="{ 'assembly-topbar': assemblyUiActive, 'topbar-item-library': isItemLibraryView && !assemblyMode }">
+        <template v-if="assemblyUiActive">
           <div class="assembly-topbar-context">
             <div class="assembly-hero">
               <div class="assembly-hero-copy">

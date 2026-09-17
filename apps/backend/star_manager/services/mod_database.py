@@ -480,7 +480,7 @@ def prepare_mod_items(
 ) -> PreparedZipmodItems:
     ok_count = 0
     duplicate_items = 0
-    seen_keys: set[tuple[str, str, str]] = set()
+    seen_keys: set[tuple[str, str, str, str]] = set()
     prepared_items: list[PreparedModItem] = []
     bundle_cache = UnityThumbnailBundleCache()
     source_cache = ThumbnailSourceCache()
@@ -502,7 +502,7 @@ def prepare_mod_items(
                 [
                     item
                     for item in csv_items
-                    if not is_map_scene_item(item) or item.thumb_ab
+                    if item.item_domain != "studio" and (not is_map_scene_item(item) or item.thumb_ab)
                 ],
                 thumbnail_dir,
                 status_zip,
@@ -516,13 +516,15 @@ def prepare_mod_items(
         for item in csv_items:
             if not item.item_id:
                 continue
-            key = (candidate.manifest.guid, item.kind, item.item_id)
+            key = (candidate.manifest.guid, item.kind, item.csv_path, item.item_id)
             if key in seen_keys:
                 duplicate_items += 1
                 continue
             seen_keys.add(key)
             thumbnail = (
-                ThumbnailResult("", "ready", "")
+                ThumbnailResult("", "not_applicable", "")
+                if item.item_domain == "studio"
+                else ThumbnailResult("", "ready", "")
                 if is_map_scene_item(item) and not item.thumb_ab
                 else extract_thumbnail_from_zipmod(
                     game_dir,
@@ -576,6 +578,11 @@ def prepare_mod_items(
                     unity3d_error=unity3d.error,
                     parse_status=item.parse_status,
                     parse_error=item.parse_error,
+                    item_domain=item.item_domain,
+                    studio_group_id=item.studio_group_id,
+                    studio_group_name=item.studio_group_name,
+                    studio_category_id=item.studio_category_id,
+                    studio_category_name=item.studio_category_name,
                 )
             )
             if item.parse_status == "ok":
@@ -609,11 +616,16 @@ def replace_mod_items(
     now: str,
 ) -> tuple[int, int]:
     existing_rows = conn.execute(
-        "SELECT id, zipmod_guid, kind, item_id FROM mod_items WHERE zipmod_id = ?",
+        "SELECT id, zipmod_guid, kind, csv_path, item_id FROM mod_items WHERE zipmod_id = ?",
         (zipmod_id,),
     ).fetchall()
     existing_by_key = {
-        (str(row["zipmod_guid"] or ""), str(row["kind"] or ""), str(row["item_id"] or "")): int(row["id"])
+        (
+            str(row["zipmod_guid"] or ""),
+            str(row["kind"] or ""),
+            str(row["csv_path"] or ""),
+            str(row["item_id"] or ""),
+        ): int(row["id"])
         for row in existing_rows
     }
     remaining_ids = {int(row["id"]) for row in existing_rows}
@@ -622,6 +634,7 @@ def replace_mod_items(
         key = (
             str(candidate.manifest.guid or ""),
             str(item.kind or ""),
+            str(item.csv_path or ""),
             str(item.item_id or ""),
         )
         item_id = existing_by_key.get(key)
@@ -632,6 +645,11 @@ def replace_mod_items(
             item.csv_path,
             item.item_id,
             item.kind,
+            item.item_domain,
+            item.studio_group_id,
+            item.studio_group_name,
+            item.studio_category_id,
+            item.studio_category_name,
             item.name,
             item.main_manifest,
             item.main_ab,
@@ -654,7 +672,8 @@ def replace_mod_items(
                 """
                 UPDATE mod_items
                 SET zipmod_id = ?, zipmod_guid = ?, zipmod_author = ?, csv_path = ?,
-                    item_id = ?, kind = ?, name = ?, main_manifest = ?, main_ab = ?,
+                    item_id = ?, kind = ?, item_domain = ?, studio_group_id = ?, studio_group_name = ?,
+                    studio_category_id = ?, studio_category_name = ?, name = ?, main_manifest = ?, main_ab = ?,
                     main_data = ?, tex_ab = ?, thumb_ab = ?, thumb_tex = ?, thumbnail_cache_path = ?,
                     thumbnail_status = ?, thumbnail_error = ?, unity3d_status = ?, unity3d_source = ?,
                     unity3d_error = ?, parse_status = ?, parse_error = ?, updated_at = ?
@@ -667,13 +686,14 @@ def replace_mod_items(
             cursor = conn.execute(
                 """
                 INSERT INTO mod_items (
-                    zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind, name,
+                    zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind,
+                    item_domain, studio_group_id, studio_group_name, studio_category_id, studio_category_name, name,
                     main_manifest, main_ab, main_data, tex_ab, thumb_ab, thumb_tex,
                     thumbnail_cache_path, thumbnail_status, thumbnail_error,
                     unity3d_status, unity3d_source, unity3d_error,
                     parse_status, parse_error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (*values, now),
             )

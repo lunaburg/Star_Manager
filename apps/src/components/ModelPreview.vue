@@ -83,11 +83,29 @@ function handleExpandedKeydown(event) {
   if (event.key === "Escape") setExpanded(false);
 }
 
+function syncRendererSize() {
+  const host = canvasHost.value;
+  if (!host || !renderer || !camera) return;
+  const width = Math.max(host.clientWidth, 1);
+  const height = Math.max(host.clientHeight, 1);
+  const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelBudget = expanded.value ? 2_500_000 : 1_500_000;
+  const budgetPixelRatio = Math.sqrt(pixelBudget / (width * height));
+  renderer.setPixelRatio(Math.max(0.75, Math.min(devicePixelRatio, budgetPixelRatio)));
+  renderer.setSize(width, height, false);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}
+
 function setExpanded(value) {
   expanded.value = Boolean(value);
   document.body.classList.toggle("model-preview-expanded", expanded.value);
   document.removeEventListener("keydown", handleExpandedKeydown);
   if (expanded.value) document.addEventListener("keydown", handleExpandedKeydown);
+  nextTick(() => {
+    syncRendererSize();
+    requestAnimationFrame(syncRendererSize);
+  });
 }
 
 function handleListboxKeydown(event, options, selectedValue, selectOption, disabled = false) {
@@ -561,20 +579,9 @@ async function renderModel(url, generation = previewGeneration) {
     }
   }
   frameVisibleModels();
-  const resize = () => {
-    const width = Math.max(host.clientWidth, 1);
-    const height = Math.max(host.clientHeight, 1);
-    const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    const pixelBudget = expanded.value ? 2_500_000 : 1_500_000;
-    const budgetPixelRatio = Math.sqrt(pixelBudget / (width * height));
-    renderer.setPixelRatio(Math.max(0.75, Math.min(devicePixelRatio, budgetPixelRatio)));
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-  };
-  resizeObserver = new ResizeObserver(resize);
+  resizeObserver = new ResizeObserver(syncRendererSize);
   resizeObserver.observe(host);
-  resize();
+  syncRendererSize();
   const animate = () => {
     controls.update();
     renderer.render(scene, camera);
@@ -679,6 +686,7 @@ defineExpose({ captureScreenshot, loadPreview });
 </script>
 
 <template>
+  <Teleport to="body" :disabled="!expanded">
   <section class="model-preview-card" :class="[`is-${state}`, { 'is-expanded': expanded }]">
     <div ref="canvasHost" class="model-preview-canvas">
       <button
@@ -823,4 +831,5 @@ defineExpose({ captureScreenshot, loadPreview });
       </div>
     </div>
   </section>
+  </Teleport>
 </template>

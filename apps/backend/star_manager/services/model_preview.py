@@ -280,7 +280,7 @@ def _texture_png(pointer: object, cache: dict[int, bytes]) -> bytes | None:
         texture = pointer.read()
         image = texture.image
         output = io.BytesIO()
-        image.save(output, format="PNG", optimize=True)
+        image.save(output, format="PNG", optimize=False)
         cache[path_id] = output.getvalue()
         return cache[path_id]
     except Exception:
@@ -827,7 +827,7 @@ def prepare_item_model_preview(mod_item_id: int, db_path: Path = DEFAULT_DB_PATH
             return {"ok": False, "error": "物品不存在"}
         asset_data, source = _read_main_asset(item)
         cache_key = hashlib.sha1(
-            f"main-data-v16-alpha-mask-front-face:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
+            f"main-data-v17-png-no-optimize:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
         ).hexdigest()
         output = DEFAULT_MODEL_PREVIEW_DIR / cache_key[:2] / f"{cache_key}.glb"
         half_output = output.with_name(f"{cache_key}-half.glb")
@@ -892,7 +892,7 @@ def prepare_workbench_model_preview(file_path: str, main_data: str, item_kind: s
         source_stat = source.stat()
         cache_key = hashlib.sha1(
             (
-                "workbench-main-data-v2-alpha-mask-front-face:"
+                "workbench-main-data-v3-png-no-optimize:"
                 f"{source}:{source_stat.st_mtime_ns}:{source_stat.st_size}:"
                 f"{normalized_main_data}:{normalized_kind}"
             ).encode("utf-8")

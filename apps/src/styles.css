@@ -262,6 +262,9 @@ small {
 }
 
 .topbar {
+  position: relative;
+  z-index: 5;
+  overflow: visible;
   border: 0;
 }
 
@@ -482,11 +485,14 @@ small {
 }
 
 .topbar {
+  position: relative;
+  z-index: 5;
   display: grid;
   grid-template-columns: minmax(430px, 1fr) minmax(280px, 360px) auto;
   gap: 12px;
   align-items: center;
   padding: 0 18px;
+  overflow: visible;
 }
 
 .topbar-item-library {
@@ -615,7 +621,7 @@ small {
 
 .topbar-kind-groups {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, .62fr) minmax(150px, .62fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(130px, .56fr) minmax(130px, .56fr) minmax(130px, .56fr);
   gap: 8px;
   min-width: 0;
   width: 100%;
@@ -649,6 +655,11 @@ small {
   --topbar-kind-tint: #f5f1ed;
 }
 
+.topbar-kind-group-studio {
+  --topbar-kind-accent: #407f7d;
+  --topbar-kind-tint: #e5f4f1;
+}
+
 .topbar-kind-group-title {
   width: 100%;
   height: 25px;
@@ -675,7 +686,8 @@ small {
 }
 
 .topbar-kind-group-common .topbar-kind-category-row,
-.topbar-kind-group-neutral .topbar-kind-category-row {
+.topbar-kind-group-neutral .topbar-kind-category-row,
+.topbar-kind-group-studio .topbar-kind-category-row {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -742,6 +754,11 @@ small {
 .topbar-kind-subview-neutral {
   --topbar-kind-accent: #80756c;
   --topbar-kind-tint: #f5f1ed;
+}
+
+.topbar-kind-subview-studio {
+  --topbar-kind-accent: #407f7d;
+  --topbar-kind-tint: #e5f4f1;
 }
 
 .topbar-kind-back {
@@ -825,17 +842,20 @@ small {
   grid-template-columns: minmax(280px, .95fr) minmax(360px, 1.05fr);
   gap: 10px;
   padding: 7px 12px;
+  overflow: visible;
 }
 
 .assembly-topbar-context,
 .assembly-topbar-state {
   min-width: 0;
+  overflow: visible;
 }
 
 .assembly-topbar .assembly-hero {
   grid-template-columns: minmax(0, 1fr) minmax(220px, 1.2fr) auto;
   height: 100%;
   padding: 7px 10px;
+  overflow: visible;
   border: 0;
 }
 
@@ -1051,6 +1071,8 @@ small {
 }
 
 .workspace {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -3701,6 +3723,74 @@ small {
 .character-layout .browser-panel > .toolbar .card-dependency-filter {
   flex: 0 0 180px;
   width: 180px;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 102px;
+  width: 102px;
+  min-height: 34px;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, .6);
+  border-radius: 8px;
+  background: var(--glass-background-fallback);
+  background: color-mix(in srgb, var(--surface-clean) 20%, transparent);
+  color: rgba(82, 76, 86, .82);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(7px) saturate(1.04);
+  backdrop-filter: blur(7px) saturate(1.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48), 0 1px 7px rgba(73, 91, 109, .08);
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, color .2s ease, transform .2s ease;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter:hover,
+.character-layout .browser-panel > .toolbar .card-favorite-filter:focus-visible {
+  border-color: rgba(255, 255, 255, .9);
+  background: rgba(255, 255, 255, .34);
+  background: color-mix(in srgb, var(--surface-clean) 34%, transparent);
+  color: rgba(91, 70, 40, .94);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68), 0 0 12px rgba(255, 255, 255, .2), 0 2px 8px rgba(73, 91, 109, .1);
+  outline: none;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter:focus-visible {
+  outline: 2px solid rgba(82, 151, 180, .58);
+  outline-offset: 2px;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter.active {
+  border-color: rgba(194, 148, 43, .7);
+  background: rgba(255, 244, 188, .42);
+  background: color-mix(in srgb, #fff1ad 42%, transparent);
+  color: #785a0c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 2px 10px rgba(176, 125, 20, .12);
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter.active svg {
+  fill: currentColor;
+}
+
+.character-layout .browser-panel > .toolbar .card-favorite-filter.active:hover,
+.character-layout .browser-panel > .toolbar .card-favorite-filter.active:focus-visible {
+  border-color: rgba(194, 148, 43, .86);
+  background: rgba(255, 244, 188, .56);
+  background: color-mix(in srgb, #fff1ad 56%, transparent);
+  color: #634705;
 }
 
 .card-tag-filter-controls {
@@ -8360,6 +8450,9 @@ small {
 }
 
 .assembly-sync-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 5px 7px;
   border: 1px solid #c6cfd1;
   border-radius: 999px;
@@ -8367,6 +8460,7 @@ small {
   color: #67767a;
   font-size: 10px;
   font-weight: 900;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -8527,6 +8621,12 @@ small {
   padding: 0;
   border: 0;
   background: transparent;
+  overflow: visible;
+}
+
+.assembly-character-picker-topbar .assembly-character-options {
+  right: 0;
+  left: 0;
 }
 
 .assembly-character-picker-topbar .assembly-character-picker-toggle {
@@ -8615,7 +8715,7 @@ small {
 
 .assembly-character-options {
   position: absolute;
-  z-index: 5;
+  z-index: 8;
   top: calc(100% - 1px);
   right: 8px;
   left: 8px;
@@ -8924,6 +9024,40 @@ button.assembly-group-head:focus-visible {
 .assembly-slot-row.empty .assembly-item-name {
   color: #899496;
   font-weight: 750;
+}
+
+.assembly-accessory-part-menu {
+  width: min(332px, calc(100vw - 16px));
+}
+
+.assembly-accessory-part-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assembly-accessory-part-option {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #d7d7d7;
+  box-shadow: none;
+  color: #4d4d4d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.assembly-accessory-part-option:hover,
+.assembly-accessory-part-option:focus-visible {
+  background: #c8c8c8;
+  color: #2f2f2f;
+  outline: none;
+}
+
+.assembly-accessory-part-option.selected {
+  background: #7eb8b4;
+  color: #f7fffe;
 }
 
 .assembly-group-empty {
@@ -10592,7 +10726,7 @@ body.model-preview-expanded { overflow: hidden; }
 .model-preview-card.is-expanded {
   position: fixed;
   inset: calc(var(--titlebar-height) + 10px) 18px 18px;
-  z-index: 1200;
+  z-index: 2400;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   margin: 0;

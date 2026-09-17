@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from star_manager.services.mod_database_core import CsvItem, PreparedModItem, ThumbnailResult  # noqa: E402
+from star_manager.services.mod_database_core import CsvItem, PreparedModItem, STUDIO_ITEM_KIND, ThumbnailResult  # noqa: E402
 from star_manager.services.mod_database_core import ManifestData, ZipmodCandidate, init_db  # noqa: E402
 from star_manager.services.mod_database_assets import (  # noqa: E402
     _duplicate_keep_sort_key,
@@ -281,6 +281,66 @@ class ThumbnailDiagnosticTests(unittest.TestCase):
 
 
 class CsvEncodingTests(unittest.TestCase):
+    def test_reads_studio_item_with_group_and_category_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "studio-item.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/studio/info/author/ItemGroup_author.csv", "ID,Name\n8460,Author Group\n")
+                zf.writestr("abdata/studio/info/author/ItemCategory_06_8460.csv", "ID,Name\n6,Animals\n")
+                zf.writestr(
+                    "abdata/studio/info/author/ItemList_01_8460_06.csv",
+                    "ID,BigCategory,MidCategory,Name,Manifest,Bundle,Object\n"
+                    "2,8460,6,Bull,abdata,author/data_prefab_000.unity3d,Bull\n",
+                )
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source))
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.kind, STUDIO_ITEM_KIND)
+        self.assertEqual(item.item_domain, "studio")
+        self.assertEqual(item.item_id, "2")
+        self.assertEqual(item.main_ab, "author/data_prefab_000.unity3d")
+        self.assertEqual(item.main_data, "Bull")
+        self.assertEqual((item.studio_group_id, item.studio_group_name), ("8460", "Author Group"))
+        self.assertEqual((item.studio_category_id, item.studio_category_name), ("6", "Animals"))
+        self.assertEqual((item.thumb_ab, item.thumb_tex), ("", ""))
+
+    def test_studio_item_skips_thumbnail_extraction(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "studio-item.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>studio.item.guid</guid><name>Studio Item</name>"
+                    "<version>1</version><author>Author</author></manifest>",
+                )
+                zf.writestr("abdata/studio/info/author/ItemGroup_author.csv", "ID,Name\n8460,Author Group\n")
+                zf.writestr("abdata/studio/info/author/ItemCategory_06_8460.csv", "ID,Name\n6,Animals\n")
+                zf.writestr(
+                    "abdata/studio/info/author/ItemList_01_8460_06.csv",
+                    "ID,BigCategory,MidCategory,Name,Manifest,Bundle,Object\n"
+                    "2,8460,6,Bull,abdata,author/data_prefab_000.unity3d,Bull\n",
+                )
+                zf.writestr("abdata/author/data_prefab_000.unity3d", b"UnityFS")
+                zf.writestr("abdata/studio_thumbnails/00008460-00000006-Bull.png", b"unused")
+
+            candidate = ZipmodCandidate(
+                manifest=ManifestData("studio.item.guid", "Studio Item", "1", "Author", "ok", ""),
+                path=zipmod_path,
+                relative_path="studio-item.zipmod",
+                file_size=zipmod_path.stat().st_size,
+                modified_at="2026-09-17T00:00:00+00:00",
+            )
+            prepared = prepare_mod_items(root, candidate, root / "thumbnails")
+
+        self.assertEqual(len(prepared.items), 1)
+        item = prepared.items[0]
+        self.assertEqual(item.item_domain, "studio")
+        self.assertEqual(item.thumbnail_status, "not_applicable")
+        self.assertEqual(item.thumbnail_cache_path, "")
+        self.assertEqual(item.unity3d_status, "in_mod")
     def test_reads_utf16_le_bom_csv_with_metadata_rows(self):
         csv_bytes = (
             "247\r\n"

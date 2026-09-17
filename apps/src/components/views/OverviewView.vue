@@ -66,7 +66,7 @@ const { ctx } = defineProps({
             </div>
             <aside class="overview-stack">
               <section class="panel">
-                <div class="module-head"><h2>使用工具</h2></div>
+                <div class="module-head"><h2>实用工具</h2></div>
                 <div class="action-list">
                   <button class="action-item" @click="ctx.importExternalZipmods"><span><strong>导入外部模组</strong><small>扫描 zipmod 和标准结构的 zip，诊断并保留更完整版本。</small></span><span>→</span></button>
                   <button class="action-item action-item--organize" @click="ctx.openOrganizeAllPrompt"><span><strong>一键整理</strong><small>将 mods 下全部 zipmod 移入对应的作者子目录。</small></span><span>→</span></button>

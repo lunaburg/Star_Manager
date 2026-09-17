@@ -514,6 +514,20 @@ const cardModeMeta = computed(() => {
                 </div>
                 <div class="toolbar-right">
                   <div class="card-filter-toolbar-controls">
+                    <button
+                      class="card-favorite-filter"
+                      :class="{ active: ctx.cardFavoriteFilter }"
+                      type="button"
+                      :aria-pressed="ctx.cardFavoriteFilter"
+                      aria-label="筛选收藏人物卡"
+                      :title="ctx.cardFavoriteFilter ? '取消收藏筛选' : '只显示收藏人物卡'"
+                      @click="ctx.toggleCardFavoriteFilter"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" />
+                      </svg>
+                      <span>收藏</span>
+                    </button>
                     <div class="card-tag-filter-controls">
                     <div class="card-tag-filter-combobox">
                     <svg class="card-tag-filter-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -606,7 +620,7 @@ const cardModeMeta = computed(() => {
                       @change="ctx.setCardDependencyFilter($event.target.value)"
                     >
                       <option value="all">全部人物卡</option>
-                      <option value="favorite">已收藏</option>
+                      <option value="normal">正常</option>
                       <option value="missing">依赖缺失</option>
                    </select>
                   </div>
@@ -633,7 +647,7 @@ const cardModeMeta = computed(() => {
                 </div>
                 <div v-else-if="ctx.visibleCards.length === 0" class="card-state">
                   <LoadingAnimation class="card-empty-loading-animation" :animation-data="characterCardEmptyAnimation" />
-                  <strong>{{ ctx.cardDependencyFilter === 'missing' && ctx.cards.length ? '当前目录没有依赖缺失的人物卡' : ctx.cardDependencyFilter === 'favorite' && ctx.cards.length ? '当前目录还没有收藏的人物卡' : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cardTagFilter.scope === 'library' ? `人物卡库中没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cards.length ? `当前目录没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : '未找到人物卡' }}</strong>
+                  <strong>{{ ctx.cardFavoriteFilter && (ctx.cards.length || ctx.cardTagFilter.libraryCards.length) ? '当前筛选没有收藏的人物卡' : ctx.cardDependencyFilter === 'missing' && ctx.cards.length ? '当前目录没有依赖缺失的人物卡' : ctx.cardDependencyFilter === 'normal' && ctx.cards.length ? '当前目录没有无依赖缺失的人物卡' : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cardTagFilter.scope === 'library' ? `人物卡库中没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : ctx.cardDependencyFilter.startsWith('tag:') && ctx.cards.length ? `当前目录没有“${ctx.cardDependencyFilter.slice(4)}”标签的人物卡` : '未找到人物卡' }}</strong>
                   <span class="subtext mono">{{ ctx.cardTagFilter.scope === 'library' && ctx.cardDependencyFilter.startsWith('tag:') ? 'UserData/chara · 全库' : ctx.cardFolderDisplay }}</span>
                 </div>
                 <VirtualCharacterCardGrid

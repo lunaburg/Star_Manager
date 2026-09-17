@@ -496,6 +496,7 @@ class DependencyResolver:
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
+              AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
             ORDER BY mod_items.id
             """
         ):
@@ -702,6 +703,7 @@ def find_mod_item_id(
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
+              AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
               AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
               AND mod_items.kind = ?
               AND (
@@ -728,6 +730,7 @@ def find_mod_item_id(
             FROM mod_items
             INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
             WHERE zipmods.scan_status != 'stale'
+              AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
               AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
               AND (
                   mod_items.item_id = ?

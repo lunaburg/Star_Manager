@@ -116,7 +116,7 @@
 位置：`<runtime>/model_previews/<sha1 前两位>/<sha1>.glb`，有时同目录还有 `<sha1>-half.glb`。
 
 - 由模组数据库物品或工作台工程物品的 MainAB/MainData 转换得到，供 Three.js 预览。
-- 模组库预览键包含物品 ID、zipmod 修改时间、MainAB、MainData 和预览转换版本；工作台预览键包含工程 Unity3D 绝对路径、文件大小、修改时间、MainData 和 Kind。相同输入命中已有 GLB 时不重复转换，工作台替换贴图或修改资源后会生成新的缓存键。
+- 模组库预览键包含物品 ID、zipmod 修改时间、MainAB、MainData 和预览转换版本（当前为 `main-data-v17-png-no-optimize`）；工作台预览键包含工程 Unity3D 绝对路径、文件大小、修改时间、MainData、Kind 和转换版本（当前为 `workbench-main-data-v3-png-no-optimize`）。相同输入命中已有 GLB 时不重复转换；贴图编码器从 PNG `optimize=True` 改为 `optimize=False` 后会生成新键。工作台替换贴图或修改资源后也会生成新的缓存键。
 - Electron 在正常 `before-quit` 阶段删除整个 `model_previews` 目录，因此它主要是跨请求、单次运行期间的缓存。
 - 崩溃或强制终止可能留下旧文件；应用启动前或后端停止后可以删除。删除后重新打开模型预览即可生成。
 

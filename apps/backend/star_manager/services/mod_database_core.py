@@ -11,6 +11,7 @@ DEFAULT_DB_PATH = runtime_root() / "star_manager.sqlite"
 DEFAULT_THUMBNAIL_DIR = runtime_root() / "thumbnails"
 VENDOR_DIR = BACKEND_ROOT / ".vendor"
 UNKNOWN_AUTHOR = "\u672a\u77e5\u4f5c\u8005"
+STUDIO_ITEM_KIND = "__studio_item__"
 
 MOD_ITEMS_COLUMNS = [
     "id",
@@ -20,6 +21,11 @@ MOD_ITEMS_COLUMNS = [
     "csv_path",
     "item_id",
     "kind",
+    "item_domain",
+    "studio_group_id",
+    "studio_group_name",
+    "studio_category_id",
+    "studio_category_name",
     "name",
     "main_manifest",
     "main_ab",
@@ -73,6 +79,11 @@ class CsvItem:
     parse_status: str
     parse_error: str
     tex_ab: str = ""
+    item_domain: str = "mod"
+    studio_group_id: str = ""
+    studio_group_name: str = ""
+    studio_category_id: str = ""
+    studio_category_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -119,6 +130,11 @@ class PreparedModItem:
     parse_error: str
     unity3d_source: str = ""
     tex_ab: str = ""
+    item_domain: str = "mod"
+    studio_group_id: str = ""
+    studio_group_name: str = ""
+    studio_category_id: str = ""
+    studio_category_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,7 +169,7 @@ def mod_items_needs_unique_key_migration(conn: sqlite3.Connection) -> bool:
             str(index_row[2])
             for index_row in conn.execute(f"PRAGMA index_info({index_name})")
         ]
-        return columns != ["zipmod_guid", "kind", "item_id"]
+        return columns != ["zipmod_guid", "kind", "csv_path", "item_id"]
     return True
 
 
@@ -172,6 +188,11 @@ def migrate_mod_items_unique_key(conn: sqlite3.Connection) -> None:
             csv_path TEXT NOT NULL DEFAULT '',
             item_id TEXT NOT NULL,
             kind TEXT NOT NULL DEFAULT '',
+            item_domain TEXT NOT NULL DEFAULT 'mod',
+            studio_group_id TEXT NOT NULL DEFAULT '',
+            studio_group_name TEXT NOT NULL DEFAULT '',
+            studio_category_id TEXT NOT NULL DEFAULT '',
+            studio_category_name TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL DEFAULT '',
             main_manifest TEXT NOT NULL DEFAULT '',
             main_ab TEXT NOT NULL DEFAULT '',
@@ -189,7 +210,7 @@ def migrate_mod_items_unique_key(conn: sqlite3.Connection) -> None:
             parse_error TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            UNIQUE(zipmod_guid, kind, item_id)
+            UNIQUE(zipmod_guid, kind, csv_path, item_id)
         );
         """
     )
@@ -247,6 +268,11 @@ def init_db(conn: sqlite3.Connection) -> None:
             csv_path TEXT NOT NULL DEFAULT '',
             item_id TEXT NOT NULL,
             kind TEXT NOT NULL DEFAULT '',
+            item_domain TEXT NOT NULL DEFAULT 'mod',
+            studio_group_id TEXT NOT NULL DEFAULT '',
+            studio_group_name TEXT NOT NULL DEFAULT '',
+            studio_category_id TEXT NOT NULL DEFAULT '',
+            studio_category_name TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL DEFAULT '',
             main_manifest TEXT NOT NULL DEFAULT '',
             main_ab TEXT NOT NULL DEFAULT '',
@@ -264,7 +290,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             parse_error TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            UNIQUE(zipmod_guid, kind, item_id)
+            UNIQUE(zipmod_guid, kind, csv_path, item_id)
         );
 
         CREATE TABLE IF NOT EXISTS builtin_items (
@@ -402,6 +428,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "mod_items", "thumbnail_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "thumbnail_error", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "tex_ab", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "item_domain", "TEXT NOT NULL DEFAULT 'mod'")
+    ensure_column(conn, "mod_items", "studio_group_id", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "studio_group_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "studio_category_id", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "mod_items", "studio_category_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_source", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_error", "TEXT NOT NULL DEFAULT ''")
@@ -421,9 +452,12 @@ def init_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_mod_items_zipmod_id ON mod_items(zipmod_id);
         CREATE INDEX IF NOT EXISTS idx_mod_items_guid_item ON mod_items(zipmod_guid, item_id);
-        CREATE INDEX IF NOT EXISTS idx_mod_items_guid_kind_item ON mod_items(zipmod_guid, kind, item_id);
+        CREATE INDEX IF NOT EXISTS idx_mod_items_guid_kind_item ON mod_items(zipmod_guid, kind, csv_path, item_id);
         CREATE INDEX IF NOT EXISTS idx_mod_items_author ON mod_items(zipmod_author);
         CREATE INDEX IF NOT EXISTS idx_mod_items_kind ON mod_items(kind);
+        CREATE INDEX IF NOT EXISTS idx_mod_items_domain_kind ON mod_items(item_domain, kind);
+        CREATE INDEX IF NOT EXISTS idx_mod_items_studio_category
+            ON mod_items(zipmod_guid, studio_group_id, studio_category_id);
         CREATE INDEX IF NOT EXISTS idx_mod_items_name ON mod_items(name);
         CREATE INDEX IF NOT EXISTS idx_mod_items_name_nocase_id
             ON mod_items(name COLLATE NOCASE, id);

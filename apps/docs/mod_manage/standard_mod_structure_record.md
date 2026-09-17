@@ -53,7 +53,9 @@ Studio 自定义物品可以使用另一套列表目录，不应强行按角色�
 
 `ItemCategory_*.csv` 通常登记 Studio 分类 ID 和显示名称；`ItemList_*.csv` 通常使用 `BigCategory`、`MidCategory`、`Name`、`Manifest`、`Bundle`、`Object` 等字段，把每个 Studio 物品映射到 Unity3D AssetBundle 内的 prefab。它可能没有 `ThumbAB` / `ThumbTex`，因此资源包中的材质贴图不应被误当作列表缩略图。
 
-当前 Star Manager 的通用 ZIP CSV 迭代器只读取 `abdata/list/**/*.csv`、`Map_kPlug.csv` 和游戏 `mapinfo`；一般 `abdata/studio/info/<作者>/ItemCategory_*.csv` / `ItemList_*.csv` 尚未进入物品索引范围。遇到这类文件时，应保留“manifest 可识别但物品数为 0”的边界，不把它诊断为损坏模组。需要支持时应增加独立的 Studio 列表适配器，并保留 `BigCategory + MidCategory`，再将 `Manifest + Bundle + Object` 与 AssetBundle 容器路径匹配。
+当前 Star Manager 通过独立 Studio 适配器读取 `abdata/studio/info/<作者>/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`。适配器先汇总 Group，再按 `ItemCategory_<category>_<group>.csv` 建立 Group/Category 映射，最后读取 ItemList，并将 `Manifest + Bundle + Object` 写入物品资源字段。Studio 条目统一使用 `kind = __studio_item__` 与 `item_domain = studio`；`BigCategory + MidCategory` 仅回填 Group/Category 显示信息，不参与分类筛选。
+
+Studio 条目不读取 `abdata/studio_thumbnails/`，不生成缩略图缓存，固定使用 `thumbnail_status = not_applicable`。因此 Studio 物品不会显示缩略图，也不会被归入缺失缩略图诊断。
 
 已验证样本：[Hooh ammunition_go.zipmod 结构解析记录](hooh_ammunition_go_zipmod_analysis.md)。
 

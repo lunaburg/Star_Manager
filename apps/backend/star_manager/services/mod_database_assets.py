@@ -25,6 +25,7 @@ from star_manager.services.mod_database_core import (
     DEFAULT_DB_PATH,
     DEFAULT_THUMBNAIL_DIR,
     ManifestData,
+    STUDIO_ITEM_KIND,
     ThumbnailResult,
     Unity3dProvider,
     Unity3dStatus,
@@ -56,6 +57,13 @@ MAP_SCENE_KIND = "__map_scene__"
 GAME_MAP_SCENE_KIND = "__game_map_scene__"
 DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__"
 GAME_MAPINFO_PREFIX = "abdata/map/list/mapinfo/"
+STUDIO_ITEM_GROUP_PATTERN = re.compile(r"^abdata/studio/info/.+/itemgroup_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_ITEM_CATEGORY_PATTERN = re.compile(r"^abdata/studio/info/.+/itemcategory_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_ITEM_LIST_PATTERN = re.compile(r"^abdata/studio/info/.+/itemlist_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_CATEGORY_FILE_PATTERN = re.compile(
+    r"^itemcategory_(?P<category>[^_]+)_(?P<group>[^.]+)\.csv$",
+    re.IGNORECASE,
+)
 
 
 def thumbnail_profile_path_for_run(started_at: str, run_id: str) -> Path:
@@ -619,6 +627,141 @@ def read_items_from_csv(csv_path: str, data: bytes) -> list[CsvItem]:
     return items
 
 
+def normalize_studio_id(value: str) -> str:
+    """Normalize numeric Studio IDs without changing non-numeric author-defined IDs."""
+    normalized = str(value or "").strip()
+    if re.fullmatch(r"\\d+", normalized):
+        return str(int(normalized))
+    return normalized
+
+
+def read_studio_id_name_rows(data: bytes) -> list[tuple[str, str]]:
+    """Read the small ItemGroup and ItemCategory ID/Name tables."""
+    try:
+        text = decode_csv_bytes(data)
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except csv.Error:
+        return []
+
+    header_index = find_header_index(rows)
+    if header_index is None:
+        return []
+    header = [cell.strip() for cell in rows[header_index]]
+    result: list[tuple[str, str]] = []
+    for row in rows[header_index + 1 :]:
+        if not row or all(not cell.strip() for cell in row):
+            continue
+        padded = row + [""] * max(0, len(header) - len(row))
+        row_map = dict(zip(header, padded))
+        identifier = normalize_studio_id(value(row_map, "ID"))
+        if identifier:
+            result.append((identifier, value(row_map, "Name")))
+    return result
+
+
+def studio_category_file_ids(csv_path: str) -> tuple[str, str]:
+    """Return the Category and Group encoded by an ItemCategory filename."""
+    match = STUDIO_CATEGORY_FILE_PATTERN.match(Path(csv_path).name)
+    if match is None:
+        return "", ""
+    return (
+        normalize_studio_id(match.group("category")),
+        normalize_studio_id(match.group("group")),
+    )
+
+
+def read_studio_item_list(
+    csv_path: str,
+    data: bytes,
+    groups: dict[str, str],
+    categories: dict[tuple[str, str], str],
+) -> list[CsvItem]:
+    """Read one Studio ItemList without treating its local ID as a characustom Kind."""
+    try:
+        text = decode_csv_bytes(data)
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except csv.Error as exc:
+        return [
+            CsvItem(csv_path, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "parse_error", str(exc), item_domain="studio")
+        ]
+
+    header_index = find_header_index(rows)
+    if header_index is None:
+        return [
+            CsvItem(csv_path, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "missing_header", "ID and Name header not found", item_domain="studio")
+        ]
+
+    header = [cell.strip() for cell in rows[header_index]]
+    required_columns = {"ID", "BigCategory", "MidCategory", "Name", "Bundle", "Object"}
+    if not required_columns.issubset(set(header)):
+        return [
+            CsvItem(csv_path, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "missing_header", "Studio ItemList header is incomplete", item_domain="studio")
+        ]
+
+    items: list[CsvItem] = []
+    for row in rows[header_index + 1 :]:
+        if not row or all(not cell.strip() for cell in row):
+            continue
+        padded = row + [""] * max(0, len(header) - len(row))
+        row_map = dict(zip(header, padded))
+        item_id = value(row_map, "ID")
+        if not item_id:
+            items.append(
+                CsvItem(csv_path, "", STUDIO_ITEM_KIND, value(row_map, "Name"), "", "", "", "", "", "short_row", "ID missing", item_domain="studio")
+            )
+            continue
+        group_id = normalize_studio_id(value(row_map, "BigCategory"))
+        category_id = normalize_studio_id(value(row_map, "MidCategory"))
+        items.append(
+            CsvItem(
+                csv_path=csv_path,
+                item_id=item_id,
+                kind=STUDIO_ITEM_KIND,
+                name=value(row_map, "Name"),
+                main_manifest=value(row_map, "Manifest") or "abdata",
+                main_ab=value(row_map, "Bundle"),
+                main_data=value(row_map, "Object"),
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+                item_domain="studio",
+                studio_group_id=group_id,
+                studio_group_name=groups.get(group_id, ""),
+                studio_category_id=category_id,
+                studio_category_name=categories.get((group_id, category_id), ""),
+            )
+        )
+    return items
+
+
+def iter_open_zip_studio_items(zf: zipfile.ZipFile) -> Iterable[CsvItem]:
+    """Resolve Studio Group/Category metadata before yielding ItemList records."""
+    members = {
+        normalize_zip_path(name): name
+        for name in zf.namelist()
+        if not name.endswith("/")
+    }
+    groups: dict[str, str] = {}
+    categories: dict[tuple[str, str], str] = {}
+    for normalized, member in sorted(members.items()):
+        if not STUDIO_ITEM_GROUP_PATTERN.match(normalized):
+            continue
+        for group_id, name in read_studio_id_name_rows(zf.read(member)):
+            groups[group_id] = name
+    for normalized, member in sorted(members.items()):
+        if not STUDIO_ITEM_CATEGORY_PATTERN.match(normalized):
+            continue
+        filename_category_id, group_id = studio_category_file_ids(normalized)
+        if not group_id:
+            continue
+        for category_id, name in read_studio_id_name_rows(zf.read(member)):
+            categories[(group_id, category_id or filename_category_id)] = name
+    for normalized, member in sorted(members.items()):
+        if STUDIO_ITEM_LIST_PATTERN.match(normalized):
+            yield from read_studio_item_list(normalized, zf.read(member), groups, categories)
+
+
 def read_kplug_map_items(
     csv_path: str,
     data: bytes,
@@ -781,6 +924,8 @@ def iter_open_zip_csv_items(
             map_display_name,
             thumbnail_references,
         )
+
+    yield from iter_open_zip_studio_items(zf)
 
 
 def iter_zip_csv_items(zipmod_path: Path) -> Iterable[CsvItem]:
@@ -1937,6 +2082,7 @@ def zipmod_unity3d_diagnostics(
                 FROM mod_items
                 WHERE zipmod_id = ?
                   AND parse_status = 'ok'
+                  AND COALESCE(item_domain, 'mod') != 'studio'
                   AND TRIM(COALESCE(kind, '')) NOT IN ('500', '501')
                   AND (thumbnail_status = '' OR thumbnail_status NOT IN ('ready', 'ok'))
                 ORDER BY csv_path, item_id
@@ -2626,6 +2772,7 @@ def analyze_duplicate_zipmods(
                 1
                 for item in items
                 if item.parse_status == "ok"
+                and item.item_domain != "studio"
                 and str(item.kind or "").strip() not in {"500", "501"}
                 and (not item.thumbnail_status or item.thumbnail_status not in {"ready", "ok"})
             )
@@ -3115,6 +3262,8 @@ def export_zipmod_item_thumbnail(
         item = conn.execute("SELECT * FROM mod_items WHERE id = ?", (int(mod_item_id),)).fetchone()
         if item is None:
             return {"ok": False, "error": f"Item not found: {mod_item_id}"}
+        if str(item["item_domain"] or "") == "studio":
+            return {"ok": False, "error": "Studio items do not use thumbnails"}
         if item["thumbnail_status"] not in {"ready", "ok"}:
             return {"ok": False, "error": "Current item thumbnail is not ready"}
 
@@ -3593,6 +3742,8 @@ def import_zipmod_item_thumbnail(
         item = conn.execute("SELECT * FROM mod_items WHERE id = ?", (int(mod_item_id),)).fetchone()
         if item is None:
             return {"ok": False, "error": f"Item not found: {mod_item_id}"}
+        if str(item["item_domain"] or "") == "studio":
+            return {"ok": False, "error": "Studio items do not use thumbnails"}
         zipmod = conn.execute("SELECT * FROM zipmods WHERE id = ?", (item["zipmod_id"],)).fetchone()
         if zipmod is None:
             return {"ok": False, "error": f"Zipmod not found: {item['zipmod_id']}"}
@@ -4265,6 +4416,8 @@ def ensure_mod_item_thumbnail(
         ).fetchone()
         if item is None:
             return {"ok": False, "error": f"Item not found: {mod_item_id}"}
+        if str(item["item_domain"] or "") == "studio":
+            return {"ok": False, "error": "Studio items do not use thumbnails"}
         if str(item["parse_status"] or "") != "ok":
             return {"ok": False, "error": "Item parsing is not ready"}
         if not str(item["thumb_tex"] or "").strip():

@@ -20,7 +20,7 @@
 `mod_items` 是物品级明细索引。它通过 `zipmod_id` 关联到 `zipmods.id`，并冗余保存 `zipmod_guid` 和 `zipmod_author`，便于筛选和诊断。当前唯一约束是：
 
 ```text
-UNIQUE(zipmod_guid, kind, item_id)
+UNIQUE(zipmod_guid, kind, csv_path, item_id)
 ```
 
 `duplicate_zipmods` 记录同一 `guid` 下未被选为主记录的重复 zipmod 文件。重复文件不进入 `zipmods` 主索引，也不解析 `mod_items`。
@@ -95,7 +95,7 @@ modified_at
 6. 每个 `guid` 选择一个主 zipmod。
 7. 只对变化过的主 zipmod 重新解析 CSV、缩略图和 Unity3D 状态。
 8. 将主记录 upsert 到 `zipmods`。
-9. 对重新解析过的 zipmod，按 `zipmod_guid + kind + item_id` 更新现有 `mod_items`，尽量保留物品主键和角色卡依赖；本轮已不存在的物品才删除，新增物品才插入。
+9. 对重新解析过的 zipmod，按 `zipmod_guid + kind + csv_path + item_id` 更新现有 `mod_items`，尽量保留物品主键和角色卡依赖；本轮已不存在的物品才删除，新增物品才插入。该键同时允许同一个 Studio 模组的不同 ItemList 复用局部 ID。
 10. 回填 `zipmods.item_count` 和 zipmod 级 Unity3D 汇总状态。
 11. 删除本轮未见到的旧 zipmod 记录。
 12. 更新 `database_metadata.last_built_at`。
@@ -196,7 +196,7 @@ scan_error = 'moved by export'
 重新解析某个 zipmod 时，`replace_mod_items()` 会按以下稳定键匹配已有物品：
 
 ```text
-zipmod_guid + kind + item_id
+zipmod_guid + kind + csv_path + item_id
 ```
 
 匹配到的物品原地更新并保留 `mod_items.id`，不存在的旧物品才删除，新增物品才插入。这样角色卡依赖不会因为普通重解析而被外键置空。写入完成后回填 `zipmods`：

@@ -2770,6 +2770,7 @@ def find_dependency_item(
                 FROM mod_items
                 INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
                 WHERE zipmods.scan_status != 'stale'
+                  AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
                   AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
                   {kind_clause}
                   AND (

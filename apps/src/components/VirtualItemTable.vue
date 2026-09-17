@@ -147,7 +147,7 @@ watch(
         <span class="item-table-virtual-cell" role="cell">
           <span class="item-thumb" :class="props.badgeClass(entry.row.status)">
             <LazyThumbnail
-              v-if="entry.row.thumbnailUrl && entry.row.status === 'ready'"
+              v-if="entry.row.thumbnailUrl && (entry.row.isStudio || entry.row.status === 'ready')"
               :src="entry.row.thumbnailUrl"
               :alt="entry.row.name + ' preview'"
               :eager="entry.index < 24"

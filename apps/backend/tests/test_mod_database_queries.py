@@ -804,5 +804,66 @@ class ZipmodExportTests(unittest.TestCase):
         self.assertEqual(wildcard_result["total"], 0)
 
 
+class StudioItemQueryTests(unittest.TestCase):
+    def test_lists_studio_items_without_thumbnail_or_thumb_filter_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "mod_database.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+                now = "2026-09-17T00:00:00+00:00"
+                with conn:
+                    zipmod_id = conn.execute(
+                        """
+                        INSERT INTO zipmods (
+                            guid, name, author, file_path, relative_path, file_name,
+                            scan_status, last_scanned_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?)
+                        """,
+                        ("studio.guid", "Studio Sample", "Author", str(root / "studio.zipmod"), "studio.zipmod", "studio.zipmod", now, now, now),
+                    ).lastrowid
+                    conn.execute(
+                        """
+                        INSERT INTO mod_items (
+                            zipmod_id, zipmod_guid, zipmod_author, csv_path, item_id, kind,
+                            item_domain, studio_group_id, studio_group_name,
+                            studio_category_id, studio_category_name, name, main_manifest,
+                            main_ab, main_data, thumbnail_status, unity3d_status,
+                            parse_status, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
+                        """,
+                        (
+                            zipmod_id, "studio.guid", "Author", "abdata/studio/info/author/ItemList_01_8460_06.csv",
+                            "2", "__studio_item__", "studio", "8460", "Author Group", "6", "Animals",
+                            "Bull", "abdata", "author/data_prefab_000.unity3d", "Bull", "not_applicable", "in_mod", now, now,
+                        ),
+                    )
+            finally:
+                conn.close()
+
+            result = list_mod_items(db_path=db_path, kind="__studio_item__")
+            thumb_result = list_mod_items(db_path=db_path, kind="__studio_item__", status="thumb")
+            zipmod_result = list_zipmods(db_path=db_path)
+            thumbnail_zipmods = list_zipmods(db_path=db_path, status="thumbnail")
+            warning_zipmods = list_zipmods(db_path=db_path, status="warning")
+            normal_zipmods = list_zipmods(db_path=db_path, status="normal")
+
+        self.assertEqual(result["total"], 1)
+        item = result["rows"][0]
+        self.assertEqual(item["item_domain"], "studio")
+        self.assertEqual(item["thumbnail_status"], "not_applicable")
+        self.assertEqual(item["thumbnail_url"], "")
+        self.assertEqual(item["studio_group_name"], "Author Group")
+        self.assertEqual(item["studio_category_name"], "Animals")
+        self.assertEqual(thumb_result["total"], 0)
+        self.assertEqual(zipmod_result["total"], 1)
+        self.assertEqual(zipmod_result["rows"][0]["thumbnail_issue_count"], 0)
+        self.assertEqual(thumbnail_zipmods["total"], 0)
+        self.assertEqual(warning_zipmods["total"], 0)
+        self.assertEqual(normal_zipmods["total"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

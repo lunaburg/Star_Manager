@@ -381,21 +381,48 @@ const cardModeMeta = computed(() => {
             <section class="panel browser-panel">
               <div class="module-head">
                 <div><h1>人物卡浏览器（{{ ctx.cardBrowserCountText }}）</h1><p class="subtext mono">{{ ctx.cardFolderDisplay }}</p></div>
-                <button
-                  class="module-icon-button card-browser-refresh-button"
-                  type="button"
-                  :disabled="ctx.cardLibrary.loading || !ctx.cardLibrary.validGameDir"
-                  aria-label="刷新当前目录人物卡"
-                  title="刷新当前目录人物卡"
-                  @click="ctx.refreshCurrentCardFolder"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M20 11a8 8 0 0 0-14.8-4L3.5 9" />
-                    <path d="M3.5 4.5V9h4.5" />
-                    <path d="M4 13a8 8 0 0 0 14.8 4L20.5 15" />
-                    <path d="M20.5 19.5V15H16" />
-                  </svg>
-                </button>
+                <div class="character-browser-head-actions">
+                  <div
+                    class="card-tag-scope-switch"
+                    :class="{ 'is-library': ctx.cardTagFilter.scope === 'library' }"
+                    role="group"
+                    aria-label="标签筛选范围"
+                  >
+                    <button
+                      type="button"
+                      :class="{ active: ctx.cardTagFilter.scope === 'directory' }"
+                      :aria-pressed="ctx.cardTagFilter.scope === 'directory'"
+                      title="只筛选当前目录中的人物卡"
+                      @click="ctx.setCardTagScope('directory')"
+                    >
+                      当前目录
+                    </button>
+                    <button
+                      type="button"
+                      :class="{ active: ctx.cardTagFilter.scope === 'library' }"
+                      :aria-pressed="ctx.cardTagFilter.scope === 'library'"
+                      title="筛选整个人物卡库中的人物卡"
+                      @click="ctx.setCardTagScope('library')"
+                    >
+                      人物卡库
+                    </button>
+                  </div>
+                  <button
+                    class="module-icon-button card-browser-refresh-button"
+                    type="button"
+                    :disabled="ctx.cardLibrary.loading || !ctx.cardLibrary.validGameDir"
+                    aria-label="刷新当前目录人物卡"
+                    title="刷新当前目录人物卡"
+                    @click="ctx.refreshCurrentCardFolder"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M20 11a8 8 0 0 0-14.8-4L3.5 9" />
+                      <path d="M3.5 4.5V9h4.5" />
+                      <path d="M4 13a8 8 0 0 0 14.8 4L20.5 15" />
+                      <path d="M20.5 19.5V15H16" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div class="toolbar">
                 <div class="toolbar-left">
@@ -488,31 +515,6 @@ const cardModeMeta = computed(() => {
                 <div class="toolbar-right">
                   <div class="card-filter-toolbar-controls">
                     <div class="card-tag-filter-controls">
-                    <div
-                      class="card-tag-scope-switch"
-                      :class="{ 'is-library': ctx.cardTagFilter.scope === 'library' }"
-                      role="group"
-                      aria-label="标签筛选范围"
-                    >
-                      <button
-                        type="button"
-                        :class="{ active: ctx.cardTagFilter.scope === 'directory' }"
-                        :aria-pressed="ctx.cardTagFilter.scope === 'directory'"
-                        title="只筛选当前目录中的人物卡"
-                        @click="ctx.setCardTagScope('directory')"
-                      >
-                        当前目录
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ active: ctx.cardTagFilter.scope === 'library' }"
-                        :aria-pressed="ctx.cardTagFilter.scope === 'library'"
-                        title="筛选整个人物卡库中的人物卡"
-                        @click="ctx.setCardTagScope('library')"
-                      >
-                        人物卡库
-                      </button>
-                    </div>
                     <div class="card-tag-filter-combobox">
                     <svg class="card-tag-filter-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                       <circle cx="10.5" cy="10.5" r="5.5" />

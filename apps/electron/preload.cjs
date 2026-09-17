@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   openUnity3dInSb3Utility: (filePath) => ipcRenderer.invoke("sb3utility:openUnity3d", filePath),
   openWorkbenchAssetInSb3Utility: (payload) => ipcRenderer.invoke("workbench:openAssetInSb3Utility", payload),
   openDirectory: (directoryPath) => ipcRenderer.invoke("shell:openDirectory", directoryPath),
+  openRepository: () => ipcRenderer.invoke("shell:openRepository"),
   deleteSims4ResultDirectory: (directoryPath) => ipcRenderer.invoke("sims4:deleteResultDirectory", directoryPath),
   createWorkbenchProject: (payload) => ipcRenderer.invoke("workbench:createProject", payload),
   deleteWorkbenchProject: (payload) => ipcRenderer.invoke("workbench:deleteProject", payload),

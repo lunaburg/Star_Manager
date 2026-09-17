@@ -8,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { terminateProcessTree } = require("./backend-process.cjs");
+const { fetchBackendRequest } = require("./backend-request.cjs");
 const {
   STANDARD_RESOLUTIONS,
   formatResolution,
@@ -43,6 +44,7 @@ const gameExecutables = {
   studio: "StudioNEOV2.exe",
   vr: "HoneySelect2VR.exe"
 };
+const GITHUB_REPOSITORY_URL = "https://github.com/lunaburg/Star_Manager";
 const DEFAULT_SB3UTILITY_EXECUTABLE_PATH = String(process.env.STAR_MANAGER_SB3UTILITY_EXE || "");
 const MAX_DATABASE_WORKERS = 8;
 
@@ -802,22 +804,7 @@ async function fetchBackend(route, options = {}) {
     },
     body: options.body ? JSON.stringify(options.body) : undefined
   };
-
-  let lastError;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const response = await fetch(url, fetchOptions);
-      return response.json();
-    } catch (error) {
-      lastError = error;
-      await sleep(250);
-    }
-  }
-
-  return {
-    ok: false,
-    error: `Python backend unavailable: ${lastError ? lastError.message : "unknown error"}`
-  };
+  return fetchBackendRequest(url, fetchOptions);
 }
 
 function escapeXml(value) {
@@ -4123,6 +4110,15 @@ ipcMain.handle("shell:openDirectory", async (_event, directoryPath) => {
   }
   const error = await shell.openPath(directoryPath);
   return error ? { ok: false, error } : { ok: true };
+});
+
+ipcMain.handle("shell:openRepository", async () => {
+  try {
+    await shell.openExternal(GITHUB_REPOSITORY_URL);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `打开 GitHub 仓库失败：${error.message}` };
+  }
 });
 
 app.on("window-all-closed", () => {

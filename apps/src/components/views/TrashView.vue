@@ -12,7 +12,7 @@ defineProps({
       </div>
       <div class="trash-hero-actions">
         <button type="button" class="ghost-button" :disabled="ctx.trashLoading" @click="ctx.loadTrash">刷新</button>
-        <button type="button" class="danger-action" :disabled="!ctx.trashEntries.length || ctx.trashAction" @click="ctx.emptyTrash">
+        <button v-if="ctx.filteredTrashEntries.length" type="button" class="danger-action" :disabled="Boolean(ctx.trashAction)" @click="ctx.emptyTrash">
           清空回收站
         </button>
       </div>

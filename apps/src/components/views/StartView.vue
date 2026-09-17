@@ -19,6 +19,19 @@ const { ctx } = defineProps({
               <span class="badge" :class="ctx.setup.dirty ? 'warn' : 'neutral'">
                 {{ ctx.setup.dirty ? "有未保存修改" : "配置已同步" }}
               </span>
+              <button
+                type="button"
+                class="repository-button"
+                aria-label="打开 GitHub 仓库"
+                title="打开 GitHub 仓库"
+                @click="ctx.openRepository"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3 0 6.8-1.7 6.8-7.5A5.8 5.8 0 0 0 19.7 3a5.4 5.4 0 0 0-.1-2s-1.3-.4-4.6 1.7a13.4 13.4 0 0 0-6 0C5.7.6 4.4 1 4.4 1a5.4 5.4 0 0 0-.1 2A5.8 5.8 0 0 0 2.2 7c0 5.8 3.5 7.5 6.8 7.5A4.8 4.8 0 0 0 8 18v4" />
+                  <path d="M8 18c-3.1 1.5-3.1-1.5-4.4-1.5" />
+                </svg>
+                <span>GitHub 仓库</span>
+              </button>
             </section>
 
             <div class="start-columns">

@@ -25,8 +25,8 @@ const views = [
   { id: "mods", icon: "MD", label: "模组" },
   { id: "plugins", icon: "PL", label: "插件" },
   { id: "workbench", icon: "WB", label: "工作台" },
-  { id: "logs", icon: "LG", label: "日志" },
-  { id: "trash", icon: "TR", label: "回收站" }
+  { id: "trash", icon: "TR", label: "回收站" },
+  { id: "logs", icon: "LG", label: "日志" }
 ];
 
 const activeView = ref("start");
@@ -1588,7 +1588,7 @@ const cardMoveAvailable = computed(() => (
 ));
 const cardMoveDestinationReady = computed(() => Boolean(cardMovePrompt.targetPath) && cardMovePrompt.targetPath !== selectedCardFolder.value);
 const cardMoveFolderRows = computed(() => flattenManagedMoveTree(cardTree.value));
-const gameDirDisplay = computed(() => paths.gameDir || "D:\\HoneySelect2");
+const gameDirDisplay = computed(() => paths.gameDir);
 const backendReady = computed(() => backendStatus.value === "ready");
 function formatProgressPercent(value) {
   const percent = Math.max(0, Math.min(100, Number(value || 0)));
@@ -7057,6 +7057,11 @@ async function openGameDirectory(relativePath) {
   if (!result?.ok) log(`[Directory Error] ${result?.error || "无法打开目录"}: ${directoryPath}`);
 }
 
+async function openRepository() {
+  const result = await window.desktopApi?.openRepository?.();
+  if (!result?.ok) log(`[External Link Error] ${result?.error || "无法打开 GitHub 仓库"}`);
+}
+
 function openDirectoryShortcutPrompt() {
   directoryShortcutPrompt.open = true;
   directoryShortcutPrompt.name = "";
@@ -8997,8 +9002,24 @@ async function restoreTrash(item) {
   trashError.value = "";
   trashNotice.value = "";
   try {
-    const result = await window.desktopApi?.backendRequest?.(`/trash/${encodeURIComponent(item.kind)}/${encodeURIComponent(item.id)}/restore`, { method: "POST" });
-    if (!result?.ok) throw new Error(result?.error || "恢复失败");
+    const restoreRoute = `/trash/${encodeURIComponent(item.kind)}/${encodeURIComponent(item.id)}/restore`;
+    let result = await window.desktopApi?.backendRequest?.(restoreRoute, { method: "POST" });
+    if (!result?.ok) {
+      if (result?.stale) {
+        // The list can be a stale filesystem snapshot while the backend is changing over.
+        // Retry once only when a fresh backend read still confirms this exact entry is recoverable.
+        await loadTrash();
+        const refreshedItem = trashEntries.value.find(
+          (entry) => entry.kind === item.kind && entry.id === item.id && entry.can_restore
+        );
+        if (refreshedItem) {
+          result = await window.desktopApi?.backendRequest?.(restoreRoute, { method: "POST" });
+        }
+      }
+    }
+    if (!result?.ok) {
+      throw new Error(result?.error || "恢复失败");
+    }
     if (item.kind === "mods") {
       await refreshModDatabaseList();
     } else if (item.kind === "cards") {
@@ -9022,7 +9043,10 @@ async function permanentlyDeleteTrash(item) {
   trashNotice.value = "";
   try {
     const result = await window.desktopApi?.backendRequest?.(`/trash/${encodeURIComponent(item.kind)}/${encodeURIComponent(item.id)}/delete`, { method: "POST" });
-    if (!result?.ok) throw new Error(result?.error || "永久删除失败");
+    if (!result?.ok) {
+      if (result?.stale) await loadTrash();
+      throw new Error(result?.error || "永久删除失败");
+    }
     trashNotice.value = `已永久删除：${item.name || item.file_name}`;
     await loadTrash();
   } catch (error) {
@@ -9352,6 +9376,7 @@ const appCtx = reactive({
   openManifestAuthorPrompt,
   openManifestEditor,
   openGameDirectory,
+  openRepository,
   openDirectoryShortcut,
   openDirectoryShortcutPrompt,
   openDirectoryShortcutEditor,
@@ -10844,7 +10869,12 @@ watch(backendStatus, (status, previousStatus) => {
             <img v-if="getAchievementIcon(achievementToast)" :src="getAchievementIcon(achievementToast)" :alt="`${achievementToast.title}图标`">
             <span v-else>{{ achievementToast.icon }}</span>
           </span>
-          <span><small>成就解锁</small><strong>{{ achievementToast.title }}</strong><em>{{ achievementToast.description }}</em></span>
+          <span class="achievement-toast-copy">
+            <span class="achievement-toast-kicker">成就解锁</span>
+            <strong>{{ achievementToast.title }}</strong>
+            <span class="achievement-toast-description">{{ achievementToast.description }}</span>
+          </span>
+          <span class="achievement-toast-arrow" aria-hidden="true">→</span>
         </button>
 
     </main>

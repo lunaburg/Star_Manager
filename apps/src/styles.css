@@ -1968,6 +1968,23 @@ small {
   padding: 14px;
 }
 
+.repository-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.repository-button svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .start-columns {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 260px;
@@ -2574,6 +2591,19 @@ small {
 .top-actions > button:not(:disabled):active,
 .launch-bar > button:not(.primary):not(:disabled):active {
   transform: translateY(1px);
+}
+
+.launch-bar > button.repository-button:not(.primary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+}
+
+.launch-bar > button.repository-button:not(.primary):not(:disabled):hover,
+.launch-bar > button.repository-button:not(.primary):not(:disabled):focus-visible {
+  border: 0;
 }
 
 .overview-grid {
@@ -3563,6 +3593,13 @@ small {
   box-shadow: none;
 }
 
+.character-browser-head-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
 .character-layout .browser-panel > .toolbar .toolbar-right {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -3590,6 +3627,24 @@ small {
 .card-bulk-toolbar-actions .icon-action svg {
   width: 19px;
   height: 19px;
+}
+
+/* 批量工具栏会在窄窗口中与下一行筛选控件相邻，提示统一向上展开，避免被覆盖。 */
+.character-layout .browser-panel > .toolbar .card-bulk-toolbar-actions .icon-action[data-tooltip]::before {
+  top: auto;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+}
+
+.character-layout .browser-panel > .toolbar .card-bulk-toolbar-actions .icon-action[data-tooltip]::after {
+  top: auto;
+  right: 14px;
+  bottom: calc(100% + 3px);
+  z-index: 31;
+  border-top: 0;
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  border-left: 0;
 }
 
 .card-filter-toolbar-controls {
@@ -4841,7 +4896,7 @@ small {
 .character-layout .browser-panel > .toolbar .bulk-select-status button,
 .character-layout .browser-panel > .toolbar .card-bulk-action-bar,
 .character-layout .browser-panel > .toolbar .card-bulk-toolbar-actions .icon-action,
-.character-layout .browser-panel > .toolbar .card-tag-scope-switch,
+.character-layout .browser-panel > .module-head .card-tag-scope-switch,
 .character-layout .browser-panel > .toolbar .card-tag-filter-combobox input,
 .character-layout .browser-panel > .toolbar .card-dependency-filter {
   border-color: rgba(255, 255, 255, .6);
@@ -4864,12 +4919,12 @@ small {
   border-width: 1px;
 }
 
-.character-layout .browser-panel > .toolbar .card-tag-scope-switch {
+.character-layout .browser-panel > .module-head .card-tag-scope-switch {
   background: rgba(255, 226, 238, .22);
   background: color-mix(in srgb, #f2dbe4 28%, transparent);
 }
 
-.character-layout .browser-panel > .toolbar .card-tag-scope-switch::before {
+.character-layout .browser-panel > .module-head .card-tag-scope-switch::before {
   border-color: rgba(190, 102, 134, .42);
   background: linear-gradient(180deg, rgba(255, 255, 255, .52), rgba(253, 235, 242, .28));
   box-shadow:
@@ -12826,12 +12881,17 @@ tbody tr:hover td {
 .achievement-drawer dl div { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(126, 143, 157, .18); font-size: 12px; }
 .achievement-drawer dt { color: var(--muted); }
 .achievement-drawer dd { margin: 0; color: #274454; font-weight: 700; }
-.achievement-toast { position: fixed; z-index: 60; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 12px; width: 320px; padding: 14px; text-align: left; border: 2px solid #171514; background: #fff8ce; box-shadow: 6px 6px 0 #171514; animation: achievement-toast-in .25s ease-out; }
-@keyframes achievement-toast-in { from { transform: translateY(20px); opacity: 0; } }
-.achievement-toast > span:last-child { display: grid; gap: 2px; }
-.achievement-toast small { font: 800 10px/1 var(--mono); letter-spacing: .12em; }
-.achievement-toast strong { font-size: 16px; }
-.achievement-toast em { color: #615b54; font-size: 11px; font-style: normal; }
+.achievement-toast { position: fixed; z-index: 60; right: 24px; bottom: 24px; display: grid; grid-template-columns: 54px minmax(0, 1fr) 20px; align-items: center; gap: 12px; width: min(380px, calc(100vw - 48px)); min-height: 88px; height: auto; padding: 12px 14px; overflow: hidden; text-align: left; border: 0; border-radius: 8px; background: rgba(255, 248, 207, .92); box-shadow: none; color: #2b2924; -webkit-backdrop-filter: blur(18px) saturate(1.08); backdrop-filter: blur(18px) saturate(1.08); animation: achievement-toast-in .25s ease-out; }
+@keyframes achievement-toast-in { from { transform: translateY(16px); opacity: 0; } }
+.achievement-toast:hover { background: rgba(255, 250, 218, .96); box-shadow: none; }
+.achievement-toast:focus-visible { outline: 2px solid #45839b; outline-offset: 3px; }
+.achievement-toast .achievement-medal { width: 54px; height: 54px; flex-basis: 54px; border: 0; border-radius: 6px; box-shadow: none; }
+.achievement-toast-copy { display: grid; min-width: 0; gap: 3px; }
+.achievement-toast-kicker { color: #80641c; font: 800 10px/1.1 var(--mono); letter-spacing: 0; }
+.achievement-toast strong { overflow: hidden; color: #24221e; font-size: 17px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.achievement-toast-description { display: -webkit-box; overflow: hidden; color: #655d4e; font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.achievement-toast-arrow { align-self: center; color: #80641c; font: 800 20px/1 var(--mono); transition: transform .18s ease; }
+.achievement-toast:hover .achievement-toast-arrow { transform: translateX(2px); }
 
 @media (max-width: 1320px) {
   .mod-management-layout {

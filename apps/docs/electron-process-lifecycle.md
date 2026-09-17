@@ -7,6 +7,7 @@ Star_Manager 的 Electron 主进程会启动本地 Python HTTP 后端。Windows 
 ## 解决方案
 
 - Electron 启动时调用 `app.requestSingleInstanceLock()`。第二次启动不会创建新的应用窗口，而是唤起已有窗口。
+- Electron 到本地后端的临时网络重试只适用于 `GET`、`HEAD` 和 `OPTIONS`；恢复、删除和其他 `POST` 变更只会提交一次，避免响应丢失时重复执行文件移动。
 - Electron 退出统一经过 `before-quit`，先阻止默认退出，再等待后端清理完成。
 - Windows 使用 `taskkill.exe /PID <pid> /T /F` 清理后端进程树，覆盖直接启动的 PyInstaller 后端和带包装进程的开发启动路径。
 - Linux/macOS 保留向子进程发送 `SIGTERM` 的行为。

@@ -273,6 +273,21 @@ error > missing > not_in_mod > in_mod > empty
 - **验证结果**：后端单元测试覆盖 32 逻辑处理器对应 8 worker 上限、单处理器退化为 1、请求值过大截断，以及任务桥传递配置值；前端构建和 Python 测试用于验证完整链路。
 - **适用边界**：线程数上限适用于模组和人物卡解析/预览准备 worker，不代表 SQLite 写入线程数；大体积 Unity3D 模组或大型 PNG 会提高并发内存峰值，8 线程仍不是所有磁盘和内存配置下的最佳速度，用户可选择更低值。
 
+#### Manifest 读取并发化（2026-09-17）
+
+- **问题背景**：全量或首次建库时，`build_candidates_from_file_stats()` 会逐个打开 zipmod 并读取 `manifest.xml`；已有“建库线程数”设置仅影响后续 CSV、缩略图和 Unity3D 准备，无法缩短该阶段。
+- **根因**：文件指纹、SQLite 缓存复用判断和 ZIP manifest 读取位于同一个主线程循环中。
+- **解决方案**：主线程仍顺序读取文件属性、判断 `file_size`/`modified_at` 缓存命中并维护稳定候选顺序；对新增、变更或全量模式下需要实际读取的 archive，复用同一 `worker_count` 建立 `ThreadPoolExecutor` 并行读取 manifest。worker 不访问 SQLite，完成结果由主线程汇总。单 worker、单个待读取 archive 和缓存命中场景保持顺序读取。
+- **验证结果**：`test_mod_database_workers.py` 新增两份变更 zipmod 的 barrier 并发测试，确认配置为 2 时 manifest 读取在两个 worker 中执行；既有 worker 上限测试仍覆盖配置截断。
+- **适用边界**：并发只覆盖 manifest 文件读取，不改变 ZIP 中央目录解析、SQLite 串行写入或后续 Unity3D provider 扫描。NVMe 通常适合从 4 worker 开始实测，机械硬盘应从 2 worker 开始，避免随机读取竞争。
+
+#### 模组准备进度日志节流（2026-09-17）
+
+- **问题背景**：并行准备 CSV、缩略图与 Unity3D 状态时，每完成一个主 zipmod 都会发送一次 `Prepared N/total primary zipmods` 进度消息；大型库会在运行日志中产生数千条相邻记录。
+- **解决方案**：多 worker 与单 worker 路径统一仅在完成数为 100 的倍数，以及最后一个主 zipmod 完成时发送准备阶段进度消息。
+- **验证结果**：`test_mod_database_workers.py` 覆盖 250 个任务只报告 100、200、250，以及总数小于 100 时仍报告最终完成项。
+- **适用边界**：节流只减少任务桥和前端运行日志的重复消息，不改变实际准备顺序、进度区间、worker 调度或 SQLite 写入。
+
 #### 8 线程硬上限调整（2026-09-16）
 
 - **背景**：实际建库测试中，12 线程的缩略图解析阶段明显慢于 8 线程；该阶段受磁盘、UnityPy 和内存并发影响，不会随线程数线性提速。

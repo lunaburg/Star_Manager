@@ -78,6 +78,7 @@ Defined in `apps/electron/preload.cjs`.
 - `POST /trash/{cards|mods}/{entry_id}/restore`: move one entry back to its recorded source path. Restored mods are re-indexed through the single-zipmod indexing flow.
 - `POST /trash/{cards|mods}/{entry_id}/delete`: permanently delete one entry from the runtime recycle bin.
 - `POST /trash/empty`: permanently delete all valid recycle-bin entries.
+- `POST /trash/{cards|mods}/{entry_id}/restore` and `POST /trash/{cards|mods}/{entry_id}/delete` return `stale: true` with `ok: false` when the entry's record or payload is already missing or damaged. The renderer must refresh its list and retain the error message; a normal restore collision does not set `stale`.
 
 ## Mutation routing rule
 

@@ -56,7 +56,7 @@
 | 前端架构 | [前端 UI 架构](frontend-ui/frontend-ui-architecture.md) | 页面清单、实现基线和整体产品假设 |
 | 应用外壳 | [主布局](frontend-ui/main-layout.md) | 全局导航、顶部目录状态、按实测耗时加权的数据库任务进度、数据库重建和共享上下文 |
 | 开始游戏 | [开始页布局](frontend-ui/start-layout.md) | 三个一级容器移除外部边框；HS2 目录选择、后端就绪竞态恢复、目录校验任务、三种启动入口、固定与自定义目录快捷入口、六个固定插件开关和两个特殊设置；读写 `UserData/setup.xml`、备份和启动框架检测 |
-| 总览 | [总览页布局](frontend-ui/overview-layout.md) | 四个一级容器移除外部边框；人物卡/模组/物品/服装卡/场景卡/插件摘要、建议操作、最近任务、本地成就 |
+| 总览 | [总览页布局](frontend-ui/overview-layout.md) | 四个一级容器移除外部边框；人物卡/模组/物品/服装卡/场景卡/插件摘要、使用工具、最近任务、本地成就 |
 | 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、服装卡、场景卡子界面，其中三类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
 | 收藏视觉 | [人物卡收藏视觉状态](frontend-ui/character-card-favorite-effects.md) | 收藏主题、铭牌、边框、名字溢出和设置持久化 |
 | 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、多选操作栏与批量按钮玻璃化、增强表头磨砂层、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装和安全维护 |
@@ -71,7 +71,7 @@
 | 主题 | 文档 | 适用场景 |
 | --- | --- | --- |
 | 模组数据库 | [模组数据库设计](mod_manage/mod_database_design.md) | SQLite 表、字段、状态、扫描和查询边界 |
-| 建库性能基准 | [模组数据库建库性能基准](mod_manage/mod_database_build_benchmark.md) | 从现有数据库抽取 100 个 zipmod，拆分 ZIP 读取/解压、UnityPy 加载、缩略图写出和完整建库耗时 |
+| 建库性能基准 | [模组数据库建库性能基准](mod_manage/mod_database_build_benchmark.md) / [数据库变动检测](mod_manage/mod_database_change_detection.md) | 从现有数据库抽取 100 个 zipmod，拆分 ZIP 读取/解压、UnityPy 加载、缩略图写出、manifest 并发读取和完整建库耗时 |
 | 游戏原版资源索引 | [原版资源索引](mod_manage/builtin_resource_index.md) | 原版 `ChaListData` 列表、`builtin_items`、缩略图和 Coordinate 匹配 |
 | 增量建库 | [数据库变动检测](mod_manage/mod_database_change_detection.md) | 新增/移除/修改、重复 GUID、stale 和角色卡依赖重连 |
 | 角色卡二进制 | [角色卡解析说明](mod_manage/character_card_parsing.md) | PNG 尾部、MessagePack、UniversalAutoResolver、人物参数和坐标卡导出 |

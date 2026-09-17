@@ -55,6 +55,22 @@ class TrashTests(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertIn("同名文件", result["error"])
 
+    def test_missing_payload_is_marked_stale_and_hidden_after_refresh(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "sample.zipmod"
+            source.write_bytes(b"archive")
+            trash_root = root / "runtime" / "trash"
+
+            with patch.object(trash, "TRASH_ROOT", trash_root):
+                record = trash.move_to_trash(source, "mods")
+                Path(record["payload_path"]).unlink()
+
+                result = trash.restore_trash_entry("mods", record["id"])
+                self.assertFalse(result["ok"])
+                self.assertTrue(result["stale"])
+                self.assertEqual(trash.list_trash()["total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

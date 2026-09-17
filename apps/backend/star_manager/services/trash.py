@@ -125,7 +125,7 @@ def list_trash() -> dict:
 def restore_trash_entry(kind: str, entry_id: str) -> dict:
     record = _read_entry(kind, entry_id)
     if not record:
-        return {"ok": False, "error": "回收站条目不存在或文件已损坏"}
+        return {"ok": False, "error": "回收站条目不存在或文件已损坏", "stale": True}
     source = Path(str(record.get("source_path") or "")).resolve()
     if source.exists():
         return {"ok": False, "error": f"原位置已有同名文件：{source}"}
@@ -146,7 +146,7 @@ def restore_trash_entry(kind: str, entry_id: str) -> dict:
 def permanently_delete_trash_entry(kind: str, entry_id: str) -> dict:
     record = _read_entry(kind, entry_id)
     if not record:
-        return {"ok": False, "error": "回收站条目不存在或文件已损坏"}
+        return {"ok": False, "error": "回收站条目不存在或文件已损坏", "stale": True}
     shutil.rmtree(_entry_root(kind, entry_id), ignore_errors=False)
     return {"ok": True, "kind": kind, "id": entry_id, "permanently_deleted": True}
 

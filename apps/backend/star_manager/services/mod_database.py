@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 import io
 import os
 import re
@@ -122,6 +122,7 @@ FINALIZE_PROGRESS = 98
 AUTO_REBUILD_MAX_CHANGES = 200
 AUTO_REBUILD_MAX_RATIO = 0.05
 MAX_DATABASE_WORKERS = 8
+PREPARE_PROGRESS_REPORT_INTERVAL = 100
 
 
 def get_build_worker_limit() -> int:
@@ -145,6 +146,11 @@ def calculate_progress(current: int, total: int, start: int, end: int) -> float:
         return float(end)
     clamped = min(max(current, 0), total)
     return start + clamped / total * (end - start)
+
+
+def should_report_prepare_progress(completed: int, total: int) -> bool:
+    """Keep long-running prepare-task progress useful without flooding task logs."""
+    return completed == total or completed % PREPARE_PROGRESS_REPORT_INTERVAL == 0
 
 
 def summarize_prepared_unity3d(
@@ -209,6 +215,7 @@ def build_candidates_from_file_stats(
     game_dir: Path,
     force_full: bool,
     progress_callback: Callable[[str, int, int], None] | None = None,
+    worker_count: int = 1,
 ) -> tuple[list[ZipmodCandidate], set[str], dict[str, int]]:
     mods_dir = game_dir / "mods"
     existing_by_path = {
@@ -231,9 +238,20 @@ def build_candidates_from_file_stats(
     if progress_callback is not None:
         progress_callback("discover_done", total, total)
 
-    candidates: list[ZipmodCandidate] = []
+    candidate_rows: list[tuple[Path, str, int, str, ManifestData | None]] = []
+    manifest_paths: list[tuple[int, Path]] = []
     changed_paths: set[str] = set()
     stats = {"reused_zipmods": 0, "changed_zipmods": 0}
+    completed_manifest_count = 0
+
+    def report_manifest_progress() -> None:
+        if progress_callback is not None and (
+            completed_manifest_count == total
+            or completed_manifest_count == 1
+            or completed_manifest_count % 100 == 0
+        ):
+            progress_callback("manifest", completed_manifest_count, total)
+
     for index, path in enumerate(zipmod_paths, start=1):
         resolved_path = path.resolve()
         stat = path.stat()
@@ -260,23 +278,53 @@ def build_candidates_from_file_stats(
             )
             stats["reused_zipmods"] += 1
         else:
-            manifest = read_manifest(path)
+            manifest = None
             changed_paths.add(str(resolved_path))
             stats["changed_zipmods"] += 1
 
-        candidates.append(
-            ZipmodCandidate(
-                manifest=manifest,
-                path=resolved_path,
-                relative_path=relative_path,
-                file_size=stat.st_size,
-                modified_at=modified_at,
-            )
+        candidate_rows.append((resolved_path, relative_path, stat.st_size, modified_at, manifest))
+        if manifest is None:
+            manifest_paths.append((index - 1, path))
+        else:
+            completed_manifest_count += 1
+            report_manifest_progress()
+
+    manifests_by_index: dict[int, ManifestData] = {}
+    if worker_count > 1 and len(manifest_paths) > 1:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            manifest_iterator = iter(manifest_paths)
+            futures = {}
+            for _ in range(min(worker_count * 4, len(manifest_paths))):
+                index, path = next(manifest_iterator)
+                futures[executor.submit(read_manifest, path)] = index
+
+            while futures:
+                completed_futures, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed_futures:
+                    manifests_by_index[futures.pop(future)] = future.result()
+                    completed_manifest_count += 1
+                    report_manifest_progress()
+                    try:
+                        index, path = next(manifest_iterator)
+                    except StopIteration:
+                        continue
+                    futures[executor.submit(read_manifest, path)] = index
+    else:
+        for index, path in manifest_paths:
+            manifests_by_index[index] = read_manifest(path)
+            completed_manifest_count += 1
+            report_manifest_progress()
+
+    candidates = [
+        ZipmodCandidate(
+            manifest=manifest if manifest is not None else manifests_by_index[index],
+            path=resolved_path,
+            relative_path=relative_path,
+            file_size=file_size,
+            modified_at=modified_at,
         )
-        if progress_callback is not None and (
-            index == total or index == 1 or index % 100 == 0
-        ):
-            progress_callback("manifest", index, total)
+        for index, (resolved_path, relative_path, file_size, modified_at, manifest) in enumerate(candidate_rows)
+    ]
     return candidates, changed_paths, stats
 
 
@@ -754,11 +802,13 @@ def build_database(
                     f"Read manifests {current}/{total} zipmod files",
                 )
 
+        actual_worker_count = choose_build_worker_count(worker_count)
         candidates, changed_paths, reuse_stats = build_candidates_from_file_stats(
             conn,
             game_dir,
             force_full,
             report_scan_progress,
+            worker_count=actual_worker_count,
         )
         report(FOUND_PROGRESS, f"Found {len(candidates)} zipmod files")
         grouped, invalid = group_valid_candidates(candidates)
@@ -825,8 +875,6 @@ def build_database(
         affected_mod_guids = (
             replaced_item_guids | removed_guids | previous_guids_for_changed_paths
         )
-        actual_worker_count = choose_build_worker_count(worker_count)
-
         stats = {
             "zipmod_files": len(candidates),
             "invalid_zipmods": len(invalid),
@@ -877,6 +925,30 @@ def build_database(
                 for completed_count, future in enumerate(as_completed(future_to_candidate), start=1):
                     candidate = future_to_candidate[future]
                     prepared_by_guid[candidate.manifest.guid] = future.result()
+                    if should_report_prepare_progress(completed_count, total_primary_candidates):
+                        report(
+                            round(
+                                calculate_progress(
+                                    completed_count,
+                                    total_primary_candidates,
+                                    PREPARE_START_PROGRESS,
+                                    PREPARE_END_PROGRESS,
+                                ),
+                                1,
+                            ),
+                            (
+                                f"Prepared {completed_count}/{total_primary_candidates} primary zipmods"
+                            ),
+                        )
+        else:
+            for completed_count, candidate in enumerate(primary_candidates, start=1):
+                prepared_by_guid[candidate.manifest.guid] = prepare_mod_items(
+                    game_dir,
+                    candidate,
+                    thumbnail_dir,
+                    provider_index,
+                )
+                if should_report_prepare_progress(completed_count, total_primary_candidates):
                     report(
                         round(
                             calculate_progress(
@@ -887,30 +959,8 @@ def build_database(
                             ),
                             1,
                         ),
-                        (
-                            f"Prepared {completed_count}/{total_primary_candidates} primary zipmods"
-                        ),
+                        f"Prepared {completed_count}/{total_primary_candidates} primary zipmods",
                     )
-        else:
-            for completed_count, candidate in enumerate(primary_candidates, start=1):
-                prepared_by_guid[candidate.manifest.guid] = prepare_mod_items(
-                    game_dir,
-                    candidate,
-                    thumbnail_dir,
-                    provider_index,
-                )
-                report(
-                    round(
-                        calculate_progress(
-                            completed_count,
-                            total_primary_candidates,
-                            PREPARE_START_PROGRESS,
-                            PREPARE_END_PROGRESS,
-                        ),
-                        1,
-                    ),
-                    f"Prepared {completed_count}/{total_primary_candidates} primary zipmods",
-                )
         phase_timings["item_parse_ms"] = round(
             (perf_counter() - item_parse_started_at) * 1000,
             2,

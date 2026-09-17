@@ -50,6 +50,144 @@ const pageComponents = {
 const activePageComponent = computed(() => pageComponents[activeView.value] || StartView);
 const cardBrowserMode = ref("character");
 const libraryMode = ref("mods");
+const modLibraryScrollPositions = reactive({ mods: 0, items: 0 });
+const modTableScrollTarget = ref(null);
+let modTableScrollRestoreToken = 0;
+let modTableScrollRestoring = false;
+
+const cardLibraryScrollPositions = reactive({ character: 0, clothes: 0, scene: 0 });
+const cardLibraryScrollTargets = reactive({ character: null, clothes: null, scene: null });
+let cardLibraryScrollRestoreToken = 0;
+let cardLibraryScrollRestoring = false;
+
+function captureModTableScrollPosition(mode = libraryMode.value, target = modTableScrollTarget.value, options = {}) {
+  if (activeView.value !== "mods" && !options.allowInactive) return;
+  if ((mode !== "mods" && mode !== "items") || !target) return;
+  // A delayed restore can temporarily clamp scrollTop to the currently loaded
+  // content height. Do not overwrite the intended session position with that
+  // transient value while the item list is still growing.
+  if (modTableScrollRestoring) return;
+  const scrollTop = Number(target.scrollTop);
+  if (!Number.isFinite(scrollTop)) return;
+  if (!modTableScrollRestoring) modTableScrollRestoreToken += 1;
+  modLibraryScrollPositions[mode] = Math.max(0, scrollTop);
+}
+
+function restoreModTableScrollPosition(mode = libraryMode.value) {
+  if (activeView.value !== "mods" || mode !== libraryMode.value || !modTableScrollTarget.value) return;
+  const scrollTop = Number(modLibraryScrollPositions[mode]);
+  if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
+  modTableScrollRestoring = true;
+  modTableScrollTarget.value.scrollTop = scrollTop;
+  window.requestAnimationFrame(() => {
+    modTableScrollRestoring = false;
+  });
+}
+
+function scheduleModTableScrollRestore(mode = libraryMode.value) {
+  if (activeView.value !== "mods" || mode !== libraryMode.value) return;
+  const restoreToken = ++modTableScrollRestoreToken;
+  for (const delay of [0, 50, 150, 300, 600, 1000]) {
+    window.setTimeout(() => {
+      if (
+        restoreToken !== modTableScrollRestoreToken
+        || activeView.value !== "mods"
+        || mode !== libraryMode.value
+        || !modTableScrollTarget.value
+      ) return;
+      restoreModTableScrollPosition(mode);
+    }, delay);
+  }
+}
+
+function registerModTableScrollContainer(target) {
+  if (!target) return;
+  modTableScrollTarget.value = target;
+  scheduleModTableScrollRestore();
+}
+
+function unregisterModTableScrollContainer(target) {
+  if (modTableScrollTarget.value !== target) return;
+  modTableScrollTarget.value = null;
+  modTableScrollRestoreToken += 1;
+}
+
+function isCardLibraryMode(mode) {
+  return mode === "character" || mode === "clothes" || mode === "scene";
+}
+
+function captureCardLibraryScrollPosition(
+  mode = cardBrowserMode.value,
+  target = cardLibraryScrollTargets[mode],
+  options = {}
+) {
+  if (activeView.value !== "characters" && !options.allowInactive) return;
+  if (!isCardLibraryMode(mode) || !target || cardLibraryScrollRestoring) return;
+  const scrollTop = Number(target.scrollTop);
+  if (!Number.isFinite(scrollTop)) return;
+  cardLibraryScrollPositions[mode] = Math.max(0, scrollTop);
+  cardLibraryScrollRestoreToken += 1;
+}
+
+function restoreCardLibraryScrollPosition(mode = cardBrowserMode.value) {
+  const target = cardLibraryScrollTargets[mode];
+  if (
+    activeView.value !== "characters"
+    || mode !== cardBrowserMode.value
+    || !target
+  ) return;
+  const scrollTop = Number(cardLibraryScrollPositions[mode]);
+  if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
+  cardLibraryScrollRestoring = true;
+  target.scrollTop = scrollTop;
+  window.requestAnimationFrame(() => {
+    cardLibraryScrollRestoring = false;
+  });
+}
+
+function scheduleCardLibraryScrollRestore(mode = cardBrowserMode.value) {
+  if (activeView.value !== "characters" || mode !== cardBrowserMode.value) return;
+  const restoreToken = ++cardLibraryScrollRestoreToken;
+  for (const delay of [0, 50, 150, 300, 600, 1000]) {
+    window.setTimeout(() => {
+      if (
+        restoreToken !== cardLibraryScrollRestoreToken
+        || activeView.value !== "characters"
+        || mode !== cardBrowserMode.value
+        || !cardLibraryScrollTargets[mode]
+      ) return;
+      restoreCardLibraryScrollPosition(mode);
+    }, delay);
+  }
+}
+
+function registerCardLibraryScrollContainer(mode, target) {
+  if (!isCardLibraryMode(mode) || !target) return;
+  cardLibraryScrollTargets[mode] = target;
+  scheduleCardLibraryScrollRestore(mode);
+}
+
+function unregisterCardLibraryScrollContainer(mode, target = null) {
+  if (!isCardLibraryMode(mode)) return;
+  const registeredTarget = cardLibraryScrollTargets[mode];
+  if (target && registeredTarget !== target) return;
+  cardLibraryScrollTargets[mode] = null;
+  cardLibraryScrollRestoreToken += 1;
+}
+
+function resetCardLibraryScrollPosition(mode = cardBrowserMode.value) {
+  if (!isCardLibraryMode(mode)) return;
+  cardLibraryScrollPositions[mode] = 0;
+  cardLibraryScrollRestoreToken += 1;
+  const target = cardLibraryScrollTargets[mode];
+  if (!target) return;
+  cardLibraryScrollRestoring = true;
+  target.scrollTop = 0;
+  window.requestAnimationFrame(() => {
+    cardLibraryScrollRestoring = false;
+  });
+}
+
 const itemViewMode = ref("table");
 const isItemLibraryView = computed(() => activeView.value === "mods" && libraryMode.value === "items");
 const itemKindLevel = ref("categories");
@@ -395,6 +533,9 @@ const stats = reactive({
   zipmodWarnings: null,
   modItems: null,
   builtinItems: null,
+  clothesCards: null,
+  sceneCards: null,
+  plugins: null,
   duplicateZipmods: null,
   lastDatabaseBuiltAt: ""
 });
@@ -413,6 +554,7 @@ const filteredTrashEntries = computed(() => {
 });
 const seenTaskMessages = ref(new Set());
 const recentTasks = ref([]);
+let nextTaskSubmissionOrder = 0;
 const selectedTask = ref(null);
 const achievements = ref([]);
 const achievementPreferences = reactive({ enabled: true, notifications: true, hide_locked: false });
@@ -1829,6 +1971,24 @@ const overviewSummaryCards = computed(() => {
       action: "characters"
     });
   }
+  if (Number.isFinite(stats.clothesCards)) {
+    cards.push({
+      key: "clothes",
+      label: "服装卡",
+      value: stats.clothesCards,
+      action: "characters",
+      cardBrowserMode: "clothes"
+    });
+  }
+  if (Number.isFinite(stats.sceneCards)) {
+    cards.push({
+      key: "scene",
+      label: "场景卡",
+      value: stats.sceneCards,
+      action: "characters",
+      cardBrowserMode: "scene"
+    });
+  }
   if (modDatabase.checked && modDatabase.exists && Number.isFinite(modDatabase.total)) {
     cards.push({
       key: "zipmods",
@@ -1845,6 +2005,14 @@ const overviewSummaryCards = computed(() => {
       value: Number(stats.modItems || 0) + Number(stats.builtinItems || 0),
       action: "mods",
       libraryMode: "items"
+    });
+  }
+  if (Number.isFinite(stats.plugins)) {
+    cards.push({
+      key: "plugins",
+      label: "插件",
+      value: stats.plugins,
+      action: "plugins"
     });
   }
   return cards;
@@ -2006,6 +2174,7 @@ async function refreshClothesTreeCounts() {
     if (!result?.ok || !result.is_valid_game_dir) return;
     clothesTree.value = result.tree || null;
     clothesLibrary.treeIndexing = Boolean(result.indexing);
+    stats.clothesCards = clothesLibrary.treeIndexing ? null : Number(result.total || 0);
     refreshVisibleClothesFolders();
     const selectedFolder = clothesFolders.value.find(
       (folder) => folder.relativePath === selectedClothesFolder.value
@@ -2029,6 +2198,7 @@ function toggleClothesFolder(folder) {
 }
 
 async function selectClothesFolder(relativePath = "") {
+  resetCardLibraryScrollPosition("clothes");
   const requestId = ++clothesListRequestId;
   window.clearTimeout(clothesIndexRetryTimer);
   clothesIndexRetryTimer = 0;
@@ -2133,6 +2303,7 @@ async function loadClothesTree({ force = false } = {}) {
   clothesLibrary.error = "";
   if (!backendReady.value || !paths.gameDir) {
     clothesLibrary.validGameDir = false;
+    stats.clothesCards = null;
     clothesCards.value = [];
     resetClothesTree();
     clothesLibrary.loading = false;
@@ -2148,6 +2319,7 @@ async function loadClothesTree({ force = false } = {}) {
     clothesLibrary.validGameDir = Boolean(result.is_valid_game_dir);
     clothesLibrary.root = result.root || "";
     if (!clothesLibrary.validGameDir) {
+      stats.clothesCards = null;
       clothesLibrary.error = result.error || "未找到 UserData/coordinate 服装卡目录";
       clothesCards.value = [];
       resetClothesTree();
@@ -2155,12 +2327,14 @@ async function loadClothesTree({ force = false } = {}) {
     }
     clothesTree.value = result.tree || null;
     clothesLibrary.treeIndexing = Boolean(result.indexing);
+    stats.clothesCards = clothesLibrary.treeIndexing ? null : Number(result.total || 0);
     expandedClothesFolders.value = collectExpandableClothesFolderPaths(clothesTree.value);
     refreshVisibleClothesFolders();
     if (clothesLibrary.treeIndexing) scheduleClothesTreeRefresh();
     const folderExists = clothesFolders.value.some((folder) => folder.relativePath === selectedClothesFolder.value);
     await selectClothesFolder(folderExists ? selectedClothesFolder.value : "");
   } catch (error) {
+    stats.clothesCards = null;
     clothesLibrary.validGameDir = false;
     clothesLibrary.error = error.message;
     clothesCards.value = [];
@@ -2235,6 +2409,7 @@ function toggleSceneFolder(folder) {
 }
 
 async function selectSceneFolder(relativePath = "") {
+  resetCardLibraryScrollPosition("scene");
   const requestId = ++sceneListRequestId;
   selectedSceneFolder.value = relativePath || "";
   selectedSceneDetailPath.value = "";
@@ -2315,6 +2490,7 @@ async function loadSceneTree({ force = false } = {}) {
   sceneLibrary.error = "";
   if (!backendReady.value || !paths.gameDir) {
     sceneLibrary.validGameDir = false;
+    stats.sceneCards = null;
     sceneCards.value = [];
     resetSceneTree();
     sceneLibrary.loading = false;
@@ -2329,17 +2505,20 @@ async function loadSceneTree({ force = false } = {}) {
     sceneLibrary.validGameDir = Boolean(result.is_valid_game_dir);
     sceneLibrary.root = result.root || "";
     if (!sceneLibrary.validGameDir) {
+      stats.sceneCards = null;
       sceneLibrary.error = result.error || "未找到 UserData/studio/scene 场景卡目录";
       sceneCards.value = [];
       resetSceneTree();
       return;
     }
     sceneTree.value = result.tree || null;
+    stats.sceneCards = Number(result.total || 0);
     expandedSceneFolders.value = collectExpandableSceneFolderPaths(sceneTree.value);
     refreshVisibleSceneFolders();
     const folderExists = sceneFolders.value.some((folder) => folder.relativePath === selectedSceneFolder.value);
     await selectSceneFolder(folderExists ? selectedSceneFolder.value : "");
   } catch (error) {
+    stats.sceneCards = null;
     sceneLibrary.validGameDir = false;
     sceneLibrary.error = error.message;
     sceneCards.value = [];
@@ -2663,18 +2842,47 @@ function taskSummary(task) {
   return task.status || "等待执行";
 }
 
-function rememberTask(task) {
+function reserveTaskSubmissionOrder() {
+  const order = nextTaskSubmissionOrder;
+  nextTaskSubmissionOrder += 1;
+  return order;
+}
+
+function rememberTask(task, submissionOrder = null) {
   if (!task?.id) return;
   const snapshot = snapshotTask(task);
+  const existingIndex = recentTasks.value.findIndex((entry) => entry.id === task.id);
+  const existing = existingIndex >= 0 ? recentTasks.value[existingIndex] : null;
+  const order = Number.isFinite(existing?.submissionOrder)
+    ? existing.submissionOrder
+    : Number.isFinite(submissionOrder)
+      ? submissionOrder
+      : reserveTaskSubmissionOrder();
   const item = {
     id: task.id,
     title: task.title || task.task_type || "任务",
     summary: taskSummary(task),
     label: taskStatusLabel(task),
     badgeClass: taskStatusClass(task),
+    submissionOrder: order,
     task: snapshot
   };
-  recentTasks.value = [item, ...recentTasks.value.filter((entry) => entry.id !== item.id)];
+  if (existingIndex >= 0) {
+    const nextTasks = [...recentTasks.value];
+    nextTasks[existingIndex] = item;
+    recentTasks.value = nextTasks;
+  } else {
+    const insertIndex = recentTasks.value.findIndex(
+      (entry) => !Number.isFinite(entry.submissionOrder) || entry.submissionOrder < order
+    );
+    const nextTasks = [...recentTasks.value];
+    if (insertIndex < 0) {
+      nextTasks.push(item);
+    } else {
+      nextTasks.splice(insertIndex, 0, item);
+    }
+    recentTasks.value = nextTasks;
+  }
   if (selectedTask.value?.id === task.id) selectedTask.value = snapshot;
 }
 
@@ -2715,6 +2923,10 @@ function formatDatabaseTime(value) {
 }
 
 function openSummaryCard(card) {
+  if (card.cardBrowserMode) {
+    setCardBrowserMode(card.cardBrowserMode);
+    return;
+  }
   if (card.libraryMode) setLibraryMode(card.libraryMode);
   if (card.action) activeView.value = card.action;
 }
@@ -2790,6 +3002,9 @@ function clearResourceStats() {
   stats.zipmodWarnings = null;
   stats.modItems = null;
   stats.builtinItems = null;
+  stats.clothesCards = null;
+  stats.sceneCards = null;
+  stats.plugins = null;
   stats.duplicateZipmods = null;
   stats.lastDatabaseBuiltAt = "";
 }
@@ -2966,6 +3181,7 @@ async function loadCardTree() {
 }
 
 async function selectCardFolder(relativePath = "") {
+  resetCardLibraryScrollPosition("character");
   selectedCardFolder.value = relativePath || "";
   selectedCards.value = new Set();
   selectedCardDetailPath.value = "";
@@ -5824,6 +6040,10 @@ async function loadItemRows({ reset = false } = {}) {
 async function ensureModDatabaseLoaded({ force = false } = {}) {
   if (libraryMode.value !== "mods") return;
   if (!backendReady.value) return;
+  // Do not restart an initial page or continuation request when KeepAlive
+  // activates this view again. A reset request would clear modRows, clamp the
+  // scroll container to the top, and lose the session position.
+  if (!force && (modDatabase.loading || modDatabase.loadingMore)) return;
   if (!force && modDatabase.checked && modDatabase.exists && modRows.value.length > 0) {
     await loadZipmodAuthors();
     return;
@@ -5839,6 +6059,10 @@ async function ensureModDatabaseLoaded({ force = false } = {}) {
 async function ensureItemDatabaseLoaded({ force = false } = {}) {
   if (libraryMode.value !== "items") return;
   if (!backendReady.value) return;
+  // Keep an in-flight first page or continuation request alive when the user
+  // navigates away and returns before it finishes. Restarting it would clear
+  // the already accumulated rows and reset the virtual list's load state.
+  if (!force && (itemDatabase.loading || itemDatabase.loadingMore)) return;
   if (!force && itemDatabase.checked && itemDatabase.exists && itemRows.value.length > 0) {
     await loadItemFilters();
     return;
@@ -6077,6 +6301,24 @@ async function loadStartPluginSettings(gameDir = paths.gameDir) {
   }
 }
 
+async function loadPluginStats(gameDir = paths.gameDir) {
+  const normalizedGameDir = String(gameDir || "").trim();
+  stats.plugins = null;
+  if (!backendReady.value || !normalizedGameDir) return;
+
+  try {
+    const query = new URLSearchParams({ game_dir: normalizedGameDir, limit: "1" });
+    const result = await window.desktopApi?.backendRequest?.(`/plugins?${query.toString()}`);
+    if (!result?.ok) throw new Error(result?.error || "插件统计读取失败");
+    const total = Number(result.data?.summary?.total ?? result.data?.total);
+    if (!Number.isFinite(total)) throw new Error("插件扫描未返回有效数量");
+    if (String(paths.gameDir || "").trim() !== normalizedGameDir) return;
+    stats.plugins = total;
+  } catch (error) {
+    log(`[Plugins] 总览统计读取失败：${error.message}`);
+  }
+}
+
 async function toggleStartPlugin(plugin) {
   if (!plugin?.installed || plugin.busy || !paths.gameDir) return;
   const enabled = !plugin.enabled;
@@ -6263,7 +6505,11 @@ async function loadAppSettingsInternal({ loadBackendData = true } = {}) {
     await measureStep("refreshWorkbenchProjects after settings", () => refreshWorkbenchProjects({ persist: true }));
     await measureStep("loadGameSetup after settings", () => loadGameSetup());
     await measureStep("loadCardTree after settings", () => loadCardTree());
-    await measureStep("loadClothesTree after settings", () => ensureClothesLibraryLoaded());
+    await Promise.all([
+      measureStep("loadClothesTree after settings", () => ensureClothesLibraryLoaded()),
+      measureStep("loadSceneTree after settings", () => ensureSceneLibraryLoaded()),
+      measureStep("loadPluginStats after settings", () => loadPluginStats(gameDir))
+    ]);
     if (managerSettings.checkDatabaseChangesOnStartup) {
       await measureStep("checkStartupDatabaseChanges", () => checkStartupDatabaseChanges());
     }
@@ -6510,7 +6756,11 @@ async function selectGameDir() {
   await loadGameSetup();
   await validateGameDir();
   await loadCardTree();
-  await ensureClothesLibraryLoaded({ force: true });
+  await Promise.all([
+    ensureClothesLibraryLoaded({ force: true }),
+    ensureSceneLibraryLoaded({ force: true }),
+    loadPluginStats(selected)
+  ]);
   await checkStartupDatabaseChanges();
   await loadItemFilters();
 }
@@ -6666,8 +6916,8 @@ function buildTaskPayload(type, overrides = {}) {
   return buildPayload(taskOverrides);
 }
 
-function applyTask(task) {
-  rememberTask(task);
+function applyTask(task, submissionOrder = null) {
+  rememberTask(task, submissionOrder);
   if (task.task_type === "download_card_missing_mods") {
     const guids = cardDependencyRemote.taskGuids[task.id] || [];
     if (guids.length) {
@@ -7056,6 +7306,7 @@ async function submitTask(type, overrides = {}) {
     taskId.value = "queued";
     taskHint.value = "等待后端开始处理";
   }
+  const submissionOrder = reserveTaskSubmissionOrder();
   log(`[UI] ${type} submitted`);
   try {
     const result = await window.desktopApi.backendRequest("/tasks", {
@@ -7077,7 +7328,7 @@ async function submitTask(type, overrides = {}) {
     if (type === "check_game_dir") {
       log(`[Game Dir Check] task: ${result.task.id}`);
     }
-    applyTask(result.task);
+    applyTask(result.task, submissionOrder);
     return await pollTask(result.task.id, {
       initialTask: result.task,
       timeoutMs: type === "check_game_dir" ? 10000 : 0
@@ -7094,6 +7345,7 @@ async function submitTaskInBackground(type, overrides = {}, onDone = null, onSta
   if (!(await waitForBackendReady())) {
     throw new Error(`后端未就绪，无法提交任务：${type}`);
   }
+  const submissionOrder = reserveTaskSubmissionOrder();
   log(`[UI] ${type} submitted`);
   const result = await window.desktopApi.backendRequest("/tasks", {
     method: "POST",
@@ -7102,7 +7354,7 @@ async function submitTaskInBackground(type, overrides = {}, onDone = null, onSta
   if (!result.ok) {
     throw new Error(result.error || "unknown error");
   }
-  applyTask(result.task);
+  applyTask(result.task, submissionOrder);
   if (typeof onStarted === "function") onStarted(result.task);
   void pollTask(result.task.id, { manageBusy: false, onDone }).catch((error) => {
     log(`[Task Error] ${error.message}`);
@@ -9038,6 +9290,14 @@ const appCtx = reactive({
   handleCardClick,
   handleCardFolderClick,
   handleModTableScroll,
+  captureModTableScrollPosition,
+  scheduleModTableScrollRestore,
+  registerModTableScrollContainer,
+  unregisterModTableScrollContainer,
+  captureCardLibraryScrollPosition,
+  scheduleCardLibraryScrollRestore,
+  registerCardLibraryScrollContainer,
+  unregisterCardLibraryScrollContainer,
   isBusy,
   itemAuthorOptions,
   itemAuthorFilterOpen,
@@ -9275,6 +9535,37 @@ const appCtx = reactive({
   submitBulkDuplicateCleanup,
   cancelCardProfileEditor
 });
+
+watch(activeView, (view, previousView) => {
+  if (previousView === "mods" && view !== "mods") {
+    captureModTableScrollPosition(libraryMode.value, modTableScrollTarget.value, { allowInactive: true });
+  }
+  if (view === "mods") {
+    scheduleModTableScrollRestore();
+  }
+  if (previousView === "characters" && view !== "characters") {
+    captureCardLibraryScrollPosition(
+      cardBrowserMode.value,
+      cardLibraryScrollTargets[cardBrowserMode.value],
+      { allowInactive: true }
+    );
+  }
+  if (view === "characters") {
+    scheduleCardLibraryScrollRestore(cardBrowserMode.value);
+  }
+}, { flush: "sync" });
+
+watch(libraryMode, (mode, previousMode) => {
+  captureModTableScrollPosition(previousMode);
+  scheduleModTableScrollRestore(mode);
+}, { flush: "sync" });
+
+watch(cardBrowserMode, (mode, previousMode) => {
+  if (activeView.value === "characters") {
+    captureCardLibraryScrollPosition(previousMode, cardLibraryScrollTargets[previousMode]);
+  }
+  scheduleCardLibraryScrollRestore(mode);
+}, { flush: "sync" });
 
 watch([activeView, cardBrowserMode, backendStatus], ([view, mode, status]) => {
   if (assemblyMode.value && view !== "mods") setAssemblyMode(false);

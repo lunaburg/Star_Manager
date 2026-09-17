@@ -92,7 +92,6 @@ function isSelected(row) {
 function bindViewport() {
   scrollParent = canvas.value?.parentElement || null;
   if (!scrollParent) return;
-  scrollParent.scrollTop = 0;
   scrollParent.addEventListener("scroll", scheduleViewportUpdate, { passive: true });
   resizeObserver = typeof ResizeObserver === "function"
     ? new ResizeObserver(scheduleViewportUpdate)

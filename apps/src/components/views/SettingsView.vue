@@ -163,28 +163,6 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section id="settings-database" data-settings-section="database" class="panel settings-section settings-section--database">
-        <div class="settings-section-body">
-          <div class="settings-section-head">
-            <div>
-              <h2>数据库构建</h2>
-            </div>
-          </div>
-
-          <label class="setting-row setting-row--select">
-            <span class="setting-copy"><strong>建库线程数</strong><small>请选择合适的线程数，不一定越高越好</small></span>
-            <select
-              :value="ctx.managerSettings.databaseWorkerCount"
-              aria-label="数据库构建线程数"
-              @change="ctx.updateDatabaseWorkerCount($event.target.value)"
-            >
-              <option v-for="count in ctx.databaseWorkerOptions" :key="count" :value="count">{{ count }} 线程</option>
-            </select>
-          </label>
-
-        </div>
-      </section>
-
       <section id="settings-wallpaper" data-settings-section="wallpaper" class="panel settings-section settings-section--wallpaper">
         <div class="settings-section-body">
           <div class="settings-section-head">
@@ -211,6 +189,28 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section id="settings-database" data-settings-section="database" class="panel settings-section settings-section--database">
+        <div class="settings-section-body">
+          <div class="settings-section-head">
+            <div>
+              <h2>数据库构建</h2>
+            </div>
+          </div>
+
+          <label class="setting-row setting-row--select">
+            <span class="setting-copy"><strong>建库线程数</strong><small>请选择合适的线程数，不一定越高越好</small></span>
+            <select
+              :value="ctx.managerSettings.databaseWorkerCount"
+              aria-label="数据库构建线程数"
+              @change="ctx.updateDatabaseWorkerCount($event.target.value)"
+            >
+              <option v-for="count in ctx.databaseWorkerOptions" :key="count" :value="count">{{ count }} 线程</option>
+            </select>
+          </label>
+
         </div>
       </section>
 

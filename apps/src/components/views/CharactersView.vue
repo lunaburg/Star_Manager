@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import LazyThumbnail from "../LazyThumbnail.vue";
 import LoadingAnimation from "../LoadingAnimation.vue";
 import VirtualCharacterCardGrid from "../VirtualCharacterCardGrid.vue";
@@ -9,6 +9,72 @@ import characterCardLoadingAnimation from "../../assets/character-card-loading.j
 
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
+});
+
+const characterCardGrid = ref(null);
+const clothesCardGrid = ref(null);
+const sceneCardGrid = ref(null);
+const cardGridRefs = { character: characterCardGrid, clothes: clothesCardGrid, scene: sceneCardGrid };
+
+function cardGridForMode(mode) {
+  return cardGridRefs[mode]?.value || null;
+}
+
+function registerActiveCardGrid() {
+  const mode = String(ctx.cardBrowserMode || "");
+  const target = cardGridForMode(mode);
+  if (target) ctx.registerCardLibraryScrollContainer(mode, target);
+}
+
+function handleCharacterCardGridScroll(event) {
+  ctx.captureCardLibraryScrollPosition("character", event?.currentTarget);
+}
+
+function handleClothesCardGridScroll(event) {
+  ctx.captureCardLibraryScrollPosition("clothes", event?.currentTarget);
+  ctx.handleClothesCardGridScroll(event);
+}
+
+function handleSceneCardGridScroll(event) {
+  ctx.captureCardLibraryScrollPosition("scene", event?.currentTarget);
+  ctx.handleSceneCardGridScroll(event);
+}
+
+onMounted(() => {
+  registerActiveCardGrid();
+});
+
+onActivated(() => {
+  registerActiveCardGrid();
+});
+
+onBeforeUnmount(() => {
+  ctx.unregisterCardLibraryScrollContainer("character");
+  ctx.unregisterCardLibraryScrollContainer("clothes");
+  ctx.unregisterCardLibraryScrollContainer("scene");
+});
+
+watch(() => ctx.cardBrowserMode, (mode, previousMode) => {
+  if (previousMode) ctx.unregisterCardLibraryScrollContainer(previousMode);
+  void nextTick(() => {
+    const target = cardGridForMode(mode);
+    if (target) ctx.registerCardLibraryScrollContainer(mode, target);
+  });
+});
+
+watch(() => [
+  ctx.visibleCards?.length,
+  ctx.clothesCards?.length,
+  ctx.visibleClothesCards?.length,
+  ctx.sceneCards?.length,
+  ctx.visibleSceneCards?.length,
+  ctx.cardLibrary?.loading,
+  ctx.clothesLibrary?.loading,
+  ctx.clothesLibrary?.loadingMore,
+  ctx.sceneLibrary?.loading,
+  ctx.sceneLibrary?.loadingMore
+], () => {
+  ctx.scheduleCardLibraryScrollRestore(ctx.cardBrowserMode);
 });
 
 const cardNameMeasureFrames = new WeakMap();
@@ -544,7 +610,7 @@ const cardModeMeta = computed(() => {
                   </div>
                 </div>
               </div>
-              <div class="card-grid">
+              <div ref="characterCardGrid" class="card-grid" @scroll.passive="handleCharacterCardGridScroll">
                 <div v-if="ctx.cardTagFilter.resultsLoading" class="card-state">
                   <strong>正在筛选整个人物卡库</strong>
                   <span class="subtext">正在查找带有“{{ ctx.cardTagFilter.libraryTag }}”标签的人物卡</span>
@@ -1304,7 +1370,7 @@ const cardModeMeta = computed(() => {
         </button>
       </div>
 
-      <div class="card-grid clothes-card-grid" @scroll.passive="ctx.handleClothesCardGridScroll">
+      <div ref="clothesCardGrid" class="card-grid clothes-card-grid" @scroll.passive="handleClothesCardGridScroll">
         <div v-if="ctx.clothesLibrary.loading && !ctx.clothesCards.length" class="clothes-card-state">
           <LoadingAnimation class="card-loading-animation" :animation-data="characterCardLoadingAnimation" />
           <strong>正在读取服装卡</strong>
@@ -1497,7 +1563,7 @@ const cardModeMeta = computed(() => {
         </button>
       </div>
 
-      <div class="card-grid clothes-card-grid scene-card-grid" @scroll.passive="ctx.handleSceneCardGridScroll">
+      <div ref="sceneCardGrid" class="card-grid clothes-card-grid scene-card-grid" @scroll.passive="handleSceneCardGridScroll">
         <div v-if="ctx.sceneLibrary.loading && !ctx.sceneCards.length" class="clothes-card-state">
           <LoadingAnimation class="card-loading-animation" :animation-data="characterCardLoadingAnimation" />
           <strong>正在读取场景卡</strong>

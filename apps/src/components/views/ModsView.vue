@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ModelPreview from "../ModelPreview.vue";
 import LazyThumbnail from "../LazyThumbnail.vue";
 import LoadingAnimation from "../LoadingAnimation.vue";
@@ -18,6 +18,35 @@ const thumbnailChoiceBusy = ref(false);
 const thumbnailChoiceError = ref("");
 const expandedAssemblyGroup = ref("clothes");
 const selectedAssemblySlotKey = ref("");
+const modTableWrap = ref(null);
+
+function handleModTableScroll(event) {
+  ctx.captureModTableScrollPosition(ctx.libraryMode, event.currentTarget);
+  ctx.handleModTableScroll(event);
+}
+
+onMounted(() => {
+  ctx.registerModTableScrollContainer(modTableWrap.value);
+});
+
+onActivated(() => {
+  // Keep the parent registration valid after KeepAlive moves this view back
+  // into the workspace, then restore the current mode after the DOM returns.
+  ctx.registerModTableScrollContainer(modTableWrap.value);
+});
+
+onBeforeUnmount(() => {
+  ctx.unregisterModTableScrollContainer(modTableWrap.value);
+});
+
+watch(() => [
+  ctx.modRows?.length,
+  ctx.itemRows?.length,
+  ctx.modDatabase?.loading,
+  ctx.itemDatabase?.loading,
+  ctx.modDatabase?.loadingMore,
+  ctx.itemDatabase?.loadingMore
+], () => ctx.scheduleModTableScrollRestore());
 
 watch(() => ctx.assemblyMode, (enabled) => {
   if (!enabled) selectedAssemblySlotKey.value = "";
@@ -395,7 +424,7 @@ function modStatusTone(status) {
           </div>
         </div>
 
-        <div class="table-wrap" @scroll="ctx.handleModTableScroll">
+        <div ref="modTableWrap" class="table-wrap" @scroll="handleModTableScroll">
           <template v-if="ctx.libraryMode === 'items'">
             <div v-if="ctx.itemDatabase.loading && ctx.itemRows.length === 0" class="table-state">
               <strong>正在加载物品数据库</strong>

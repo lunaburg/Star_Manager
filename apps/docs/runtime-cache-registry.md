@@ -171,17 +171,34 @@
 
 ### 3.2 卡片列表的前端状态
 
-`App.vue` 只在当前 renderer 会话中保留当前目录已经返回的有效人物卡/服装卡文件项、分页位置和目录树。切换目录或刷新会替换对应状态；服装卡有效性和轻量卡片名称由后端的 `clothes_card_index.sqlite` 持久化，前端本身不保存完整解析结果。人物卡和服装卡网格分别通过 `VirtualCharacterCardGrid` / `VirtualClothesCardGrid` 只创建视口附近的卡片 DOM，并通过 `LazyThumbnail` 的 IntersectionObserver 只请求视口附近图片；服装卡首批分页最多保留 96 条。
+`App.vue` 只在当前 renderer 会话中保留当前目录已经返回的有效人物卡/服装卡/场景卡文件项、分页位置和目录树。切换目录或刷新会替换对应状态；服装卡有效性和轻量卡片名称由后端的 `clothes_card_index.sqlite` 持久化，前端本身不保存完整解析结果。三类卡片网格分别通过 `VirtualCharacterCardGrid` / `VirtualClothesCardGrid` 只创建视口附近的卡片 DOM，并通过 `LazyThumbnail` 的 IntersectionObserver 只请求视口附近图片；服装卡首批分页最多保留 96 条。
 
-### 3.3 人物卡标签目录的 Vue 进程内缓存
+### 3.3 卡片浏览滚动位置
+
+- 位置是 `App.vue` 的 renderer 进程内状态，按 `character`、`clothes` 和 `scene` 分别保存人物卡、服装卡、场景卡浏览器的垂直 `scrollTop`；没有存储键，也不写入 `localStorage`。对应列表数组、分页偏移和加载标记同样只保留在当前 renderer 会话中。
+- 三个卡片浏览器的实际滚动容器由 `CharactersView.vue` 注册到应用壳层；切换到开始游戏或其它页面前同步捕获当前位置，返回卡片管理页或切换卡片类型后，在异步列表和虚拟网格完成更新时多次恢复。虚拟网格不会在重新挂载时无条件置顶，目录切换则由目录选择操作显式清零对应类型的位置。
+- 这段状态只属于当前应用 renderer 进程，刷新页面、renderer 重载或重启应用后自然清空；人物卡/服装卡/场景卡的数据库索引、源文件和解析缓存不受影响。
+
+实现：[`CharactersView.vue`](../src/components/views/CharactersView.vue)、[`VirtualCharacterCardGrid.vue`](../src/components/VirtualCharacterCardGrid.vue)、[`VirtualClothesCardGrid.vue`](../src/components/VirtualClothesCardGrid.vue)、[`App.vue`](../src/App.vue)。
+
+### 3.4 模组管理列表滚动位置
+
+- 位置是 `App.vue` 的 renderer 进程内状态，按 `mods` 和 `items` 分别保存模组浏览、物品浏览列表的垂直 `scrollTop`，没有存储键，也不写入 `localStorage`。两种浏览模式已加载的行数据、分页 `offset` / `hasMore` 和加载标记也属于同一份进程内状态。
+- 页面切换期间由应用壳层的 `KeepAlive` 优先保留模组管理实例和实际滚动容器；`App.vue` 在切页前同步捕获已注册容器的 `scrollTop`。刷新页面或重启应用后，这段内存状态会自然清空。
+- 列表异步加载、浏览模式切换和应用视图返回时由应用壳层再次尝试恢复；返回任一浏览模式时，如果首批或增量请求仍在进行，不会重复发起 reset 请求，已加载批次会继续保留。筛选重载或数据库内容变化时，浏览器会按新的内容高度自然限制滚动位置。
+- 应用重启不会影响模组数据库、筛选条件来源或游戏目录，只会让列表滚动位置回到初始位置。
+
+实现：[`ModsView.vue`](../src/components/views/ModsView.vue)、[`App.vue`](../src/App.vue)。
+
+### 3.5 人物卡标签目录的 Vue 进程内缓存
 
 前端 `App.vue` 的 `cardTagCatalog` 保存当前游戏目录的标签列表，打开标签弹窗或筛选器时复用，切换游戏目录后失效。它不落盘，刷新页面或重启 renderer 后消失。
 
-### 3.4 mannequin FBX 模板 Promise 缓存
+### 3.6 mannequin FBX 模板 Promise 缓存
 
 [`modelPreviewAssets.js`](../src/modelPreviewAssets.js) 的 `mannequinTemplatePromises` 按 URL 缓存 FBX 加载 Promise，使同一 renderer 内多个模型预览共享一次模板加载。加载失败会删除对应键；刷新页面或关闭应用后消失。
 
-### 3.5 HTTP/Chromium 资源缓存
+### 3.7 HTTP/Chromium 资源缓存
 
 后端 `send_bytes()` 和 `send_file()` 对图片、GLB、FBX 等资源返回：
 

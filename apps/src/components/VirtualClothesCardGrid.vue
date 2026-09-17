@@ -98,10 +98,6 @@ function isSelected(row) {
 function bindViewport() {
   scrollParent = canvas.value?.parentElement || null;
   if (!scrollParent) return;
-  // A folder switch can reuse the same scroll container with a much shorter
-  // list. Start the new virtual canvas at the top instead of keeping a stale
-  // scroll offset that would render an empty window.
-  scrollParent.scrollTop = 0;
   scrollParent.addEventListener("scroll", scheduleViewportUpdate, { passive: true });
   resizeObserver = typeof ResizeObserver === "function"
     ? new ResizeObserver(scheduleViewportUpdate)

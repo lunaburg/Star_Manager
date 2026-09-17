@@ -2611,16 +2611,16 @@ small {
 }
 
 .summary-card {
-  min-height: 108px;
+  min-height: 90px;
   display: block;
-  padding: 14px;
+  padding: 12px;
   text-align: left;
   box-shadow: none;
 }
 
 .summary-card strong {
   display: block;
-  margin-top: 14px;
+  margin-top: 8px;
   font-size: 24px;
 }
 

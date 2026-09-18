@@ -15,7 +15,7 @@
 | [模组数据库设计](mod_database_design.md) | SQLite 表、字段、关系、扫描流程、状态和查询边界 |
 | [模组数据库建库性能基准](mod_database_build_benchmark.md) | 现有数据库 100 个 zipmod 的建库耗时、ZIP 读取/解压与 Unity3D 缩略图阶段拆分和优化建议 |
 | [游戏原版资源索引](builtin_resource_index.md) | `characustom/*.unity3d` 中的 ChaListData、原版物品表、缩略图和服装卡匹配 |
-| [标准模组结构记录](standard_mod_structure_record.md) | `manifest.xml`、角色/Studio CSV、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
+| [标准模组结构记录](standard_mod_structure_record.md) | `manifest.xml`、角色/Studio CSV（递归子目录、作者工具和日语原生表头兼容）、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
 | [Hooh ammunition_go.zipmod 结构解析](hooh_ammunition_go_zipmod_analysis.md) | 一个标准 Studio 自定义物品模组样本的目录、ItemCategory/ItemList、AssetBundle 对象和当前扫描边界 |
 | [Studio 女性姿势转换](pose_zipmod_conversion.md) | Studio `.dat` 姿势到 `Kind=501` zipmod 的 CSV、Animator/AnimationClip、骨骼映射和验证边界 |
 | [KK Animations ForMaker 注册补全](kk_animations_formaker_completion.md) | 完整 KK Animations 动画包与 ForMaker 姿势列表补丁的结构关系和全量注册结果 |
@@ -33,7 +33,7 @@
 | --- | --- |
 | [角色卡解析说明](character_card_parsing.md) | PNG 尾部、MessagePack、UniversalAutoResolver、类别映射和依赖记录 |
 | [服装卡样本解析报告](clothes_card_sample_analysis.md) | AIS_Clothes 信封、Coordinate 部件、UAR 依赖和 KKEx 插件样本分析 |
-| [Studio 场景卡解析说明](scene_card_parsing.md) | StudioNEOV2 场景数据、UAR 地图/物品/图案依赖、本地数据库匹配、远端补全和详情关联展示 |
+| [Studio 场景卡解析说明](scene_card_parsing.md) | StudioNEOV2 场景数据、UAR 地图/物品/图案依赖、本地数据库匹配（含 Studio 物品）、远端补全和详情关联展示 |
 
 ## 按维护任务查找
 

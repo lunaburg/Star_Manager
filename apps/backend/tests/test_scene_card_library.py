@@ -144,6 +144,125 @@ class SceneCardLibraryTests(unittest.TestCase):
             self.assertTrue(resolved[0]["matched"])
             self.assertEqual(resolved[0]["item"]["name"], "Pattern 184")
 
+    def test_scene_item_dependencies_match_indexed_studio_item_by_slot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "mods.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            now = "2026-01-01T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO zipmods (
+                    guid, name, file_path, scan_status,
+                    last_scanned_at, created_at, updated_at
+                ) VALUES (?, ?, ?, 'ok', ?, ?, ?)
+                """,
+                (
+                    "kky.AIStudio.SkyboxPack",
+                    "[KKY] 4K Skybox Pack",
+                    "skybox.zipmod",
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            zipmod_id = conn.execute(
+                "SELECT id FROM zipmods WHERE guid = ?",
+                ("kky.AIStudio.SkyboxPack",),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO mod_items (
+                    zipmod_id, zipmod_guid, item_id, kind, item_domain,
+                    name, main_ab, main_data, parse_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)
+                """,
+                (
+                    zipmod_id,
+                    "kky.AIStudio.SkyboxPack",
+                    "2",
+                    "__studio_item__",
+                    "studio",
+                    "[KKY] Fluffy Clouds Skybox",
+                    "studio/kky/kky_ai_skyboxes.unity3d",
+                    "LightFluffyClouds",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resolved = resolve_dependency_records(
+                [{
+                    "ModID": "kky.AIStudio.SkyboxPack",
+                    "Slot": 2,
+                    "LocalSlot": 100002399,
+                    "Property": "StudioScene.Item",
+                    "DependencyType": "scene_item",
+                }],
+                db_path=db_path,
+            )
+
+            self.assertEqual(len(resolved), 1)
+            self.assertTrue(resolved[0]["matched"])
+            self.assertEqual(resolved[0]["item"]["name"], "[KKY] Fluffy Clouds Skybox")
+
+    def test_character_dependency_does_not_match_studio_item(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "mods.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            now = "2026-01-01T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO zipmods (
+                    guid, name, file_path, scan_status,
+                    last_scanned_at, created_at, updated_at
+                ) VALUES (?, ?, ?, 'ok', ?, ?, ?)
+                """,
+                ("kky.AIStudio.SkyboxPack", "Skybox", "skybox.zipmod", now, now, now),
+            )
+            zipmod_id = conn.execute(
+                "SELECT id FROM zipmods WHERE guid = ?",
+                ("kky.AIStudio.SkyboxPack",),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO mod_items (
+                    zipmod_id, zipmod_guid, item_id, kind, item_domain,
+                    name, parse_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'studio', ?, 'ok', ?, ?)
+                """,
+                (
+                    zipmod_id,
+                    "kky.AIStudio.SkyboxPack",
+                    "2",
+                    "__studio_item__",
+                    "[KKY] Fluffy Clouds Skybox",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resolved = resolve_dependency_records(
+                [{
+                    "ModID": "kky.AIStudio.SkyboxPack",
+                    "CategoryNo": 240,
+                    "Slot": 2,
+                    "Property": "Clothes.Top",
+                }],
+                db_path=db_path,
+            )
+
+            self.assertEqual(len(resolved), 1)
+            self.assertFalse(resolved[0]["matched"])
+            self.assertIsNone(resolved[0]["item"])
+
 
 if __name__ == "__main__":
     unittest.main()

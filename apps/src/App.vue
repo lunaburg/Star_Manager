@@ -2398,6 +2398,11 @@ async function handleClothesCardClick(card) {
   clothesSideMode.value = "detail";
   selectedClothesDetailPath.value = card.relativePath;
   selectedClothesDetail.value = card;
+  cardDependencyRemote.loading = false;
+  cardDependencyRemote.error = "";
+  cardDependencyRemote.byGuid = {};
+  cardDependencyRemote.busyGuids = {};
+  cardDependencyRemote.notices = {};
   clothesLibrary.detailLoading = true;
   try {
     const result = await window.desktopApi?.backendRequest?.(
@@ -2426,6 +2431,11 @@ async function handleClothesCardClick(card) {
       modifiedTimestamp: Number(detail.modified_at || card.modifiedTimestamp),
       fileSize: Number(detail.file_size || card.fileSize)
     };
+    void loadCardDependencyRemoteCandidates(
+      card.relativePath,
+      selectedClothesDetail.value.dependencies,
+      { clothes: true }
+    );
   } catch (error) {
     clothesLibrary.error = error.message;
     log(`[Clothes Card Detail Error] ${error.message}`);
@@ -4682,9 +4692,17 @@ async function openModItemInItemBrowser(item) {
 }
 
 async function openCardDependencyItem(dependency) {
+  if (dependency?.displayMode === "mod") {
+    const result = await openPackagedMod(
+      dependency.mod_id || dependency.zipmod?.guid,
+      dependency.zipmod?.id
+    );
+    if (!result?.ok) showMissingItemPrompt(dependency);
+    return;
+  }
   if (dependency?.dependency_type === "scene") {
     if (dependency.matched) {
-      await openPackagedMod(dependency.mod_id);
+      await openPackagedMod(dependency.mod_id, dependency.zipmod?.id);
     } else {
       showMissingItemPrompt(dependency);
     }
@@ -4724,25 +4742,17 @@ async function openCardDependencyItem(dependency) {
   }
 }
 
-async function openPackagedMod(guid) {
+async function openPackagedMod(guid, zipmodId = 0) {
   const targetGuid = String(guid || "").trim();
-  if (!targetGuid) return { ok: false, error: "缺少已打包模组的 GUID" };
+  const targetZipmodId = Number(zipmodId || 0);
+  if (!targetGuid && !targetZipmodId) return { ok: false, error: "缺少已打包模组的 GUID" };
 
   window.clearTimeout(modFilterTimer);
-  activeView.value = "mods";
-  libraryMode.value = "mods";
-  modTab.value = "详情";
-  modFilters.author = "";
-  modFilters.status = "";
-  dependencyUsageFilter.value = "";
-  modRows.value = [];
-  selectedMod.value = null;
-  selectedModItems.value = [];
-  selectedModDiagnostics.value = null;
-  modDatabase.hasMore = false;
 
   const findTarget = async () => {
-    const query = new URLSearchParams({ guid: targetGuid, offset: "0", limit: "1" });
+    const query = new URLSearchParams({ offset: "0", limit: "1" });
+    if (targetZipmodId > 0) query.set("zipmod_id", String(targetZipmodId));
+    else query.set("guid", targetGuid);
     const response = await window.desktopApi?.backendRequest?.(`/mods/zipmods?${query.toString()}`);
     if (!response?.ok) throw new Error(response?.error || "模组数据库查询失败");
     const row = response.data?.rows?.[0];
@@ -4755,13 +4765,22 @@ async function openPackagedMod(guid) {
       return { ok: false, error: `模组数据库中暂时找不到 GUID：${targetGuid}；请重试单个模组同步` };
     }
 
+    libraryMode.value = "mods";
+    modTab.value = "详情";
+    modFilters.author = "";
+    modFilters.status = "";
+    dependencyUsageFilter.value = "";
     modRows.value = [target];
+    selectedMod.value = null;
+    selectedModItems.value = [];
+    selectedModDiagnostics.value = null;
     modDatabase.checked = true;
     modDatabase.exists = true;
     modDatabase.offset = 1;
     modDatabase.total = 1;
     modDatabase.hasMore = false;
     selectMod(target);
+    activeView.value = "mods";
     return { ok: true, mod: target };
   } catch (error) {
     log(`[Workbench Error] 跳转模组管理失败：${error.message}`);
@@ -8314,6 +8333,9 @@ function cardDependencyRemoteState(dependency) {
   if (!guid || dependency?.matched) return null;
   const entry = cardDependencyRemote.byGuid[guid];
   if (cardDependencyRemote.loading && !entry) return { status: "loading", label: "检查中" };
+  if (entry?.status === "local_item_missing") {
+    return { status: "local-item-missing", label: "模组存在 物品缺失" };
+  }
   if (entry?.can_download) return { status: "available", label: "安装", candidate: entry.candidates?.[0] };
   if (entry && !entry.can_download) return { status: "unavailable", label: "无法获取", reason: entry.reason };
   return { status: "unavailable", label: "无法获取", reason: "远程索引中没有有效记录" };
@@ -8463,7 +8485,8 @@ function buildDependencyRemoteSummary(dependencies) {
     if (dependency?.matched) continue;
     missingCount += 1;
     const guid = normalizeCardDependencyGuid(dependency);
-    const candidate = cardDependencyRemote.byGuid[guid]?.candidates?.[0];
+    const remoteEntry = cardDependencyRemote.byGuid[guid];
+    const candidate = remoteEntry?.can_download ? remoteEntry.candidates?.[0] : null;
     if (guid && candidate?.remote_id && !available.has(guid)) {
       available.set(guid, candidate);
     }
@@ -8477,14 +8500,22 @@ function buildDependencyRemoteSummary(dependencies) {
 const cardDependencyRemoteSummary = computed(() => (
   buildDependencyRemoteSummary(selectedCardDependencies.value)
 ));
+const clothesDependencyRemoteSummary = computed(() => (
+  buildDependencyRemoteSummary(selectedClothesCard.value?.dependencies)
+));
 const sceneDependencyRemoteSummary = computed(() => (
   buildDependencyRemoteSummary(selectedSceneCard.value?.dependencies)
 ));
 const cardDependencyRemoteBusy = computed(() => Object.keys(cardDependencyRemote.busyGuids).length > 0);
 
-function formatDownloadSpeed(bytesPerSecond) {
-  const speed = Math.max(0, Number(bytesPerSecond || 0)) / (1024 * 1024);
-  return `${speed >= 10 ? speed.toFixed(1) : speed.toFixed(2)} MB/s`;
+function formatDownloadedBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(2)} KB`;
+  const megabytes = value / (1024 * 1024);
+  if (megabytes < 1024) return `${megabytes >= 10 ? megabytes.toFixed(1) : megabytes.toFixed(2)} MB`;
+  const gigabytes = megabytes / 1024;
+  return `${gigabytes >= 10 ? gigabytes.toFixed(1) : gigabytes.toFixed(2)} GB`;
 }
 
 function cardDependencyInlineProgress(dependency) {
@@ -8498,14 +8529,15 @@ function cardDependencyInlineProgress(dependency) {
     phase,
     downloadProgress: phase === "download" ? phaseProgress : 100,
     installProgress: phase === "install" ? phaseProgress : (phase === "completed" ? 100 : 0),
-    downloadSpeedBps: Math.max(0, Number(cardDependencyRemote.downloadSpeedBps || 0))
+    downloadedBytes: Math.max(0, Number(cardDependencyRemote.downloadedBytes || 0)),
+    totalBytes: Math.max(0, Number(cardDependencyRemote.totalBytes || 0))
   };
 }
 
-async function loadCardDependencyRemoteCandidates(targetPath, dependencies, { scene = false } = {}) {
+async function loadCardDependencyRemoteCandidates(targetPath, dependencies, { scene = false, clothes = false } = {}) {
   const requestId = ++cardDependencyRemoteRequestId;
-  const card = scene ? selectedSceneCard.value : selectedCardDetail.value;
-  const selectedPath = scene ? selectedSceneDetailPath.value : selectedCardDetailPath.value;
+  const card = scene ? selectedSceneCard.value : clothes ? selectedClothesCard.value : selectedCardDetail.value;
+  const selectedPath = scene ? selectedSceneDetailPath.value : clothes ? selectedClothesDetailPath.value : selectedCardDetailPath.value;
   if (!card?.relativePath || selectedPath !== targetPath) return;
   const missingGuids = [...new Set(
     (dependencies || [])
@@ -8522,7 +8554,11 @@ async function loadCardDependencyRemoteCandidates(targetPath, dependencies, { sc
       game_dir: String(paths.gameDir || ""),
       path: String(card.relativePath || "")
     });
-    const endpoint = scene ? "/library/scene/missing-mods" : "/library/cards/missing-mods";
+    const endpoint = scene
+      ? "/library/scene/missing-mods"
+      : clothes
+        ? "/library/clothes/missing-mods"
+        : "/library/cards/missing-mods";
     const result = await window.desktopApi?.backendRequest?.(`${endpoint}?${query.toString()}`);
     if (!result?.ok) throw new Error(result?.error || "无法读取远程模组候选");
     if (requestId !== cardDependencyRemoteRequestId) return;
@@ -8545,7 +8581,8 @@ async function loadCardDependencyRemoteCandidates(targetPath, dependencies, { sc
 
 async function installCardDependency(dependency) {
   const isScene = cardBrowserMode.value === "scene";
-  const card = isScene ? selectedSceneCard.value : selectedCardDetail.value;
+  const isClothes = cardBrowserMode.value === "clothes";
+  const card = isScene ? selectedSceneCard.value : isClothes ? selectedClothesCard.value : selectedCardDetail.value;
   const guid = normalizeCardDependencyGuid(dependency);
   if (cardDependencyRemote.taskIds[guid]) {
     await toggleCardDependencyDownload(dependency);
@@ -8565,10 +8602,11 @@ async function installCardDependency(dependency) {
         if (finalTask.status === "completed") {
           cardDependencyRemote.notices = { ...cardDependencyRemote.notices, [guid]: "安装完成" };
           if (isScene) await loadSelectedSceneDetail(card);
+          else if (isClothes) await handleClothesCardClick(card);
           else await loadSelectedCardProfile(card);
-          const currentCard = isScene ? selectedSceneCard.value : selectedCardDetail.value;
+          const currentCard = isScene ? selectedSceneCard.value : isClothes ? selectedClothesCard.value : selectedCardDetail.value;
           if (currentCard) {
-            const dependencies = isScene
+            const dependencies = isScene || isClothes
               ? (currentCard.dependencies || [])
               : (selectedCardDependencies.value || []);
             currentCard.missingCount = dependencies.filter((item) => !item.matched).length;
@@ -8593,8 +8631,13 @@ async function installCardDependency(dependency) {
 
 async function installAllCardDependencies() {
   const isScene = cardBrowserMode.value === "scene";
-  const card = isScene ? selectedSceneCard.value : selectedCardDetail.value;
-  const summary = isScene ? sceneDependencyRemoteSummary.value : cardDependencyRemoteSummary.value;
+  const isClothes = cardBrowserMode.value === "clothes";
+  const card = isScene ? selectedSceneCard.value : isClothes ? selectedClothesCard.value : selectedCardDetail.value;
+  const summary = isScene
+    ? sceneDependencyRemoteSummary.value
+    : isClothes
+      ? clothesDependencyRemoteSummary.value
+      : cardDependencyRemoteSummary.value;
   if (!card?.relativePath || !summary.candidates.length || cardDependencyRemote.installingAll || cardDependencyRemoteBusy.value) return;
 
   const candidates = summary.candidates;
@@ -8629,10 +8672,11 @@ async function installAllCardDependencies() {
         cardDependencyRemote.notices = completedNotices;
         if (finalTask.status === "completed") {
           if (isScene) await loadSelectedSceneDetail(card);
+          else if (isClothes) await handleClothesCardClick(card);
           else await loadSelectedCardProfile(card);
-          const currentCard = isScene ? selectedSceneCard.value : selectedCardDetail.value;
+          const currentCard = isScene ? selectedSceneCard.value : isClothes ? selectedClothesCard.value : selectedCardDetail.value;
           if (currentCard) {
-            const dependencies = isScene
+            const dependencies = isScene || isClothes
               ? (currentCard.dependencies || [])
               : (selectedCardDependencies.value || []);
             currentCard.missingCount = dependencies.filter((item) => !item.matched).length;
@@ -9352,9 +9396,10 @@ const appCtx = reactive({
   cardDetailTab,
   cardDependencyRemote,
   cardDependencyRemoteSummary,
+  clothesDependencyRemoteSummary,
   sceneDependencyRemoteSummary,
   cardDependencyRemoteBusy,
-  formatDownloadSpeed,
+  formatDownloadedBytes,
   cardDependencyInlineProgress,
   cardDependencyRemoteFor,
   normalizeCardDependencyGuid,
@@ -9942,8 +9987,8 @@ watch(backendStatus, (status, previousStatus) => {
       </nav>
     </aside>
 
-    <main class="main" :class="{ 'assembly-mode-main': assemblyUiActive, 'item-library-main': isItemLibraryView && !assemblyMode, 'character-library-main': activeView === 'characters', 'plugin-library-main': activeView === 'plugins', 'workbench-main': activeView === 'workbench', 'runtime-log-main': activeView === 'logs', 'settings-main': activeView === 'settings', 'trash-main': activeView === 'trash' }">
-      <header v-if="activeView !== 'characters' && activeView !== 'plugins' && activeView !== 'workbench' && activeView !== 'logs' && activeView !== 'settings' && activeView !== 'trash'" class="topbar" :class="{ 'assembly-topbar': assemblyUiActive, 'topbar-item-library': isItemLibraryView && !assemblyMode }">
+    <main class="main" :class="{ 'overview-main': activeView === 'overview', 'mod-library-main': activeView === 'mods' && !isItemLibraryView, 'assembly-mode-main': assemblyUiActive, 'item-library-main': isItemLibraryView && !assemblyMode, 'character-library-main': activeView === 'characters', 'plugin-library-main': activeView === 'plugins', 'workbench-main': activeView === 'workbench', 'runtime-log-main': activeView === 'logs', 'settings-main': activeView === 'settings', 'trash-main': activeView === 'trash' }">
+      <header v-if="activeView === 'start' || isItemLibraryView" class="topbar" :class="{ 'assembly-topbar': assemblyUiActive, 'topbar-item-library': isItemLibraryView && !assemblyMode }">
         <template v-if="assemblyUiActive">
           <div class="assembly-topbar-context">
             <div class="assembly-hero">
@@ -10567,7 +10612,6 @@ watch(backendStatus, (status, previousStatus) => {
           <div class="prompt-panel missing-item-panel">
             <div class="missing-item-panel-head">
               <div>
-                <span class="missing-item-kicker">DEPENDENCY CHECK</span>
                 <strong>{{ missingItemPrompt.kind === 'mod' ? '模组缺失' : '物品缺失' }}</strong>
               </div>
               <span class="missing-item-alert-mark">!</span>
@@ -10588,7 +10632,6 @@ watch(backendStatus, (status, previousStatus) => {
             <section v-if="missingItemPrompt.modId" class="missing-item-remote-card">
               <div class="missing-item-remote-head">
                 <div>
-                  <span class="missing-item-kicker remote-kicker">REMOTE INDEX</span>
                   <strong>远端模组信息</strong>
                 </div>
                 <span

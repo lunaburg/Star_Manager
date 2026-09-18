@@ -57,7 +57,7 @@
 | 应用外壳 | [主布局](frontend-ui/main-layout.md) | 全局导航、顶部目录状态、按实测耗时加权的数据库任务进度、数据库重建和共享上下文 |
 | 开始游戏 | [开始页布局](frontend-ui/start-layout.md) | 三个一级容器移除外部边框；HS2 目录选择、后端就绪竞态恢复、目录校验任务、三种启动入口、固定与自定义目录快捷入口、六个固定插件开关和两个特殊设置；读写 `UserData/setup.xml`、备份和启动框架检测 |
 | 总览 | [总览页布局](frontend-ui/overview-layout.md) | 四个一级容器移除外部边框；人物卡/模组/物品/服装卡/场景卡/插件摘要、实用工具、最近任务、本地成就 |
-| 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、服装卡、场景卡子界面，其中三类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
+| 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、服装卡、场景卡子界面，其中三类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；三类卡片依赖统一支持物品级匹配、模组级降级、模组未安装可补全/不可补全，以及“模组存在，物品缺失”特殊状态；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
 | 收藏视觉 | [人物卡收藏视觉状态](frontend-ui/character-card-favorite-effects.md) | 收藏主题、铭牌、边框、名字溢出和设置持久化 |
 | 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、多选操作栏与批量按钮玻璃化、增强表头磨砂层、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装和安全维护 |
 | 插件管理 | [插件管理布局](frontend-ui/plugins-layout.md) | BepInEx DLL 扫描、元数据、依赖、缓存、诊断和 `.dl_` 启停 |
@@ -76,9 +76,9 @@
 | 增量建库 | [数据库变动检测](mod_manage/mod_database_change_detection.md) | 新增/移除/修改、重复 GUID、stale 和角色卡依赖重连 |
 | 角色卡二进制 | [角色卡解析说明](mod_manage/character_card_parsing.md) | PNG 尾部、MessagePack、UniversalAutoResolver、人物参数和坐标卡导出 |
 | 服装卡样本解析 | [服装卡样本解析报告](mod_manage/clothes_card_sample_analysis.md) | 用户提供的 AIS_Clothes 样本结构、Coordinate 部件、UAR 依赖和 KKEx 插件摘要 |
-| Studio 场景卡解析 | [Studio 场景卡解析说明](mod_manage/scene_card_parsing.md) | StudioNEOV2 场景数据、地图/物品/图案依赖、本地数据库匹配、远端候选查询和详情关联展示 |
+| Studio 场景卡解析 | [Studio 场景卡解析说明](mod_manage/scene_card_parsing.md) | StudioNEOV2 场景数据、地图/物品/图案依赖、本地数据库匹配（含 Studio 物品）、远端候选查询和详情关联展示 |
 | 模组异常 | [模组异常分类](mod_manage/mod_exception_catalog.md) | 诊断类型、触发条件和当前修复入口 |
-| 标准模组结构 | [标准模组结构记录](mod_manage/standard_mod_structure_record.md) | manifest、角色/Studio CSV、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
+| 标准模组结构 | [标准模组结构记录](mod_manage/standard_mod_structure_record.md) | manifest、角色/Studio CSV（递归子目录、作者工具和日语原生表头兼容）、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
 | Studio 模组样本解析 | [Hooh ammunition_go.zipmod 结构解析](mod_manage/hooh_ammunition_go_zipmod_analysis.md) | Studio `ItemCategory` / `ItemList`、AssetBundle prefab 映射和当前扫描边界 |
 | Studio 姿势转 zipmod | [Studio 女性姿势转换](mod_manage/pose_zipmod_conversion.md) | `.dat` 女性姿势、Kind=501 CSV、Animator/AnimationClip 模板、骨骼路径映射和验证边界 |
 | KK Animations ForMaker 补全 | [KK Animations ForMaker 注册补全](mod_manage/kk_animations_formaker_completion.md) | 从完整动画包读取全部 Studio 动画并注册到 Kind=501 姿势列表 |

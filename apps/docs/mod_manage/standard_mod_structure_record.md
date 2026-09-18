@@ -46,16 +46,23 @@ Studio 自定义物品可以使用另一套列表目录，不应强行按角色�
 |-- manifest.xml
 `-- abdata/
     |-- <作者或模组资源目录>/*.unity3d
-    `-- studio/info/<作者>/
+    `-- studio/info/<作者>/<可选的子目录>/
         |-- ItemCategory_<分类>_<大类>.csv
         `-- ItemList_<列表>_<大类>_<分类>.csv
 ```
 
-`ItemCategory_*.csv` 通常登记 Studio 分类 ID 和显示名称；`ItemList_*.csv` 通常使用 `BigCategory`、`MidCategory`、`Name`、`Manifest`、`Bundle`、`Object` 等字段，把每个 Studio 物品映射到 Unity3D AssetBundle 内的 prefab。它可能没有 `ThumbAB` / `ThumbTex`，因此资源包中的材质贴图不应被误当作列表缩略图。
+`ItemCategory_*.csv` 通常登记 Studio 分类 ID 和显示名称；`ItemList_*.csv` 通常使用 `BigCategory`、`MidCategory`、`Name`、`Manifest`、`Bundle`、`Object` 等字段，把每个 Studio 物品映射到 Unity3D AssetBundle 内的 prefab。部分作者工具会把登记表放在 `info` 下的额外子目录中，并使用 `id/categoryId/subcategoryId/name/assetBundlePath/prefabPath` 表头；这些表头分别映射为 `ID/BigCategory/MidCategory/Name/Bundle/Object`。它可能没有 `ThumbAB` / `ThumbTex`，因此资源包中的材质贴图不应被误当作列表缩略图。
 
-当前 Star Manager 通过独立 Studio 适配器读取 `abdata/studio/info/<作者>/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`。适配器先汇总 Group，再按 `ItemCategory_<category>_<group>.csv` 建立 Group/Category 映射，最后读取 ItemList，并将 `Manifest + Bundle + Object` 写入物品资源字段。Studio 条目统一使用 `kind = __studio_item__` 与 `item_domain = studio`；`BigCategory + MidCategory` 仅回填 Group/Category 显示信息，不参与分类筛选。
+当前 Star Manager 通过独立 Studio 适配器读取 `abdata/studio/info/<作者>/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`。适配器先汇总 Group，再按 `ItemCategory_<category>_<group>.csv` 建立 Group/Category 映射，最后读取 ItemList，并将 `Manifest + Bundle + Object` 写入物品资源字段。英文工具表头和游戏原生日语表头均受支持：`管理番号/大きい項目/中間項目/名称/マニフェスト/バンドルパス/ファイルパス` 分别映射为 `ID/BigCategory/MidCategory/Name/Manifest/Bundle/Object`；Group/Category 的 `グループ番号/カテゴリー番号/名称` 也会映射为 `ID/Name`。Studio 条目统一使用 `kind = __studio_item__` 与 `item_domain = studio`；`BigCategory + MidCategory` 仅回填 Group/Category 显示信息，不参与分类筛选。
 
 Studio 条目不读取 `abdata/studio_thumbnails/`，不生成缩略图缓存，固定使用 `thumbnail_status = not_applicable`。因此 Studio 物品不会显示缩略图，也不会被归入缺失缩略图诊断。
+
+### 本次问题记录：嵌套 Studio 登记表
+
+- **背景与根因**：`[Joan6694]_Dynamic Bone Colliders.zipmod` 的 `ItemCategory_00_11.csv` 和 `ItemList_00_11_42.csv` 位于 `abdata/studio/info/Joan6694/dynamic_bone_colliders/`，且使用作者工具表头。旧解析器只按标准字段识别 ItemList，因此没有生成物品记录。
+- **解决方案**：Studio CSV 继续按 `abdata/studio/info/` 递归枚举；新增作者工具字段别名和大小写不敏感的表头归一化，并让 `categoryId` / `subcategoryId` 参与分类映射。
+- **验证结果**：样本解析得到 `item_id=694001`、名称 `[J694] Dynamic Bone Capsule Collider`、分类 `DB Colliders`、Prefab `Collider` 和 `studio/Joan6694/dynamic_bone_collider.unity3d`；新增回归测试覆盖嵌套目录和作者工具表头。
+- **适用边界**：仅扩展 Studio `ItemCategory` / `ItemList` 登记表解析；不会把 Studio 资源误当作角色服饰 CSV，也不会为 Studio 物品生成缩略图。
 
 已验证样本：[Hooh ammunition_go.zipmod 结构解析记录](hooh_ammunition_go_zipmod_analysis.md)。
 

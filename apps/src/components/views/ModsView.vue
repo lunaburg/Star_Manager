@@ -168,7 +168,21 @@ function modStatusTone(status) {
     <div class="mod-layout mod-management-layout">
       <section class="panel browser-panel mod-page glass-surface--compact">
         <div class="module-head mod-head glass-surface--compact">
-          <h1>模组管理</h1>
+          <div class="mode-strip mod-tabs">
+            <button :class="{ active: ctx.libraryMode === 'mods' }" type="button" @click="ctx.setLibraryMode('mods')">模组浏览</button>
+            <button :class="{ active: ctx.libraryMode === 'items' }" type="button" @click="ctx.setLibraryMode('items')">物品浏览</button>
+          </div>
+          <button
+            v-if="ctx.libraryMode === 'items'"
+            class="assembly-mode-toggle"
+            :class="{ active: ctx.assemblyMode }"
+            type="button"
+            :aria-pressed="ctx.assemblyMode"
+            title="切换右侧为游戏角色编辑器的实际装配信息"
+            @click="ctx.setAssemblyMode(!ctx.assemblyMode)"
+          >
+            <span>{{ ctx.assemblyMode ? '退出装配模式' : '装配模式' }}</span>
+          </button>
           <div class="library-summary mod-summary">
             <span class="badge ok">{{ ctx.formatStat(ctx.modDatabase.total) }} zipmod</span>
             <span class="badge">{{ ctx.formatStat(ctx.stats.modItems) }} items</span>
@@ -178,38 +192,9 @@ function modStatusTone(status) {
           </div>
         </div>
 
-        <div class="mod-strip glass-surface--compact">
-          <div class="mode-strip mod-tabs">
-            <button :class="{ active: ctx.libraryMode === 'mods' }" type="button" @click="ctx.setLibraryMode('mods')">模组浏览</button>
-            <button :class="{ active: ctx.libraryMode === 'items' }" type="button" @click="ctx.setLibraryMode('items')">物品浏览</button>
-          </div>
-          <div v-if="ctx.libraryMode === 'items'" class="assembly-mode-control">
-            <button
-              class="assembly-mode-toggle"
-              :class="{ active: ctx.assemblyMode }"
-              type="button"
-              :aria-pressed="ctx.assemblyMode"
-              title="切换右侧为游戏角色编辑器的实际装配信息"
-              @click="ctx.setAssemblyMode(!ctx.assemblyMode)"
-            >
-              <span>{{ ctx.assemblyMode ? '退出装配模式' : '装配模式' }}</span>
-            </button>
-          </div>
-          <div class="dependency-usage-filter" aria-label="角色卡依赖筛选">
-            <button
-              v-for="option in ctx.dependencyUsageOptions"
-              :key="option.value || 'all'"
-              type="button"
-              :class="{ active: ctx.dependencyUsageFilter === option.value }"
-              @click="ctx.setDependencyUsageFilter(option.value)"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-        </div>
-
         <div class="toolbar library-toolbar glass-surface--compact">
-          <div v-if="ctx.libraryMode === 'items'" class="toolbar-left filter-grid items">
+          <template v-if="ctx.libraryMode === 'items'">
+          <div class="toolbar-left filter-grid items">
             <input
               v-model="ctx.itemFilters.search"
               class="search"
@@ -268,14 +253,22 @@ function modStatusTone(status) {
               <option value="thumb">缩略图异常</option>
             </select>
           </div>
+          <select
+            class="dependency-usage-filter"
+            aria-label="角色卡依赖筛选"
+            :value="ctx.dependencyUsageFilter"
+            @change="ctx.setDependencyUsageFilter($event.target.value)"
+          >
+            <option
+              v-for="option in ctx.dependencyUsageOptions"
+              :key="option.value || 'all'"
+              :value="option.value"
+            >{{ option.label }}</option>
+          </select>
+          </template>
 
-          <div v-if="ctx.libraryMode === 'items'" class="item-toolbar-actions">
-            <button class="bulk-delete-error-items-button danger-action" type="button" title="批量删除当前筛选列表下的所有错误模组物品" aria-label="批量删除当前筛选列表下的所有错误模组物品" :aria-busy="ctx.bulkActionBusy === 'items-delete'" :disabled="!ctx.itemDatabase.exists || ctx.itemFilters.source === 'builtin' || Boolean(ctx.bulkActionBusy)" @click="ctx.openBulkDeleteErrorItemsPrompt">
-              删除错误物品
-            </button>
-          </div>
-
-          <div v-else class="toolbar-left filter-grid mods">
+          <template v-else>
+          <div class="toolbar-left filter-grid mods">
             <button
               v-if="!ctx.modBulkMode"
               class="bulk-select-button"
@@ -290,6 +283,8 @@ function modStatusTone(status) {
               <span>已选 {{ ctx.selectedModCount }} 个</span>
               <button type="button" @click="ctx.exitModBulkMode">退出</button>
             </div>
+          </div>
+          <div class="mod-filter-end">
             <div class="author-combobox">
               <input
                 v-model="ctx.modFilters.author"
@@ -346,7 +341,20 @@ function modStatusTone(status) {
               <option class="status-option-danger" value="unity3d_missing">　Unity3D 文件缺失</option>
               <option class="status-option-danger" value="unity3d_error">　Unity3D 资源读取异常</option>
             </select>
+          <select
+            class="dependency-usage-filter"
+            aria-label="角色卡依赖筛选"
+            :value="ctx.dependencyUsageFilter"
+            @change="ctx.setDependencyUsageFilter($event.target.value)"
+          >
+            <option
+              v-for="option in ctx.dependencyUsageOptions"
+              :key="option.value || 'all'"
+              :value="option.value"
+            >{{ option.label }}</option>
+          </select>
           </div>
+          </template>
 
           <div v-if="ctx.libraryMode === 'mods' && ctx.modBulkMode" class="bulk-action-bar" aria-label="批量操作">
             <button

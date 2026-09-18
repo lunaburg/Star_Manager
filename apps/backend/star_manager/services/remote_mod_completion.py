@@ -16,11 +16,14 @@ from typing import Callable, Iterable
 from star_manager.core.zipmod_utils import is_hs2_game_dir
 from star_manager.services.card_library import (
     is_ais_card,
+    inspect_clothes_card_file,
     resolve_card_dependencies,
     resolve_card_file,
     resolve_dependency_records,
+    resolve_coordinate_file,
     resolve_scene_file,
     validate_card_root,
+    validate_coordinate_root,
     validate_scene_root,
 )
 from star_manager.core.scene_card import inspect_scene_card_file
@@ -149,7 +152,16 @@ def _group_missing_dependencies(
         group["candidates"] = candidates
         group["candidate_count"] = len(candidates)
         group["can_download"] = bool(candidates)
-        if candidates:
+        has_local_item_missing = bool(group["local_item_missing_count"])
+        group["mod_installed"] = bool(group["local_item_missing_count"])
+        group["item_missing"] = has_local_item_missing
+        if has_local_item_missing:
+            group["display_name"] = group["guid"]
+            group["can_download"] = False
+            group["status"] = "local_item_missing"
+            group["status_label"] = "模组存在，物品缺失"
+            group["reason"] = "本地数据库已有该模组，但没有找到场景/卡片所需的具体物品记录"
+        elif candidates:
             group["display_name"] = candidates[0]["name"]
             group["status"] = "available"
             group["status_label"] = "可补全"
@@ -266,6 +278,46 @@ def inspect_scene_missing_mods(
             dependencies,
             connection,
             resource_type="scene_card",
+            index_path=index_path,
+        )
+    finally:
+        connection.close()
+    return result
+
+
+def inspect_clothes_missing_mods(
+    game_dir: str,
+    relative_path: str,
+    index_path: Path = DEFAULT_REMOTE_INDEX_PATH,
+) -> dict:
+    """Return remote candidates for unresolved dependencies in one clothes card."""
+
+    if not is_hs2_game_dir(game_dir):
+        return {"ok": False, "error": "Please select a valid HS2 game directory."}
+    is_valid, root, error = validate_coordinate_root(game_dir)
+    if not is_valid:
+        return {"ok": False, "error": error or "Clothes-card directory is invalid."}
+    try:
+        card_path = resolve_coordinate_file(root, relative_path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    parsed = inspect_clothes_card_file(card_path)
+    if not parsed:
+        return {"ok": False, "error": "Clothes card not found or invalid."}
+
+    try:
+        dependencies = resolve_dependency_records(parsed.get("dependencies") or [])
+        connection = _remote_index_connection(index_path)
+    except (OSError, sqlite3.Error) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        result = _missing_mod_result(
+            card_path,
+            relative_path,
+            dependencies,
+            connection,
+            resource_type="clothes_card",
             index_path=index_path,
         )
     finally:

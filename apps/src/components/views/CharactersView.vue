@@ -129,12 +129,14 @@ const vCardNameScroll = {
 };
 
 const DEPENDENCY_GROUPS = [
+  { key: "missing-mod", label: "模组依赖缺失", tone: "gray" },
+  { key: "studio", label: "工作室物品", tone: "blue" },
+  { key: "other", label: "其它", tone: "gray" },
   { key: "clothes", label: "服装", tone: "blue" },
   { key: "accessory", label: "配饰", tone: "mint" },
   { key: "face", label: "面部与五官", tone: "rose" },
   { key: "hair", label: "发型", tone: "violet" },
-  { key: "body", label: "身体与肌肤", tone: "amber" },
-  { key: "other", label: "其他依赖", tone: "gray" }
+  { key: "body", label: "身体与肌肤", tone: "amber" }
 ];
 
 const CATEGORY_PARTS = {
@@ -230,17 +232,17 @@ const PROPERTY_PARTS = [
 ];
 
 function dependencyDescriptor(dependency) {
-  if (dependency?.dependency_type === "scene") {
-    return { group: "other", part: "场景地图" };
-  }
   if (dependency?.displayMode === "mod") {
-    return { group: "other", part: "场景模组" };
+    return { group: "missing-mod", part: "模组" };
   }
   if (dependency?.dependency_type === "scene_item") {
-    return { group: "other", part: "场景物品" };
+    return { group: "studio", part: "工作室物品" };
   }
   if (dependency?.dependency_type === "scene_pattern") {
-    return { group: "other", part: "场景图案" };
+    return { group: "other", part: "工作室图案" };
+  }
+  if (dependency?.dependency_type === "scene") {
+    return { group: "other", part: "工作室地图" };
   }
   const property = String(dependency.property || "").replace(/^outfit\./i, "");
   const category = CATEGORY_PARTS[String(dependency.category_no || "").trim()];
@@ -265,16 +267,42 @@ function dependencyDescriptor(dependency) {
   return { group: "other", part };
 }
 
-function dependencyStatus(dependency) {
+function dependencyStatus(dependency, remoteState = null) {
   if (dependency.source_type === "builtin" || dependency.item?.source_type === "builtin") {
     return { label: "游戏本体", state: "matched" };
   }
   if (dependency.matched) return { label: "已匹配", state: "matched" };
-  if (dependency.zipmod) return { label: "物品未找到", state: "item-missing" };
-  return { label: "模组未安装", state: "mod-missing" };
+  if (dependency.displayMode === "mod" && dependency.zipmod) {
+    return {
+      label: "模组存在 物品缺失",
+      labelPrefix: "模组存在",
+      labelSuffix: "物品缺失",
+      state: "local-item-missing"
+    };
+  }
+  if (remoteState?.status === "local-item-missing") {
+    return {
+      label: "模组存在 物品缺失",
+      labelPrefix: "模组存在",
+      labelSuffix: "物品缺失",
+      state: "local-item-missing"
+    };
+  }
+  if (remoteState?.status === "available") {
+    return { label: "模组未安装 · 可补全", state: "mod-available" };
+  }
+  if (remoteState?.status === "unavailable") {
+    return {
+      label: "模组未安装 不可补全",
+      labelPrefix: "模组未安装",
+      labelSuffix: "不可补全",
+      state: "mod-unavailable"
+    };
+  }
+  return { label: "模组未安装 · 检查中", state: "mod-checking" };
 }
 
-function collapseUnmatchedSceneDependencies(dependencies) {
+function collapseUnmatchedDependencies(dependencies) {
   const result = [];
   const unmatchedByMod = new Map();
   for (const dependency of dependencies || []) {
@@ -289,6 +317,7 @@ function collapseUnmatchedSceneDependencies(dependencies) {
     if (existing) {
       existing.missingDependencyCount += 1;
       existing.missingDependencies.push(dependency);
+      if (!existing.zipmod && dependency.zipmod) existing.zipmod = dependency.zipmod;
       continue;
     }
 
@@ -307,10 +336,8 @@ function collapseUnmatchedSceneDependencies(dependencies) {
   return result;
 }
 
-function buildDependencyGroups(dependencies, { collapseUnmatchedByMod = false } = {}) {
-  const displayDependencies = collapseUnmatchedByMod
-    ? collapseUnmatchedSceneDependencies(dependencies)
-    : dependencies || [];
+function buildDependencyGroups(dependencies, { remoteFor = null } = {}) {
+  const displayDependencies = collapseUnmatchedDependencies(dependencies);
   const buckets = new Map(DEPENDENCY_GROUPS.map((group) => [group.key, []]));
   for (const dependency of displayDependencies) {
     const descriptor = dependencyDescriptor(dependency);
@@ -323,14 +350,16 @@ function buildDependencyGroups(dependencies, { collapseUnmatchedByMod = false } 
         ? dependency.zipmod?.name || dependency.name || dependency.mod_id || "未知场景地图"
         : dependency.item?.name || dependency.name || dependency.mod_id || "未知物品",
       sourceName: dependency.displayMode === "mod"
-        ? `${dependency.mod_id || "未知 GUID"} · ${dependency.missingDependencyCount || 1} 项未匹配本地数据库`
+        ? `${dependency.mod_id || "未知 GUID"} · ${dependency.missingDependencyCount || 1} 项${dependency.zipmod ? "物品缺失" : "未匹配本地数据库"}`
         : dependency.item?.source_mod || dependency.zipmod?.name || dependency.mod_id || "来源未知",
-      status: dependencyStatus(dependency)
+      status: dependencyStatus(dependency, remoteFor?.(dependency))
     });
   }
   return DEPENDENCY_GROUPS
     .map((group) => {
-      const items = buckets.get(group.key);
+      const items = [...buckets.get(group.key)].sort(
+        (left, right) => Number(!right.matched) - Number(!left.matched)
+      );
       return {
         ...group,
         items,
@@ -340,14 +369,14 @@ function buildDependencyGroups(dependencies, { collapseUnmatchedByMod = false } 
     .filter((group) => group.items.length > 0);
 }
 
-const cardDependencyGroups = computed(() => buildDependencyGroups(ctx.selectedCardDependencies || []));
+const cardDependencyGroups = computed(() => buildDependencyGroups(ctx.selectedCardDependencies || [], { remoteFor: ctx.cardDependencyRemoteFor }));
 
 const clothesDependencyGroups = computed(() => (
-  buildDependencyGroups(ctx.selectedClothesCard?.dependencies || [])
+  buildDependencyGroups(ctx.selectedClothesCard?.dependencies || [], { remoteFor: ctx.cardDependencyRemoteFor })
 ));
 
 const sceneDependencyGroups = computed(() => (
-  buildDependencyGroups(ctx.selectedSceneCard?.dependencies || [], { collapseUnmatchedByMod: true })
+  buildDependencyGroups(ctx.selectedSceneCard?.dependencies || [], { remoteFor: ctx.cardDependencyRemoteFor })
 ));
 
 const sceneDependencyDisplayCount = computed(() => (
@@ -949,7 +978,7 @@ const cardModeMeta = computed(() => {
                               v-for="dependency in group.items"
                               :key="dependency.id"
                               class="card-dependency-item"
-                              :class="[dependency.status.state, { 'has-inline-progress': ctx.cardDependencyInlineProgress(dependency) }]"
+                              :class="[dependency.status.state, { 'has-inline-progress': ctx.cardDependencyInlineProgress(dependency), 'mod-dependency': dependency.displayMode === 'mod' }]"
                               role="button"
                               tabindex="0"
                               :title="`${dependency.partLabel} · ${dependency.property || '无内部属性'} · ${dependency.status.label}`"
@@ -957,7 +986,7 @@ const cardModeMeta = computed(() => {
                               @keydown.enter.prevent="ctx.openCardDependencyItem(dependency)"
                               @keydown.space.prevent="ctx.openCardDependencyItem(dependency)"
                             >
-                              <span class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : 'missing'">
+                              <span v-if="dependency.displayMode !== 'mod'" class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : 'missing'">
                                 <LazyThumbnail
                                   v-if="dependency.item?.thumbnailUrl"
                                   :src="dependency.item.thumbnailUrl"
@@ -969,18 +998,34 @@ const cardModeMeta = computed(() => {
                                 <strong>{{ dependency.displayName }}</strong>
                                 <span class="dependency-item-meta">
                                   <span class="dependency-part-label">{{ dependency.partLabel }}</span>
-                                  <small>{{ dependency.sourceName }}</small>
+                                  <small v-if="dependency.displayMode !== 'mod'">{{ dependency.sourceName }}</small>
+                                  <small v-else class="dependency-missing-count">包含（{{ dependency.missingDependencyCount || 1 }}）个缺失物品</small>
                                 </span>
                               </span>
                               <span class="dependency-match-actions">
                                 <span
-                                  v-if="dependency.status.state === 'matched'"
+                                  v-if="['matched', 'local-item-missing'].includes(dependency.status.state)"
                                   class="dependency-match-state"
                                   :class="dependency.status.state"
                                 >
-                                  {{ dependency.status.label }}
+                                  <template v-if="dependency.status.labelSuffix">
+                                    <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                                    <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                                  </template>
+                                  <template v-else>{{ dependency.status.label }}</template>
                                 </span>
-                                <template v-if="['mod-missing', 'item-missing'].includes(dependency.status.state)">
+                                <template v-if="['mod-available', 'mod-unavailable', 'mod-checking'].includes(dependency.status.state)">
+                                  <span
+                                    v-if="dependency.status.state !== 'mod-available'"
+                                    class="dependency-match-state"
+                                    :class="dependency.status.state"
+                                  >
+                                    <template v-if="dependency.status.labelSuffix">
+                                      <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                                      <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                                    </template>
+                                    <template v-else>{{ dependency.status.label }}</template>
+                                  </span>
                                   <div v-if="ctx.cardDependencyInlineProgress(dependency)" class="dependency-inline-progress" aria-live="polite">
                                     <div class="dependency-inline-progress-head">
                                       <span>{{ ctx.cardDependencyInlineProgress(dependency).phase === 'download' ? '下载' : '安装' }}</span>
@@ -1005,7 +1050,7 @@ const cardModeMeta = computed(() => {
                                     <template v-if="ctx.cardDependencyInlineProgress(dependency).phase === 'download'">
                                       <div class="dependency-inline-progress-stage download">
                                         <div class="dependency-inline-progress-track"><span :style="{ width: `${ctx.cardDependencyInlineProgress(dependency).downloadProgress}%` }"></span></div>
-                                        <small>{{ ctx.formatDownloadSpeed(ctx.cardDependencyInlineProgress(dependency).downloadSpeedBps) }}</small>
+                                        <small>{{ ctx.formatDownloadedBytes(ctx.cardDependencyInlineProgress(dependency).downloadedBytes) }}</small>
                                       </div>
                                     </template>
                                     <template v-else-if="ctx.cardDependencyInlineProgress(dependency).phase === 'install'">
@@ -1033,13 +1078,6 @@ const cardModeMeta = computed(() => {
                                   >
                                     {{ ctx.cardDependencyRemote.busyGuids[ctx.normalizeCardDependencyGuid(dependency)] ? '准备中...' : '安装' }}
                                   </button>
-                                  <span
-                                    v-else-if="ctx.cardDependencyRemoteFor(dependency)?.status === 'unavailable'"
-                                    class="dependency-unavailable-label"
-                                  >
-                                    无法获取
-                                  </span>
-                                  <span v-else class="dependency-checking-label">检查中</span>
                                 </template>
                                 <small
                                   v-if="ctx.cardDependencyRemote.notices[ctx.normalizeCardDependencyGuid(dependency)]"
@@ -1498,7 +1536,24 @@ const cardModeMeta = computed(() => {
             <div v-else-if="!ctx.selectedClothesCard.dependencies?.length" class="clothes-detail-empty">暂无关联物品。</div>
             <div v-else class="card-dependency-browser clothes-dependency-browser">
               <div class="card-dependency-overview">
-                <span><strong>{{ ctx.selectedClothesCard.dependencies.length }}</strong>项物品依赖</span>
+                <span>
+                  <strong>{{ ctx.selectedClothesCard.dependencies.length }}</strong>项物品依赖
+                  <small v-if="ctx.clothesDependencyRemoteSummary.availableCount">可补全 {{ ctx.clothesDependencyRemoteSummary.availableCount }} 个模组</small>
+                </span>
+                <div class="card-dependency-overview-actions">
+                  <button
+                    v-if="ctx.clothesDependencyRemoteSummary.missingCount > 0 && ctx.clothesDependencyRemoteSummary.availableCount > 0"
+                    type="button"
+                    class="card-dependency-install-all"
+                    :disabled="ctx.cardDependencyRemoteBusy && !ctx.cardDependencyRemote.allTaskId"
+                    :title="ctx.cardDependencyRemote.allTaskId ? (ctx.cardDependencyRemote.allStatus === 'paused' ? '点击继续任务' : '点击暂停任务') : '安装全部可获取的缺失模组'"
+                    @click.stop="ctx.cardDependencyRemote.allTaskId ? ctx.toggleAllCardDependencies() : ctx.installAllCardDependencies()"
+                  >
+                    {{ ctx.cardDependencyRemote.allTaskId
+                      ? (ctx.cardDependencyRemote.allStatus === 'paused' ? '继续全部' : '暂停全部')
+                      : (ctx.cardDependencyRemoteBusy ? '准备中...' : '全部安装') }}
+                  </button>
+                </div>
               </div>
               <section
                 v-for="group in clothesDependencyGroups"
@@ -1517,7 +1572,7 @@ const cardModeMeta = computed(() => {
                     v-for="dependency in group.items"
                     :key="dependency.id || `${dependency.property}-${dependency.slot}-${dependency.local_slot}`"
                     class="card-dependency-item"
-                    :class="dependency.status.state"
+                    :class="[dependency.status.state, { 'mod-dependency': dependency.displayMode === 'mod' }]"
                     role="button"
                     tabindex="0"
                     :title="`${dependency.partLabel} · ${dependency.property || '无内部属性'} · ${dependency.status.label}`"
@@ -1525,7 +1580,7 @@ const cardModeMeta = computed(() => {
                     @keydown.enter.prevent="ctx.openCardDependencyItem(dependency)"
                     @keydown.space.prevent="ctx.openCardDependencyItem(dependency)"
                   >
-                    <span class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : 'missing'">
+                    <span v-if="dependency.displayMode !== 'mod'" class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : 'missing'">
                       <LazyThumbnail
                         v-if="dependency.item?.thumbnailUrl"
                         :src="dependency.item.thumbnailUrl"
@@ -1537,11 +1592,44 @@ const cardModeMeta = computed(() => {
                       <strong>{{ dependency.displayName }}</strong>
                       <span class="dependency-item-meta">
                         <span class="dependency-part-label">{{ dependency.partLabel }}</span>
-                        <small>{{ dependency.sourceName }}</small>
+                        <small v-if="dependency.displayMode !== 'mod'">{{ dependency.sourceName }}</small>
+                        <small v-else class="dependency-missing-count">包含（{{ dependency.missingDependencyCount || 1 }}）个缺失物品</small>
                       </span>
                     </span>
                     <span class="dependency-match-actions">
-                      <span class="dependency-match-state" :class="dependency.status.state">{{ dependency.status.label }}</span>
+                    <span
+                      v-if="['matched', 'local-item-missing'].includes(dependency.status.state)"
+                      class="dependency-match-state"
+                      :class="dependency.status.state"
+                    >
+                      <template v-if="dependency.status.labelSuffix">
+                        <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                        <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                      </template>
+                      <template v-else>{{ dependency.status.label }}</template>
+                    </span>
+                    <template v-if="['mod-available', 'mod-unavailable', 'mod-checking'].includes(dependency.status.state)">
+                      <span
+                        v-if="dependency.status.state !== 'mod-available'"
+                        class="dependency-match-state"
+                        :class="dependency.status.state"
+                      >
+                        <template v-if="dependency.status.labelSuffix">
+                          <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                          <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                        </template>
+                        <template v-else>{{ dependency.status.label }}</template>
+                      </span>
+                      <button
+                        v-if="ctx.cardDependencyRemoteFor(dependency)?.status === 'available'"
+                        type="button"
+                        class="dependency-install-button"
+                        title="安装此模组"
+                        @click.stop="ctx.installCardDependency(dependency)"
+                      >
+                        {{ ctx.cardDependencyRemote.busyGuids[ctx.normalizeCardDependencyGuid(dependency)] ? '准备中...' : '安装' }}
+                      </button>
+                    </template>
                     </span>
                   </div>
                 </div>
@@ -1721,7 +1809,7 @@ const cardModeMeta = computed(() => {
                     v-for="dependency in group.items"
                     :key="dependency.id || `${dependency.property}-${dependency.mod_id}`"
                     class="card-dependency-item"
-                    :class="dependency.status.state"
+                    :class="[dependency.status.state, { 'mod-dependency': dependency.displayMode === 'mod' }]"
                     role="button"
                     tabindex="0"
                     :title="`${dependency.partLabel} · ${dependency.status.label}`"
@@ -1729,7 +1817,7 @@ const cardModeMeta = computed(() => {
                     @keydown.enter.prevent="ctx.openCardDependencyItem(dependency)"
                     @keydown.space.prevent="ctx.openCardDependencyItem(dependency)"
                   >
-                    <span class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : (dependency.matched ? 'ok' : 'missing')">
+                    <span v-if="dependency.displayMode !== 'mod'" class="item-thumb" :class="dependency.item ? ctx.badgeClass(dependency.item.status) : (dependency.matched ? 'ok' : 'missing')">
                       <LazyThumbnail
                         v-if="dependency.item?.thumbnailUrl"
                         :src="dependency.item.thumbnailUrl"
@@ -1741,19 +1829,34 @@ const cardModeMeta = computed(() => {
                       <strong>{{ dependency.displayName }}</strong>
                       <span class="dependency-item-meta">
                         <span class="dependency-part-label">{{ dependency.partLabel }}</span>
-                        <small>{{ dependency.sourceName }}</small>
-                        <small v-if="dependency.displayMode === 'mod'">已合并同模组缺失项</small>
+                        <small v-if="dependency.displayMode !== 'mod'">{{ dependency.sourceName }}</small>
+                        <small v-else class="dependency-missing-count">包含（{{ dependency.missingDependencyCount || 1 }}）个缺失物品</small>
                       </span>
                     </span>
                     <span class="dependency-match-actions">
                       <span
-                        v-if="dependency.status.state === 'matched'"
+                        v-if="['matched', 'local-item-missing'].includes(dependency.status.state)"
                         class="dependency-match-state"
                         :class="dependency.status.state"
                       >
-                        {{ dependency.status.label }}
+                        <template v-if="dependency.status.labelSuffix">
+                          <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                          <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                        </template>
+                        <template v-else>{{ dependency.status.label }}</template>
                       </span>
-                      <template v-if="['mod-missing', 'item-missing'].includes(dependency.status.state)">
+                      <template v-if="['mod-available', 'mod-unavailable', 'mod-checking'].includes(dependency.status.state)">
+                        <span
+                          v-if="dependency.status.state !== 'mod-available'"
+                          class="dependency-match-state"
+                          :class="dependency.status.state"
+                        >
+                          <template v-if="dependency.status.labelSuffix">
+                            <span class="dependency-status-prefix">{{ dependency.status.labelPrefix }}</span>
+                            <span class="dependency-status-nowrap">{{ dependency.status.labelSuffix }}</span>
+                          </template>
+                          <template v-else>{{ dependency.status.label }}</template>
+                        </span>
                         <div v-if="ctx.cardDependencyInlineProgress(dependency)" class="dependency-inline-progress" aria-live="polite">
                           <div class="dependency-inline-progress-head">
                             <span>{{ ctx.cardDependencyInlineProgress(dependency).phase === 'download' ? '下载' : '安装' }}</span>
@@ -1778,7 +1881,7 @@ const cardModeMeta = computed(() => {
                           <template v-if="ctx.cardDependencyInlineProgress(dependency).phase === 'download'">
                             <div class="dependency-inline-progress-stage download">
                               <div class="dependency-inline-progress-track"><span :style="{ width: `${ctx.cardDependencyInlineProgress(dependency).downloadProgress}%` }"></span></div>
-                              <small>{{ ctx.formatDownloadSpeed(ctx.cardDependencyInlineProgress(dependency).downloadSpeedBps) }}</small>
+                              <small>{{ ctx.formatDownloadedBytes(ctx.cardDependencyInlineProgress(dependency).downloadedBytes) }}</small>
                             </div>
                           </template>
                           <template v-else-if="ctx.cardDependencyInlineProgress(dependency).phase === 'install'">
@@ -1806,13 +1909,6 @@ const cardModeMeta = computed(() => {
                         >
                           {{ ctx.cardDependencyRemote.busyGuids[ctx.normalizeCardDependencyGuid(dependency)] ? '准备中...' : '安装' }}
                         </button>
-                        <span
-                          v-else-if="ctx.cardDependencyRemoteFor(dependency)?.status === 'unavailable'"
-                          class="dependency-unavailable-label"
-                        >
-                          无法获取
-                        </span>
-                        <span v-else class="dependency-checking-label">检查中</span>
                         <small
                           v-if="ctx.cardDependencyRemote.notices[ctx.normalizeCardDependencyGuid(dependency)]"
                           class="dependency-install-notice"

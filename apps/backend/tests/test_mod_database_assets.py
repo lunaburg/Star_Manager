@@ -281,6 +281,34 @@ class ThumbnailDiagnosticTests(unittest.TestCase):
 
 
 class CsvEncodingTests(unittest.TestCase):
+    def test_reads_nested_studio_info_author_tool_csv(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "dynamic-bone-colliders.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "abdata/studio/info/Joan6694/dynamic_bone_colliders/ItemCategory_00_11.csv",
+                    "sortingOrder,categoryId,name\n42,42,DB Colliders\n",
+                )
+                zf.writestr(
+                    "abdata/studio/info/Joan6694/dynamic_bone_colliders/ItemList_00_11_42.csv",
+                    "id,categoryId,subcategoryId,name,manifest,assetBundlePath,prefabPath,childObject\n"
+                    "694001,11,42,[J694] Dynamic Bone Capsule Collider,,"
+                    "studio/Joan6694/dynamic_bone_collider.unity3d,Collider,\n",
+                )
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source))
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.item_domain, "studio")
+        self.assertEqual(item.item_id, "694001")
+        self.assertEqual(item.name, "[J694] Dynamic Bone Capsule Collider")
+        self.assertEqual(item.main_manifest, "abdata")
+        self.assertEqual(item.main_ab, "studio/Joan6694/dynamic_bone_collider.unity3d")
+        self.assertEqual(item.main_data, "Collider")
+        self.assertEqual((item.studio_group_id, item.studio_group_name), ("11", ""))
+        self.assertEqual((item.studio_category_id, item.studio_category_name), ("42", "DB Colliders"))
+
     def test_reads_studio_item_with_group_and_category_metadata(self):
         with TemporaryDirectory() as temp_dir:
             zipmod_path = Path(temp_dir) / "studio-item.zipmod"
@@ -305,6 +333,42 @@ class CsvEncodingTests(unittest.TestCase):
         self.assertEqual((item.studio_group_id, item.studio_group_name), ("8460", "Author Group"))
         self.assertEqual((item.studio_category_id, item.studio_category_name), ("6", "Animals"))
         self.assertEqual((item.thumb_ab, item.thumb_tex), ("", ""))
+
+    def test_reads_native_japanese_studio_headers(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "japanese-studio-item.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "abdata/studio/info/KKYSkyboxPack/ItemGroup_KKYSkyboxPack.csv",
+                    "グループ番号,名称\n2828,KKY Mods\n".encode("utf-8-sig"),
+                )
+                zf.writestr(
+                    "abdata/studio/info/KKYSkyboxPack/ItemCategory_00_2828.csv",
+                    "カテゴリー番号,名称\n15,Skyboxes\n".encode("utf-8-sig"),
+                )
+                zf.writestr(
+                    "abdata/studio/info/KKYSkyboxPack/ItemList_00_2828_15.csv",
+                    (
+                        "管理番号,大きい項目,中間項目,名称,マニフェスト,バンドルパス,ファイルパス,子の接続先\n"
+                        "1,2828,15,[KKY] Above Clouds Skybox,studio00,"
+                        "studio/kky/kky_ai_skyboxes.unity3d,DayAboveClouds,\n"
+                        "2,2828,15,[KKY] Fluffy Clouds Skybox,studio00,"
+                        "studio/kky/kky_ai_skyboxes.unity3d,LightFluffyClouds,\n"
+                    ).encode("utf-8-sig"),
+                )
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source))
+
+        self.assertEqual(len(items), 2)
+        item = next(item for item in items if item.item_id == "2")
+        self.assertEqual(item.kind, STUDIO_ITEM_KIND)
+        self.assertEqual(item.item_domain, "studio")
+        self.assertEqual(item.name, "[KKY] Fluffy Clouds Skybox")
+        self.assertEqual(item.main_manifest, "studio00")
+        self.assertEqual(item.main_ab, "studio/kky/kky_ai_skyboxes.unity3d")
+        self.assertEqual(item.main_data, "LightFluffyClouds")
+        self.assertEqual((item.studio_group_id, item.studio_group_name), ("2828", "KKY Mods"))
+        self.assertEqual((item.studio_category_id, item.studio_category_name), ("15", "Skyboxes"))
 
     def test_studio_item_skips_thumbnail_extraction(self):
         with TemporaryDirectory() as temp_dir:

@@ -175,7 +175,7 @@ zipmod 内的 abdata/list/**/*.csv
 解包模组目录下的 abdata/list/**/*.csv
 ```
 
-Studio 自定义物品额外扫描 `abdata/studio/info/**/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`。适配器先建立 Group/Category 映射，再解析 ItemList；Studio 行统一写入 `kind = __studio_item__`、`item_domain = studio`，作为物品库单一一级“Studio”类别。`BigCategory` / `MidCategory` 仅用于详情显示，不参与筛选、排序或角色服装依赖匹配。
+Studio 自定义物品额外扫描 `abdata/studio/info/**/ItemGroup_*.csv`、`ItemCategory_*.csv` 和 `ItemList_*.csv`，包括 `info` 下的作者子目录和更深层子目录。适配器先建立 Group/Category 映射，再解析 ItemList；英文工具表头和游戏原生日语表头均支持，日语的 `管理番号`、`大きい項目`、`中間項目`、`名称`、`マニフェスト`、`バンドルパス`、`ファイルパス` 分别映射为 `ID`、`BigCategory`、`MidCategory`、`Name`、`Manifest`、`Bundle`、`Object`；作者工具的 `id`、`categoryId`、`subcategoryId`、`name`、`assetBundlePath`、`prefabPath` 分别映射为 `ID`、`BigCategory`、`MidCategory`、`Name`、`Bundle`、`Object`。`グループ番号` / `カテゴリー番号` / `名称` 映射为 Group/Category 的 `ID` / `Name`。Studio 行统一写入 `kind = __studio_item__`、`item_domain = studio`，作为物品库单一一级“Studio”类别。`BigCategory` / `MidCategory` 仅用于详情显示，不参与筛选、排序或角色服装依赖匹配。
 
 此外，扫描器识别 `abdata/studio/info/kPlug/Map_kPlug.csv` 中以 `MAPMOD` 标记的地图登记行，以及 `abdata/map/list/mapinfo/*.unity3d` 本体地图信息包：
 

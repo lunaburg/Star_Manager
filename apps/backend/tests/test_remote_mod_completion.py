@@ -63,6 +63,118 @@ def _remote_db(path: Path, rows: list[tuple]) -> None:
 
 
 class RemoteModCompletionTests(unittest.TestCase):
+    def test_clothes_card_missing_mods_distinguish_available_unavailable_and_local_item_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "HS2"
+            coordinate_root = game_dir / "UserData" / "coordinate"
+            coordinate_root.mkdir(parents=True)
+            card_path = coordinate_root / "sample.png"
+            card_path.write_bytes(b"clothes")
+            remote_db = root / "remote.sqlite"
+            source = "https://sideload.betterrepack.com/download/AISHS2/"
+            _remote_db(remote_db, [
+                (
+                    21,
+                    source,
+                    source + "available.zipmod",
+                    "Author/available.zipmod",
+                    "available.zipmod",
+                    "available.mod",
+                    "available.mod",
+                    "Available Mod",
+                    "1",
+                    "Author",
+                    128,
+                    "ok",
+                    1,
+                ),
+                (
+                    22,
+                    source,
+                    source + "local.zipmod",
+                    "Author/local.zipmod",
+                    "local.zipmod",
+                    "local.mod",
+                    "local.mod",
+                    "Local Mod",
+                    "1",
+                    "Author",
+                    128,
+                    "ok",
+                    1,
+                ),
+            ])
+            parsed = {
+                "name": "Sample Clothes",
+                "dependencies": [
+                    {"ModID": "available.mod", "DependencyType": "clothes"},
+                    {"ModID": "unavailable.mod", "DependencyType": "clothes"},
+                    {"ModID": "local.mod", "DependencyType": "clothes"},
+                ],
+            }
+            resolved = [
+                {
+                    "mod_id": "available.mod",
+                    "dependency_type": "clothes",
+                    "matched": False,
+                    "zipmod": None,
+                    "category_no": "",
+                    "slot": "",
+                    "local_slot": "",
+                    "property": "Coordinate.Top",
+                    "name": "available.mod",
+                },
+                {
+                    "mod_id": "unavailable.mod",
+                    "dependency_type": "clothes",
+                    "matched": False,
+                    "zipmod": None,
+                    "category_no": "",
+                    "slot": "",
+                    "local_slot": "",
+                    "property": "Coordinate.Bottom",
+                    "name": "unavailable.mod",
+                },
+                {
+                    "mod_id": "local.mod",
+                    "dependency_type": "clothes",
+                    "matched": False,
+                    "zipmod": {"guid": "local.mod", "name": "Local Mod"},
+                    "category_no": "",
+                    "slot": "",
+                    "local_slot": "",
+                    "property": "Coordinate.Accessory",
+                    "name": "local.mod",
+                },
+            ]
+
+            with (
+                patch.object(completion, "is_hs2_game_dir", return_value=True),
+                patch.object(completion, "validate_coordinate_root", return_value=(True, coordinate_root, "")),
+                patch.object(completion, "resolve_coordinate_file", return_value=card_path),
+                patch.object(completion, "inspect_clothes_card_file", return_value=parsed) as inspect,
+                patch.object(completion, "resolve_dependency_records", return_value=resolved),
+            ):
+                result = completion.inspect_clothes_missing_mods(
+                    str(game_dir), "sample.png", index_path=remote_db,
+                )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["resource_type"], "clothes_card")
+            inspect.assert_called_once_with(card_path)
+            groups = {group["guid_norm"]: group for group in result["groups"]}
+            self.assertEqual(groups["available.mod"]["status"], "available")
+            self.assertTrue(groups["available.mod"]["can_download"])
+            self.assertEqual(groups["unavailable.mod"]["status"], "unavailable")
+            self.assertFalse(groups["unavailable.mod"]["can_download"])
+            self.assertEqual(groups["local.mod"]["status"], "local_item_missing")
+            self.assertFalse(groups["local.mod"]["can_download"])
+            self.assertEqual(groups["local.mod"]["candidate_count"], 1)
+            self.assertEqual(result["available_count"], 1)
+            self.assertEqual(result["unavailable_count"], 2)
+            self.assertEqual(result["local_item_missing_count"], 1)
+
     def test_scene_card_missing_mods_uses_scene_dependencies_and_remote_index(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -145,12 +257,14 @@ class RemoteModCompletionTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["resource_type"], "scene_card")
-            self.assertEqual(result["available_count"], 1)
-            self.assertEqual(result["unavailable_count"], 1)
+            self.assertEqual(result["available_count"], 0)
+            self.assertEqual(result["unavailable_count"], 2)
             self.assertEqual(result["local_item_missing_count"], 1)
-            self.assertEqual(result["available"][0]["guid_norm"], "scene.pack")
-            self.assertEqual(result["available"][0]["usage_count"], 2)
-            self.assertEqual(result["available"][0]["candidate_count"], 1)
+            local_missing = next(group for group in result["groups"] if group["guid_norm"] == "scene.pack")
+            self.assertEqual(local_missing["status"], "local_item_missing")
+            self.assertFalse(local_missing["can_download"])
+            self.assertEqual(local_missing["usage_count"], 2)
+            self.assertEqual(local_missing["candidate_count"], 1)
 
     def test_batch_downloads_run_concurrently_before_single_file_indexing(self):
         with TemporaryDirectory() as temp_dir:

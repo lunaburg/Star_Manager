@@ -93,6 +93,7 @@ from star_manager.services.mod_database_queries import (
 )
 from star_manager.services.remote_mod_completion import (
     inspect_card_missing_mods,
+    inspect_clothes_missing_mods,
     inspect_scene_missing_mods,
 )
 from star_manager.services.model_preview import (
@@ -294,6 +295,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             relative_path = unquote((query.get("path") or [""])[0])
             try:
                 result = inspect_card_missing_mods(game_dir, relative_path)
+            except (OSError, sqlite3.Error, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+                return
+            self.send_json(result, status=200 if result.get("ok") else 400)
+            return
+
+        if route == "/library/clothes/missing-mods":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            relative_path = unquote((query.get("path") or [""])[0])
+            try:
+                result = inspect_clothes_missing_mods(game_dir, relative_path)
             except (OSError, sqlite3.Error, ValueError) as error:
                 self.send_json({"ok": False, "error": str(error)}, status=400)
                 return

@@ -212,6 +212,7 @@ SUPPORTED_API_ROUTES = {
     "/library/clothes/tree",
     "/library/clothes",
     "/library/clothes/detail",
+    "/library/clothes/missing-mods",
     "/library/clothes/image",
     "/library/scene/tree",
     "/library/scene",

@@ -57,13 +57,26 @@ MAP_SCENE_KIND = "__map_scene__"
 GAME_MAP_SCENE_KIND = "__game_map_scene__"
 DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__"
 GAME_MAPINFO_PREFIX = "abdata/map/list/mapinfo/"
-STUDIO_ITEM_GROUP_PATTERN = re.compile(r"^abdata/studio/info/.+/itemgroup_[^/]+\.csv$", re.IGNORECASE)
-STUDIO_ITEM_CATEGORY_PATTERN = re.compile(r"^abdata/studio/info/.+/itemcategory_[^/]+\.csv$", re.IGNORECASE)
-STUDIO_ITEM_LIST_PATTERN = re.compile(r"^abdata/studio/info/.+/itemlist_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_ITEM_GROUP_PATTERN = re.compile(r"^abdata/studio/info/(?:[^/]+/)+itemgroup_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_ITEM_CATEGORY_PATTERN = re.compile(r"^abdata/studio/info/(?:[^/]+/)+itemcategory_[^/]+\.csv$", re.IGNORECASE)
+STUDIO_ITEM_LIST_PATTERN = re.compile(r"^abdata/studio/info/(?:[^/]+/)+itemlist_[^/]+\.csv$", re.IGNORECASE)
 STUDIO_CATEGORY_FILE_PATTERN = re.compile(
     r"^itemcategory_(?P<category>[^_]+)_(?P<group>[^.]+)\.csv$",
     re.IGNORECASE,
 )
+
+# Studio CSVs written by the game's native Japanese tooling use Japanese
+# column names.  Keep these aliases local to the Studio adapter so ordinary
+# character/custom CSV parsing retains its existing header contract.
+STUDIO_HEADER_ALIASES = {
+    "ID": ("ID", "管理番号", "グループ番号", "カテゴリー番号"),
+    "BigCategory": ("BigCategory", "大きい項目"),
+    "MidCategory": ("MidCategory", "中間項目"),
+    "Name": ("Name", "名称"),
+    "Manifest": ("Manifest", "マニフェスト"),
+    "Bundle": ("Bundle", "assetBundlePath", "バンドルパス"),
+    "Object": ("Object", "prefabPath", "ファイルパス"),
+}
 
 
 def thumbnail_profile_path_for_run(started_at: str, run_id: str) -> Path:
@@ -539,11 +552,24 @@ def csv_decode_score(text: str) -> int:
     except csv.Error:
         return score + 1000
 
-    header_index = find_header_index(rows)
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(rows)
+            if {
+                canonical_studio_metadata_header(cell)
+                for cell in row
+            }.issuperset({"ID", "Name"})
+        ),
+        None,
+    )
     if header_index is None:
         score += 200
     else:
-        header = {cell.strip() for cell in rows[header_index]}
+        header = {
+            canonical_studio_header(cell)
+            for cell in rows[header_index]
+        }
         expected_columns = {
             "ID",
             "Name",
@@ -562,6 +588,44 @@ def find_header_index(rows: list[list[str]]) -> int | None:
     for index, row in enumerate(rows):
         columns = {cell.strip() for cell in row}
         if {"ID", "Name"}.issubset(columns):
+            return index
+    return None
+
+
+def canonical_studio_header(value: str) -> str:
+    header = str(value or "").strip()
+    folded_header = header.casefold()
+    for canonical, aliases in STUDIO_HEADER_ALIASES.items():
+        if folded_header in {str(alias).casefold() for alias in aliases}:
+            return canonical
+    return header
+
+
+def canonical_studio_metadata_header(value: str) -> str:
+    """Normalize ID columns used by ItemGroup/ItemCategory author tables."""
+    header = str(value or "").strip()
+    if header.casefold() in {"categoryid", "groupid"}:
+        return "ID"
+    return canonical_studio_header(header)
+
+
+def canonical_studio_item_header(value: str) -> str:
+    """Normalize the alternate ItemList columns emitted by author tools."""
+    header = str(value or "").strip()
+    folded_header = header.casefold()
+    if folded_header == "categoryid":
+        return "BigCategory"
+    if folded_header == "subcategoryid":
+        return "MidCategory"
+    return canonical_studio_header(header)
+
+
+def find_studio_header_index(
+    rows: list[list[str]], required_columns: set[str]
+) -> int | None:
+    for index, row in enumerate(rows):
+        columns = {canonical_studio_header(cell) for cell in row}
+        if required_columns.issubset(columns):
             return index
     return None
 
@@ -643,10 +707,20 @@ def read_studio_id_name_rows(data: bytes) -> list[tuple[str, str]]:
     except csv.Error:
         return []
 
-    header_index = find_header_index(rows)
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(rows)
+            if {
+                canonical_studio_metadata_header(cell)
+                for cell in row
+            }.issuperset({"ID", "Name"})
+        ),
+        None,
+    )
     if header_index is None:
         return []
-    header = [cell.strip() for cell in rows[header_index]]
+    header = [canonical_studio_metadata_header(cell) for cell in rows[header_index]]
     result: list[tuple[str, str]] = []
     for row in rows[header_index + 1 :]:
         if not row or all(not cell.strip() for cell in row):
@@ -685,13 +759,36 @@ def read_studio_item_list(
             CsvItem(csv_path, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "parse_error", str(exc), item_domain="studio")
         ]
 
-    header_index = find_header_index(rows)
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(rows)
+            if {
+                canonical_studio_item_header(cell)
+                for cell in row
+            }.issuperset({"ID", "BigCategory", "MidCategory", "Name", "Bundle", "Object"})
+        ),
+        None,
+    )
     if header_index is None:
         return [
-            CsvItem(csv_path, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "missing_header", "ID and Name header not found", item_domain="studio")
+            CsvItem(
+                csv_path,
+                "",
+                STUDIO_ITEM_KIND,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "missing_header",
+                "Studio ItemList header is incomplete",
+                item_domain="studio",
+            )
         ]
 
-    header = [cell.strip() for cell in rows[header_index]]
+    header = [canonical_studio_item_header(cell) for cell in rows[header_index]]
     required_columns = {"ID", "BigCategory", "MidCategory", "Name", "Bundle", "Object"}
     if not required_columns.issubset(set(header)):
         return [

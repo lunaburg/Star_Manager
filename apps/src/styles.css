@@ -448,6 +448,22 @@ small {
   grid-template-rows: 96px minmax(0, 1fr);
 }
 
+.main.overview-main {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.main.overview-main .workspace {
+  padding-top: 0;
+}
+
+.main.mod-library-main {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.main.mod-library-main .workspace {
+  padding-top: 0;
+}
+
 .main.character-library-main {
   grid-template-rows: minmax(0, 1fr);
 }
@@ -3553,6 +3569,10 @@ small {
   cursor: pointer;
 }
 
+.clothes-dependency-browser .card-dependency-item.mod-dependency {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .clothes-dependency-browser .card-dependency-item:hover,
 .clothes-dependency-browser .card-dependency-item:focus-visible {
   transform: none;
@@ -4650,7 +4670,9 @@ small {
 }
 
 .character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.item-missing,
-.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-missing {
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-missing,
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.local-item-missing,
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-unavailable {
   border-color: rgba(211, 59, 74, .54);
   background: rgba(255, 225, 230, .28);
 }
@@ -4659,6 +4681,13 @@ small {
 .character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.item-missing:focus-visible,
 .character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-missing:hover,
 .character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-missing:focus-visible {
+  background: rgba(255, 225, 230, .5);
+}
+
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.local-item-missing:hover,
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.local-item-missing:focus-visible,
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-unavailable:hover,
+.character-layout > .character-side-panel .card-detail-related-panel .card-dependency-item.mod-unavailable:focus-visible {
   background: rgba(255, 225, 230, .5);
 }
 
@@ -4693,7 +4722,9 @@ small {
 }
 
 .character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.item-missing,
-.character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.mod-missing {
+.character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.mod-missing,
+.character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.local-item-missing,
+.character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.mod-unavailable {
   border-color: rgba(211, 59, 74, .5);
   background: rgba(255, 225, 230, .34);
   color: #b51f34;
@@ -7108,7 +7139,9 @@ small {
 }
 
 .card-dependency-item.item-missing,
-.card-dependency-item.mod-missing {
+.card-dependency-item.mod-missing,
+.card-dependency-item.local-item-missing,
+.card-dependency-item.mod-unavailable {
   border-color: #d33b4a;
   background: #fff7f8;
 }
@@ -7118,6 +7151,27 @@ small {
 .card-dependency-item.mod-missing:hover,
 .card-dependency-item.mod-missing:focus-visible {
   background: #fff0f2;
+}
+
+.card-dependency-item.local-item-missing:hover,
+.card-dependency-item.local-item-missing:focus-visible,
+.card-dependency-item.mod-unavailable:hover,
+.card-dependency-item.mod-unavailable:focus-visible {
+  background: #fff0f2;
+}
+
+.card-dependency-item.mod-dependency {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.card-dependency-item.mod-dependency .dependency-match-actions {
+  min-width: 92px;
+}
+
+.card-dependency-item.mod-dependency .dependency-match-state {
+  max-width: 88px;
+  min-width: 76px;
+  padding-inline: 8px;
 }
 
 .card-dependency-main {
@@ -7177,11 +7231,51 @@ small {
   text-align: center;
 }
 
+.dependency-status-nowrap {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.dependency-status-prefix {
+  margin-right: .25em;
+}
+
+.dependency-match-state.local-item-missing .dependency-status-prefix,
+.dependency-match-state.local-item-missing .dependency-status-nowrap {
+  display: block;
+  margin-right: 0;
+  text-align: center;
+}
+
+.dependency-missing-count {
+  color: #8f5962 !important;
+}
+
 .dependency-match-state.item-missing,
-.dependency-match-state.mod-missing {
+.dependency-match-state.mod-missing,
+.dependency-match-state.local-item-missing,
+.dependency-match-state.mod-unavailable {
   border-color: #e1a7af;
   background: #fff;
   color: #b51f34;
+}
+
+.character-layout > .character-side-panel .card-detail-related-panel .dependency-match-state.mod-checking {
+  border-color: rgba(117, 139, 157, .45);
+  background: rgba(247, 250, 252, .38);
+  color: #607183;
+}
+
+.dependency-match-state.mod-available {
+  border-color: #8bc9b6;
+  background: #effcf6;
+  color: #08745c;
+}
+
+.dependency-match-state.mod-checking {
+  border-color: #b8c8d7;
+  background: #f7fafc;
+  color: #607183;
 }
 
 .dependency-match-actions {
@@ -7191,9 +7285,7 @@ small {
   gap: 5px;
 }
 
-.dependency-install-button,
-.dependency-unavailable-label,
-.dependency-checking-label {
+.dependency-install-button {
   min-width: 58px;
   min-height: 25px;
   padding: 4px 7px;
@@ -7251,18 +7343,6 @@ small {
   opacity: .68;
 }
 
-.dependency-unavailable-label {
-  border-color: #e1a7af;
-  background: #fff;
-  color: #b51f34;
-}
-
-.dependency-checking-label {
-  border-color: #d6dce0;
-  background: #f6f7f8;
-  color: #7b858b;
-}
-
 .dependency-install-notice {
   max-width: 92px;
   overflow: hidden;
@@ -7288,6 +7368,10 @@ small {
     grid-template-columns: 42px minmax(0, 1fr) 90px;
     gap: 6px;
     padding: 6px;
+  }
+
+  .card-dependency-item.mod-dependency.has-inline-progress {
+    grid-template-columns: minmax(0, 1fr) 90px;
   }
 }
 
@@ -7387,7 +7471,8 @@ small {
 
 .mod-page {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
   height: 100%;
   border: 0;
   container-name: mod-page;
@@ -7395,13 +7480,40 @@ small {
 }
 
 .mod-head {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
   min-height: 64px;
   padding: 14px 16px;
 }
 
+.mod-head .mod-tabs {
+  flex: 0 1 auto;
+  align-self: center;
+  align-items: center;
+  min-width: 0;
+}
+
+.mod-head .mod-tabs button {
+  min-width: 124px;
+  height: 40px;
+  border-radius: 8px;
+}
+
+.mod-head .assembly-mode-toggle {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+}
+
 .mod-summary {
-  justify-content: flex-end;
-  margin-left: auto;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  min-width: 0;
+  margin-left: 0;
 }
 
 .mod-summary .badge,
@@ -7427,11 +7539,13 @@ small {
 
 .mod-strip {
   display: flex;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 64px;
-  padding: 8px 16px 0;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -7460,11 +7574,13 @@ small {
 .assembly-mode-control {
   display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   min-width: 0;
   align-self: stretch;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
-  padding-bottom: 10px;
+  gap: 10px;
+  padding-bottom: 0;
 }
 
 .assembly-mode-toggle {
@@ -7500,45 +7616,26 @@ small {
 }
 
 .dependency-usage-filter {
-  max-width: min(420px, 46vw);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding: 4px;
-  overflow-x: auto;
+  width: auto;
+  min-width: 132px;
+  max-width: 200px;
+  height: 40px;
+  margin-left: auto;
+  padding: 0 28px 0 12px;
+  overflow: visible;
   border: 1px solid #d3cec5;
   border-radius: 6px;
   background: rgba(255, 253, 248, .82);
-  scrollbar-width: thin;
-}
-
-.dependency-usage-filter button {
-  min-width: 76px;
-  height: 34px;
-  flex: 0 0 auto;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  box-shadow: none;
+  color: var(--text);
   font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
+  font-weight: 800;
+  cursor: pointer;
 }
 
-.dependency-usage-filter button:hover,
-.dependency-usage-filter button:focus-visible {
-  background: rgba(218, 241, 255, .52);
-  color: var(--text);
-  outline: none;
-}
-
-.dependency-usage-filter button.active {
-  background: linear-gradient(180deg, #fff4fa, #edf8ff);
-  color: var(--text);
-  box-shadow: 0 1px 4px rgba(42, 38, 44, .12);
+.library-toolbar .dependency-usage-filter {
+  height: 36px;
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .library-toolbar {
@@ -7592,14 +7689,41 @@ small {
 
 .filter-grid.mods {
   flex-grow: 0;
-  flex-basis: 540px;
-  grid-template-columns: minmax(104px, auto) repeat(2, minmax(0, 1fr));
+  flex-basis: auto;
+  grid-template-columns: minmax(104px, auto);
   gap: 8px;
   align-items: center;
   min-height: 40px;
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.mod-filter-end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.mod-filter-end .author-combobox {
+  width: 220px;
+  flex: 0 0 220px;
+}
+
+.mod-filter-end .mod-status-filter {
+  width: 168px;
+  flex: 0 0 168px;
+}
+
+.mod-filter-end .dependency-usage-filter {
+  width: 132px;
+  flex: 0 0 132px;
+  height: 36px;
+  margin-left: 0;
+  max-width: none;
 }
 
 .mod-status-filter {
@@ -7632,13 +7756,6 @@ small {
 .mod-status-filter .status-option-neutral {
   background: var(--surface-clean);
   color: #2d2930;
-}
-
-.bulk-delete-error-items-button {
-  align-self: center;
-  flex: 0 0 auto;
-  min-width: 128px;
-  padding-inline: 14px;
 }
 
 .author-combobox {
@@ -7929,19 +8046,20 @@ small {
 }
 
 .mod-page .dependency-usage-filter {
-  border-color: rgba(148, 164, 177, .48);
-  background: rgba(255, 255, 255, .28);
+  border-color: rgba(148, 164, 177, .52);
+  background: rgba(255, 255, 255, .42);
 }
 
-.mod-page .dependency-usage-filter button:hover,
-.mod-page .dependency-usage-filter button:focus-visible {
-  background: rgba(218, 241, 255, .46);
-  outline: none;
+.mod-page .dependency-usage-filter:hover {
+  border-color: rgba(111, 139, 154, .62);
+  background: rgba(255, 255, 255, .54);
 }
 
-.mod-page .dependency-usage-filter button.active {
-  background: rgba(237, 248, 255, .66);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68), 0 1px 5px rgba(59, 77, 91, .08);
+.mod-page .dependency-usage-filter:focus {
+  border-color: rgba(74, 139, 161, .72);
+  background: rgba(255, 255, 255, .62);
+  outline: 2px solid rgba(120, 185, 212, .32);
+  outline-offset: 1px;
 }
 
 .mod-page .library-toolbar input,
@@ -8085,20 +8203,6 @@ small {
   .mod-page .bulk-icon-button {
     transition: none;
   }
-}
-
-.mod-page .bulk-delete-error-items-button {
-  border-color: rgba(159, 36, 36, .78);
-  background: rgba(255, 241, 241, .68);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .58), 0 2px 9px rgba(159, 36, 36, .08);
-}
-
-.mod-page .bulk-delete-error-items-button:hover:not(:disabled),
-.mod-page .bulk-delete-error-items-button:focus-visible:not(:disabled) {
-  border-color: rgba(159, 36, 36, .88);
-  background: rgba(255, 226, 226, .8);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68), 0 3px 10px rgba(159, 36, 36, .12);
-  outline: none;
 }
 
 @media (max-width: 1280px) {
@@ -9101,6 +9205,44 @@ button.assembly-group-head:focus-visible {
   }
 }
 
+@container mod-page (max-width: 920px) {
+  .mod-head {
+    padding: 10px 12px;
+  }
+
+  .mod-head .mod-tabs {
+    flex: 0 1 auto;
+  }
+
+  .mod-head .mod-tabs button {
+    min-width: 0;
+    height: 32px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .mod-head .assembly-mode-toggle {
+    height: 32px;
+    min-height: 32px;
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+
+  .mod-summary {
+    gap: 4px;
+  }
+
+  .mod-summary .badge {
+    min-height: 22px;
+    padding: 2px 6px;
+    font-size: 10px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 @container mod-page (max-width: 760px) {
   .mod-strip {
     gap: 8px;
@@ -9132,18 +9274,10 @@ button.assembly-group-head:focus-visible {
   }
 
   .dependency-usage-filter {
-    flex: 0 1 200px;
-    min-width: 0;
-    margin-bottom: 8px;
-    padding: 2px;
-    gap: 2px;
-  }
-
-  .dependency-usage-filter button {
-    min-width: 0;
-    height: 32px;
-    flex: 1 1 0;
-    padding-inline: 6px;
+    flex: 0 1 160px;
+    min-width: 108px;
+    height: 38px;
+    padding-inline: 10px 24px;
     font-size: 12px;
   }
 }
@@ -12274,17 +12408,6 @@ body.model-preview-expanded { overflow: hidden; }
   gap: 4px;
 }
 
-.missing-item-kicker {
-  color: #a42135;
-  font-size: 10px;
-  font-weight: 950;
-  letter-spacing: .14em;
-}
-
-.missing-item-kicker.remote-kicker {
-  color: #176b57;
-}
-
 .missing-item-alert-mark {
   width: 28px;
   height: 28px;
@@ -12303,7 +12426,6 @@ body.model-preview-expanded { overflow: hidden; }
   gap: 10px;
   padding: 12px;
   border: 1px solid #9ccdbb;
-  border-left: 3px solid #1d8a69;
   border-radius: 7px;
   background: linear-gradient(135deg, #f2fff9, #f8fbff 70%);
 }
@@ -14307,8 +14429,12 @@ tbody tr:hover td {
 
 .clothes-card-layout > .clothes-side-panel .card-dependency-item.item-missing,
 .clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-missing,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.local-item-missing,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-unavailable,
 .scene-card-layout > .scene-side-panel .card-dependency-item.item-missing,
-.scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing {
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing,
+.scene-card-layout > .scene-side-panel .card-dependency-item.local-item-missing,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-unavailable {
   border-color: rgba(211, 59, 74, .54);
   background: rgba(255, 225, 230, .28);
 }
@@ -14321,6 +14447,17 @@ tbody tr:hover td {
 .scene-card-layout > .scene-side-panel .card-dependency-item.item-missing:focus-visible,
 .scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing:hover,
 .scene-card-layout > .scene-side-panel .card-dependency-item.mod-missing:focus-visible {
+  background: rgba(255, 225, 230, .5);
+}
+
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.local-item-missing:hover,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.local-item-missing:focus-visible,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-unavailable:hover,
+.clothes-card-layout > .clothes-side-panel .card-dependency-item.mod-unavailable:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-item.local-item-missing:hover,
+.scene-card-layout > .scene-side-panel .card-dependency-item.local-item-missing:focus-visible,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-unavailable:hover,
+.scene-card-layout > .scene-side-panel .card-dependency-item.mod-unavailable:focus-visible {
   background: rgba(255, 225, 230, .5);
 }
 
@@ -14354,11 +14491,29 @@ tbody tr:hover td {
 
 .clothes-card-layout > .clothes-side-panel .dependency-match-state.item-missing,
 .clothes-card-layout > .clothes-side-panel .dependency-match-state.mod-missing,
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.local-item-missing,
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.mod-unavailable,
 .scene-card-layout > .scene-side-panel .dependency-match-state.item-missing,
-.scene-card-layout > .scene-side-panel .dependency-match-state.mod-missing {
+.scene-card-layout > .scene-side-panel .dependency-match-state.mod-missing,
+.scene-card-layout > .scene-side-panel .dependency-match-state.local-item-missing,
+.scene-card-layout > .scene-side-panel .dependency-match-state.mod-unavailable {
   border-color: rgba(211, 59, 74, .5);
   background: rgba(255, 225, 230, .34);
   color: #b51f34;
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.mod-available,
+.scene-card-layout > .scene-side-panel .dependency-match-state.mod-available {
+  border-color: rgba(75, 164, 137, .5);
+  background: rgba(224, 249, 239, .3);
+  color: #08745c;
+}
+
+.clothes-card-layout > .clothes-side-panel .dependency-match-state.mod-checking,
+.scene-card-layout > .scene-side-panel .dependency-match-state.mod-checking {
+  border-color: rgba(117, 139, 157, .45);
+  background: rgba(247, 250, 252, .38);
+  color: #607183;
 }
 
 .clothes-card-layout > .clothes-side-panel .dependency-inline-progress,

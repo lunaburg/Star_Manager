@@ -2696,8 +2696,16 @@ def resolve_dependency_records(records: list[dict], db_path: Path = DEFAULT_DB_P
             slot = dependency_record_value(dependency_record_field(record, "Slot", "slot"))
             local_slot = dependency_record_value(dependency_record_field(record, "LocalSlot", "local_slot"))
             is_scene_map = dependency_type == "scene"
+            allow_studio_item = dependency_type in {"scene_item", "scene_pattern"}
             item = (
-                find_dependency_item(conn, mod_id, category, slot, local_slot)
+                find_dependency_item(
+                    conn,
+                    mod_id,
+                    category,
+                    slot,
+                    local_slot,
+                    allow_studio=allow_studio_item,
+                )
                 if conn and mod_id and not is_scene_map
                 else None
             )
@@ -2746,6 +2754,8 @@ def find_dependency_item(
     category: str,
     slot: str,
     local_slot: str,
+    *,
+    allow_studio: bool = False,
 ) -> dict | None:
     if conn is None:
         return None
@@ -2753,6 +2763,7 @@ def find_dependency_item(
         if require_kind and not category:
             continue
         kind_clause = "AND mod_items.kind = ?" if require_kind else ""
+        domain_clause = "" if allow_studio else "AND COALESCE(mod_items.item_domain, 'mod') != 'studio'"
         for item_id in [slot, local_slot]:
             if not item_id:
                 continue
@@ -2770,7 +2781,7 @@ def find_dependency_item(
                 FROM mod_items
                 INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
                 WHERE zipmods.scan_status != 'stale'
-                  AND COALESCE(mod_items.item_domain, 'mod') != 'studio'
+                  {domain_clause}
                   AND trim(mod_items.zipmod_guid) = trim(?) COLLATE NOCASE
                   {kind_clause}
                   AND (

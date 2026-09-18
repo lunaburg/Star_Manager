@@ -78,6 +78,8 @@ Defined in `apps/electron/preload.cjs`.
 - `POST /trash/{cards|mods}/{entry_id}/restore`: move one entry back to its recorded source path. Restored mods are re-indexed through the single-zipmod indexing flow.
 - `POST /trash/{cards|mods}/{entry_id}/delete`: permanently delete one entry from the runtime recycle bin.
 - `POST /trash/empty`: permanently delete all valid recycle-bin entries.
+- `GET /deletion-queue`: list persisted single-mod/item deletion requests waiting for a Windows file lock to clear. Entries contain operation, retry count, last error, and the validated target payload.
+- `POST /deletion-queue/retry`: attempt all queued deletions once. Successful requests are moved into the normal mod trash flow or finish the item write-back; still-locked requests remain persisted.
 - `POST /trash/{cards|mods}/{entry_id}/restore` and `POST /trash/{cards|mods}/{entry_id}/delete` return `stale: true` with `ok: false` when the entry's record or payload is already missing or damaged. The renderer must refresh its list and retain the error message; a normal restore collision does not set `stale`.
 
 ## Mutation routing rule
@@ -259,7 +261,7 @@ Direct mutation routes:
   - Body: `{ "duplicate_id": 1 }`
   - Merges a selected duplicate into the current primary zipmod when backend comparison rules allow it.
 - `POST /mods/zipmods/:id/delete`
-  - Deletes one zipmod file and related database records.
+  - Deletes one zipmod file and related database records. On a Windows sharing violation, returns `ok: true`, `queued: true`, and `pending_delete_id`; the source file and database record remain until the persisted deletion queue can move it into `runtime/trash/mods`.
 - `POST /mods/items/:id/import-thumbnail`
   - Body: `{ "image_path": "D:\\path\\image.png" }` for an external PNG, or `{ "image_data": "data:image/png;base64,..." }` for a screenshot captured from the 3D preview. Screenshot payloads are validated as PNG, capped at 2 MB decoded size, and passed through a short-lived runtime file before using the same single-item import path.
   - Imports one thumbnail into the source zipmod and updates the item CSV fields.
@@ -274,7 +276,7 @@ Direct mutation routes:
   - Body: `{ "target_path": "D:\\Exports\\item.unity3d" }`
   - Copies the selected item's `MainAB` Unity3D resource to the user-selected target file. Resources inside a zipmod are read from the archive; resources only in the game `abdata` are copied from the existing file. The source zipmod, CSV, game `abdata`, and database record are never modified. This is a single-object direct HTTP mutation with copy semantics, not a batch task.
 - `POST /mods/items/:id/delete`
-  - Deletes one item row from its source zipmod; if it was the final item, moves the now-empty zipmod into `runtime/trash/mods` before removing the zipmod database records.
+  - Deletes one item row from its source zipmod; if it was the final item, moves the now-empty zipmod into `runtime/trash/mods` before removing the zipmod database records. If zipmod rewriting or final-file moving encounters a Windows sharing violation, returns `ok: true`, `queued: true`, and `pending_delete_id`; the item remains indexed until a later retry completes the same operation.
 
 ## Game item probe bridge
 

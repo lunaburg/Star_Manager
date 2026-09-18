@@ -18,7 +18,7 @@
 ## 删除边界
 
 - 批量人物卡删除和整包 zipmod 删除都会进入回收站。
-- 删除 zipmod 内的单个物品时，应用仍然写回 zipmod 并移除 CSV 行；它不是独立文件，当前不会额外拆分为回收站条目。
+- 删除 zipmod 内的单个物品时，应用仍然写回 zipmod 并移除 CSV 行；它不是独立文件，正常完成时不会额外拆分为回收站条目。若写回时遇到 Windows 占用，会进入 `runtime/pending-deletes` 等待续行。
 - 重复模组清理、主模组替换重复项、合并重复模组产生的文件删除也进入模组回收站。
 - 回收站条目不参与模组/人物卡扫描，直到用户恢复它。
 
@@ -73,3 +73,19 @@
 ## 适用边界
 
 回收站是本地 runtime 数据，不会同步到游戏目录或外部云端。用户手动从文件管理器删除 `<runtime>/trash` 内容后，应用无法恢复对应条目；runtime 位置仍受 `STAR_MANAGER_RUNTIME_DIR` 控制，打包版位于 exe 同级的 `runtime`。
+
+## Windows 文件占用时的删除续行（2026-09-18）
+
+- **现象**：游戏或其他进程打开 zipmod 时，单个模组删除无法将文件移入回收站；单个物品删除需要重写 zipmod，也可能因 Windows 共享占用失败。
+- **根因**：Windows 的共享冲突发生在文件移动或 zipmod 临时文件替换阶段，原实现把异常直接返回给前端，既没有可靠的后续任务，也不能安全地提前删数据库记录。
+- **解决**：检测到 Windows sharing violation（WinError 32/33 或等价的权限/占用信息）时，将删除意图写入 `<runtime>/pending-deletes/<id>.json`。模组/物品仍保留在数据库和游戏目录中，当前请求返回“已排队”；后端 worker 每 5 秒尝试一次，应用重启后也会读取同一队列继续处理。成功后才将完整 zipmod 移入 `runtime/trash/mods` 并清理索引，或完成物品 CSV/资源写回；回收站页面提供“立即重试”和等待数量提示。
+- **安全边界**：只有明确的文件占用错误会自动排队；找不到文件、坏压缩包、普通路径错误等不会无限重试。不会自动结束游戏或其他占用进程。持久化队列记录异常期间的删除意图，不是新的回收站条目。
+- **验证**：`backend/tests/test_pending_deletes.py` 覆盖锁定模组的排队、数据库记录保留、解除占用后的回收站迁移和索引删除；`backend/tests/test_trash.py` 覆盖占用错误分类与移动失败不产生空回收站条目；另需通过 Python 全量测试、`npm run build` 和 Electron 测试。
+
+## 恢复模组时单文件索引参数缺失（2026-09-18）
+
+- **现象**：从回收站恢复 zipmod 时，后端返回 `index_single_zipmod() missing 2 required positional arguments: 'thumbnail_dir' and 'zipmod_path'`。
+- **根因**：单 zipmod 索引函数已经统一要求游戏目录、数据库路径、缩略图目录和目标 zipmod 四个路径参数；回收站恢复分支仍沿用旧的两参数调用方式。
+- **解决**：恢复分支通过统一的 `_index_restored_zipmod` 适配调用，传入默认数据库路径、默认缩略图目录和恢复后的 zipmod 路径；只影响恢复后的索引，不改变删除、回收站移动或永久删除行为。
+- **验证**：`backend/tests/test_server_restore.py` 断言恢复索引传入完整参数；同时运行 Python 相关测试、`npm run build` 和 Electron 测试。
+- **适用边界**：该修复处理的是“恢复后重建索引”的参数契约错误；如果 zipmod 文件损坏、manifest 缺少 GUID 或原路径存在同名文件，仍会按原有规则返回相应错误。

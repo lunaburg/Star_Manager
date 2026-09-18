@@ -42,7 +42,13 @@ def move_to_trash(
     payload_dir = entry_root / "payload"
     payload_dir.mkdir(parents=True, exist_ok=False)
     payload_path = payload_dir / source.name
-    shutil.move(str(source), str(payload_path))
+    try:
+        shutil.move(str(source), str(payload_path))
+    except Exception:
+        # A failed move (most commonly Windows sharing violation) must not
+        # leave an empty, misleading entry in the application recycle bin.
+        shutil.rmtree(entry_root, ignore_errors=True)
+        raise
 
     safe_metadata = json.loads(json.dumps(metadata or {}, ensure_ascii=False, default=str))
     record = {

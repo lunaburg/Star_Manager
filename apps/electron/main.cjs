@@ -24,7 +24,7 @@ const {
 const rendererUrl = process.env.ELECTRON_RENDERER_URL || "";
 const isDev = Boolean(rendererUrl);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-const expectedBackendRevision = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1";
+const expectedBackendRevision = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-pending-delete-v1";
 const disableGpu = process.env.STAR_MANAGER_DISABLE_GPU === "1";
 if (disableGpu) {
   app.disableHardwareAcceleration();

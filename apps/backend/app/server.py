@@ -57,6 +57,7 @@ from star_manager.services.card_library import (
     update_character_card_profile,
 )
 from star_manager.services.mod_database import (
+    DEFAULT_DB_PATH,
     DEFAULT_THUMBNAIL_DIR,
     analyze_duplicate_zipmods,
     assess_database_changes,
@@ -116,6 +117,21 @@ from star_manager.services.trash import (
     permanently_delete_trash_entry,
     restore_trash_entry,
 )
+from star_manager.services.pending_deletes import (
+    list_pending_deletes,
+    start_pending_delete_worker,
+)
+from star_manager.services.mod_database_assets import retry_pending_deletes
+
+
+def _index_restored_zipmod(game_dir: str, restored_path: str) -> dict:
+    """Re-index a restored archive using the complete single-zipmod contract."""
+    return index_single_zipmod(
+        Path(game_dir),
+        DEFAULT_DB_PATH,
+        DEFAULT_THUMBNAIL_DIR,
+        Path(restored_path),
+    )
 
 
 def is_process_alive(pid: int) -> bool:
@@ -212,6 +228,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if route == "/trash":
             self.send_json(list_trash())
+            return
+
+        if route == "/deletion-queue":
+            self.send_json({"ok": True, "entries": list_pending_deletes()})
             return
 
         if route == "/game-item-probe/status":
@@ -747,6 +767,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(empty_trash())
             return
 
+        if route == "/deletion-queue/retry":
+            self.send_json(retry_pending_deletes())
+            return
+
         trash_parts = [unquote(part) for part in route.split("/") if part]
         if len(trash_parts) == 4 and trash_parts[0] == "trash" and trash_parts[3] in {"restore", "delete"}:
             kind, entry_id, action = trash_parts[1], trash_parts[2], trash_parts[3]
@@ -757,7 +781,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     restored_path = str(result.get("restored_path") or "").strip()
                     if game_dir and restored_path:
                         try:
-                            result["index"] = index_single_zipmod(Path(game_dir), Path(restored_path))
+                            result["index"] = _index_restored_zipmod(game_dir, restored_path)
                         except (OSError, ValueError, sqlite3.Error) as error:
                             result["index_warning"] = f"模组已恢复，但索引更新失败：{error}"
                 self.send_json(result, status=200 if result.get("ok") else 400)
@@ -1272,6 +1296,7 @@ def main() -> None:
     port = int(os.environ.get("STAR_MANAGER_BACKEND_PORT", "8765"))
     server = ThreadingHTTPServer(("127.0.0.1", port), RequestHandler)
     start_parent_watchdog(server)
+    start_pending_delete_worker()
     print(f"Star_Manager backend listening on http://127.0.0.1:{port}", flush=True)
     server.serve_forever()
 

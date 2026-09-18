@@ -29,6 +29,16 @@ defineProps({
     <div v-if="ctx.trashError" class="trash-notice error">{{ ctx.trashError }}</div>
     <div v-if="ctx.trashNotice" class="trash-notice success">{{ ctx.trashNotice }}</div>
 
+    <section v-if="ctx.pendingDeleteEntries.length" class="pending-delete-panel">
+      <div class="pending-delete-copy">
+        <strong>{{ ctx.pendingDeleteEntries.length }} 个删除请求等待文件解除占用</strong>
+        <span>游戏关闭或释放 zipmod 后，后台会自动继续；也可以立即重试。</span>
+      </div>
+      <button type="button" class="ghost-button" :disabled="ctx.pendingDeleteAction" @click="ctx.retryPendingDeletes">
+        {{ ctx.pendingDeleteAction ? "重试中..." : "立即重试" }}
+      </button>
+    </section>
+
     <div v-if="ctx.trashLoading" class="trash-empty-state">
       <span class="trash-pulse"></span>
       <strong>正在读取回收站</strong>

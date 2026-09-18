@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from star_manager.services import trash  # noqa: E402
+from star_manager.services import pending_deletes  # noqa: E402
 
 
 class TrashTests(unittest.TestCase):
@@ -70,6 +71,28 @@ class TrashTests(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertTrue(result["stale"])
                 self.assertEqual(trash.list_trash()["total"], 0)
+
+    def test_failed_move_does_not_leave_empty_trash_entry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "sample.zipmod"
+            source.write_bytes(b"archive")
+            trash_root = root / "runtime" / "trash"
+
+            with patch.object(trash, "TRASH_ROOT", trash_root), patch(
+                "star_manager.services.trash.shutil.move",
+                side_effect=PermissionError(13, "sharing violation"),
+            ):
+                with self.assertRaises(PermissionError):
+                    trash.move_to_trash(source, "mods")
+
+            self.assertFalse(any(trash_root.rglob("record.json")) if trash_root.exists() else False)
+
+    def test_lock_error_is_classified_as_retryable(self):
+        error = PermissionError(13, "The process cannot access the file because it is being used by another process")
+        error.winerror = 32
+        self.assertTrue(pending_deletes.is_transient_file_lock_error(error))
+        self.assertFalse(pending_deletes.is_transient_file_lock_error(FileNotFoundError("missing")))
 
 
 if __name__ == "__main__":

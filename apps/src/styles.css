@@ -13839,6 +13839,33 @@ tbody tr:hover td {
 .trash-notice.success { color: #aee2c9; }
 .trash-notice.error { color: #ffc5b4; }
 
+.prompt-notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(129, 193, 189, .45);
+  border-radius: 7px;
+  background: rgba(71, 143, 137, .12);
+  color: #aee2d6;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pending-delete-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 14px;
+  padding: 13px 15px;
+  border: 1px solid rgba(232, 171, 115, .34);
+  border-radius: 10px;
+  background: rgba(232, 171, 115, .08);
+}
+
+.pending-delete-copy { display: grid; gap: 4px; }
+.pending-delete-copy strong { color: #ffe1b8; font-size: 13px; }
+.pending-delete-copy span { color: rgba(244, 240, 231, .58); font-size: 11px; }
+
 .trash-list {
   display: grid;
   gap: 9px;

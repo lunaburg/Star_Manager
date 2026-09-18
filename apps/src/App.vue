@@ -549,6 +549,8 @@ const trashAction = ref("");
 const trashError = ref("");
 const trashNotice = ref("");
 const trashRoot = ref("");
+const pendingDeleteEntries = ref([]);
+const pendingDeleteAction = ref(false);
 const trashFilter = ref("all");
 const filteredTrashEntries = computed(() => {
   if (trashFilter.value === "all") return trashEntries.value;
@@ -1425,7 +1427,8 @@ const deleteItemPrompt = reactive({
   open: false,
   item: null,
   name: "",
-  error: ""
+  error: "",
+  notice: ""
 });
 const bulkDeleteErrorItemsPrompt = reactive({
   open: false,
@@ -1436,7 +1439,8 @@ const deleteModPrompt = reactive({
   open: false,
   mod: null,
   name: "",
-  error: ""
+  error: "",
+  notice: ""
 });
 const missingItemPrompt = reactive({
   open: false,
@@ -5482,6 +5486,7 @@ async function deleteSelectedItem(item = selectedItem.value) {
   deleteItemPrompt.item = item;
   deleteItemPrompt.name = item.name || item.raw?.item_id || String(item.id);
   deleteItemPrompt.error = "";
+  deleteItemPrompt.notice = "";
   deleteItemPrompt.open = true;
 }
 
@@ -5543,6 +5548,7 @@ async function confirmDeleteSelectedItem() {
   const itemId = item.id;
   deletingItemId.value = itemId;
   deleteItemPrompt.error = "";
+  deleteItemPrompt.notice = "";
   try {
     const result = await window.desktopApi?.backendRequest?.(
       `/mods/items/${itemId}/delete`,
@@ -5552,6 +5558,10 @@ async function confirmDeleteSelectedItem() {
       throw new Error(result?.error || "删除物品失败");
     }
     log(`[Items] ${result.message || "item deleted"}`);
+    if (result.queued) {
+      deleteItemPrompt.notice = result.message || "文件被占用，删除请求已排队，解除占用后会自动继续。";
+      return;
+    }
     deleteItemPrompt.open = false;
     deleteItemPrompt.item = null;
     selectedItem.value = null;
@@ -5815,6 +5825,7 @@ async function deleteSelectedMod() {
   deleteModPrompt.mod = selectedMod.value;
   deleteModPrompt.name = selectedMod.value.name || selectedMod.value.raw?.file_name || String(selectedMod.value.id);
   deleteModPrompt.error = "";
+  deleteModPrompt.notice = "";
   deleteModPrompt.open = true;
 }
 
@@ -5822,6 +5833,7 @@ async function confirmDeleteSelectedMod() {
   const mod = deleteModPrompt.mod;
   if (!mod?.id) return;
   deleteModPrompt.error = "";
+  deleteModPrompt.notice = "";
   try {
     const result = await window.desktopApi?.backendRequest?.(
       `/mods/zipmods/${mod.id}/delete`,
@@ -5831,6 +5843,10 @@ async function confirmDeleteSelectedMod() {
       throw new Error(result?.error || "删除模组失败");
     }
     log(`[Mods] ${result.message || "zipmod deleted"}`);
+    if (result.queued) {
+      deleteModPrompt.notice = result.message || "文件被占用，删除请求已排队，解除占用后会自动继续。";
+      return;
+    }
     deleteModPrompt.open = false;
     deleteModPrompt.mod = null;
     selectedModDiagnostics.value = null;
@@ -9180,10 +9196,34 @@ async function loadTrash() {
     if (!result?.ok) throw new Error(result?.error || "读取回收站失败");
     trashEntries.value = Array.isArray(result.entries) ? result.entries : [];
     trashRoot.value = String(result.root || "runtime/trash");
+    const pendingResult = await window.desktopApi?.backendRequest?.("/deletion-queue");
+    pendingDeleteEntries.value = pendingResult?.ok && Array.isArray(pendingResult.entries)
+      ? pendingResult.entries
+      : [];
   } catch (error) {
     trashError.value = error.message;
   } finally {
     trashLoading.value = false;
+  }
+}
+
+async function retryPendingDeletes() {
+  if (pendingDeleteAction.value) return;
+  pendingDeleteAction.value = true;
+  trashError.value = "";
+  trashNotice.value = "";
+  try {
+    const result = await window.desktopApi?.backendRequest?.("/deletion-queue/retry", { method: "POST" });
+    if (!result?.ok) throw new Error(result?.error || "重试删除失败");
+    trashNotice.value = result.completed_count
+      ? `已继续完成 ${result.completed_count} 个删除请求${result.waiting_count ? `，仍有 ${result.waiting_count} 个文件被占用` : ""}`
+      : `仍有 ${result.waiting_count || pendingDeleteEntries.value.length} 个删除请求等待文件解除占用`;
+    await loadTrash();
+    if (result.completed_count) await refreshModDatabaseList();
+  } catch (error) {
+    trashError.value = error.message;
+  } finally {
+    pendingDeleteAction.value = false;
   }
 }
 
@@ -9470,8 +9510,11 @@ const appCtx = reactive({
   trashError,
   trashNotice,
   trashRoot,
+  pendingDeleteEntries,
+  pendingDeleteAction,
   trashFilter,
   loadTrash,
+  retryPendingDeletes,
   restoreTrash,
   permanentlyDeleteTrash,
   emptyTrash,
@@ -10553,10 +10596,11 @@ watch(backendStatus, (status, previousStatus) => {
               <strong>{{ deleteItemPrompt.name }}</strong>
             </div>
             <p class="duplicate-delete-warning">删除后不可由应用自动恢复，请确认后继续。</p>
+            <div v-if="deleteItemPrompt.notice" class="prompt-notice" role="status">{{ deleteItemPrompt.notice }}</div>
             <div v-if="deleteItemPrompt.error" class="prompt-error">{{ deleteItemPrompt.error }}</div>
             <div class="prompt-actions">
-              <button type="button" :disabled="Boolean(deletingItemId)" @click="deleteItemPrompt.open = false">取消</button>
-              <button type="button" class="danger-action" :disabled="Boolean(deletingItemId)" @click="confirmDeleteSelectedItem">
+              <button type="button" :disabled="Boolean(deletingItemId)" @click="deleteItemPrompt.open = false">{{ deleteItemPrompt.notice ? "关闭" : "取消" }}</button>
+              <button v-if="!deleteItemPrompt.notice" type="button" class="danger-action" :disabled="Boolean(deletingItemId)" @click="confirmDeleteSelectedItem">
                 {{ deletingItemId ? "删除中..." : "确认删除物品" }}
               </button>
             </div>
@@ -10600,10 +10644,11 @@ watch(backendStatus, (status, previousStatus) => {
               <strong>{{ deleteModPrompt.name }}</strong>
             </div>
             <p class="duplicate-delete-warning">删除后不可由应用自动恢复，请确认后继续。</p>
+            <div v-if="deleteModPrompt.notice" class="prompt-notice" role="status">{{ deleteModPrompt.notice }}</div>
             <div v-if="deleteModPrompt.error" class="prompt-error">{{ deleteModPrompt.error }}</div>
             <div class="prompt-actions">
-              <button type="button" @click="deleteModPrompt.open = false">取消</button>
-              <button type="button" class="danger-action" @click="confirmDeleteSelectedMod">确认删除模组</button>
+              <button type="button" @click="deleteModPrompt.open = false">{{ deleteModPrompt.notice ? "关闭" : "取消" }}</button>
+              <button v-if="!deleteModPrompt.notice" type="button" class="danger-action" @click="confirmDeleteSelectedMod">确认删除模组</button>
             </div>
           </div>
         </div>

@@ -192,6 +192,8 @@ SUPPORTED_API_ROUTES = {
     "/library/cards",
     "/trash",
     "/trash/empty",
+    "/deletion-queue",
+    "/deletion-queue/retry",
     "/trash/<kind>/<id>/restore",
     "/trash/<kind>/<id>/delete",
     "/library/cards/detail",
@@ -259,7 +261,7 @@ SUPPORTED_API_ROUTES = {
     "/tasks/<task_id>/control",
 }
 
-BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-weighted-database-progress-v1"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-weighted-database-progress-v1-pending-delete-v1"
 
 # The database task's top-bar progress is a weighted estimate of the phase
 # timings captured in the UI reference run. The mod database service reports

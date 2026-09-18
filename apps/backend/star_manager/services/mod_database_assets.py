@@ -36,6 +36,15 @@ from star_manager.services.mod_database_core import (
     utc_now,
 )
 from star_manager.services.trash import move_to_trash
+from star_manager.services.pending_deletes import (
+    enqueue_pending_delete,
+    acquire_retry_lock,
+    is_transient_file_lock_error,
+    list_pending_deletes,
+    remove_pending_delete,
+    release_retry_lock,
+    update_pending_delete,
+)
 
 if VENDOR_DIR.exists():
     sys.path.insert(0, str(VENDOR_DIR))
@@ -3054,6 +3063,8 @@ def analyze_duplicate_zipmods(
 def delete_zipmod(
     zipmod_id: int,
     db_path: Path = DEFAULT_DB_PATH,
+    *,
+    queue_on_lock: bool = True,
 ) -> dict:
     resolved = db_path.resolve()
     if not resolved.exists() or not resolved.is_file():
@@ -3070,19 +3081,41 @@ def delete_zipmod(
         zipmod_path = Path(zipmod["file_path"]).resolve()
         removed = False
         if zipmod_path.is_file():
-            trash_record = move_to_trash(
-                zipmod_path,
-                "mods",
-                name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
-                metadata={
-                    "game_dir": resolve_game_dir_from_zipmod(
-                        str(zipmod_path), str(zipmod["relative_path"] or "")
-                    ),
-                    "relative_path": str(zipmod["relative_path"] or ""),
-                    "guid": str(zipmod["guid"] or ""),
-                    "reason": "delete_zipmod",
-                },
-            )
+            trash_metadata = {
+                "game_dir": resolve_game_dir_from_zipmod(
+                    str(zipmod_path), str(zipmod["relative_path"] or "")
+                ),
+                "relative_path": str(zipmod["relative_path"] or ""),
+                "guid": str(zipmod["guid"] or ""),
+                "reason": "delete_zipmod",
+            }
+            try:
+                trash_record = move_to_trash(
+                    zipmod_path,
+                    "mods",
+                    name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
+                    metadata=trash_metadata,
+                )
+            except OSError as exc:
+                if not queue_on_lock or not is_transient_file_lock_error(exc):
+                    raise
+                pending = enqueue_pending_delete(
+                    "zipmod",
+                    {
+                        "zipmod_path": str(zipmod_path),
+                        "zipmod_guid": str(zipmod["guid"] or ""),
+                        "db_path": str(resolved),
+                    },
+                    str(exc),
+                )
+                return {
+                    "ok": True,
+                    "queued": True,
+                    "pending_delete_id": pending["id"],
+                    "message": "模组文件正被游戏占用，删除请求已排队；解除占用后会自动移入回收站",
+                    "file_path": str(zipmod_path),
+                    "guid": zipmod["guid"],
+                }
             removed = True
         else:
             trash_record = None
@@ -3538,6 +3571,8 @@ def delete_mod_item(
     mod_item_id: int,
     db_path: Path = DEFAULT_DB_PATH,
     thumbnail_dir: Path = DEFAULT_THUMBNAIL_DIR,
+    *,
+    queue_on_lock: bool = True,
 ) -> dict:
     resolved_db = db_path.resolve()
     if not resolved_db.exists() or not resolved_db.is_file():
@@ -3563,20 +3598,45 @@ def delete_mod_item(
             (int(item["zipmod_id"]),),
         ).fetchone()[0])
         if item_count <= 1:
-            trash_record = move_to_trash(
-                zipmod_path,
-                "mods",
-                name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
-                metadata={
-                    "game_dir": resolve_game_dir_from_zipmod(
-                        str(zipmod_path), str(zipmod["relative_path"] or "")
-                    ),
-                    "relative_path": str(zipmod["relative_path"] or ""),
-                    "guid": str(zipmod["guid"] or ""),
-                    "reason": "delete_last_item",
+            trash_metadata = {
+                "game_dir": resolve_game_dir_from_zipmod(
+                    str(zipmod_path), str(zipmod["relative_path"] or "")
+                ),
+                "relative_path": str(zipmod["relative_path"] or ""),
+                "guid": str(zipmod["guid"] or ""),
+                "reason": "delete_last_item",
+                "deleted_item_id": int(mod_item_id),
+            }
+            try:
+                trash_record = move_to_trash(
+                    zipmod_path,
+                    "mods",
+                    name=str(zipmod["name"] or zipmod["file_name"] or zipmod_path.stem),
+                    metadata=trash_metadata,
+                )
+            except OSError as exc:
+                if not queue_on_lock or not is_transient_file_lock_error(exc):
+                    raise
+                pending = enqueue_pending_delete(
+                    "item",
+                    {
+                        "zipmod_path": str(zipmod_path),
+                        "zipmod_guid": str(zipmod["guid"] or ""),
+                        "item_id": str(item["item_id"] or ""),
+                        "csv_path": str(item["csv_path"] or ""),
+                        "db_path": str(resolved_db),
+                        "thumbnail_dir": str(Path(thumbnail_dir).resolve()),
+                    },
+                    str(exc),
+                )
+                return {
+                    "ok": True,
+                    "queued": True,
+                    "pending_delete_id": pending["id"],
+                    "message": "模组文件正被游戏占用，物品删除请求已排队；解除占用后会自动继续",
                     "deleted_item_id": int(mod_item_id),
-                },
-            )
+                    "deleted_zipmod": True,
+                }
             with conn:
                 conn.execute("DELETE FROM mod_items WHERE zipmod_id = ?", (int(item["zipmod_id"]),))
                 conn.execute("DELETE FROM duplicate_zipmods WHERE guid = ?", (zipmod["guid"],))
@@ -3608,29 +3668,53 @@ def delete_mod_item(
         )
         deleted_unity3d = unity3d_reference_paths(deleted_item)
 
-        with zipfile.ZipFile(zipmod_path, "r") as zf:
-            csv_member = find_zip_member(zf, csv_path)
-            if csv_member is None:
-                return {"ok": False, "error": f"CSV not found in zipmod: {csv_path}"}
-            new_csv = rewrite_csv_without_item_row(zf.read(csv_member), str(item["item_id"]))
+        try:
+            with zipfile.ZipFile(zipmod_path, "r") as zf:
+                csv_member = find_zip_member(zf, csv_path)
+                if csv_member is None:
+                    return {"ok": False, "error": f"CSV not found in zipmod: {csv_path}"}
+                new_csv = rewrite_csv_without_item_row(zf.read(csv_member), str(item["item_id"]))
 
-        remaining_references: set[str] = set()
-        for remaining in iter_zip_csv_items(zipmod_path):
-            if (
-                normalize_zip_path(remaining.csv_path).lower() == csv_path.lower()
-                and remaining.item_id == str(item["item_id"])
-            ):
-                continue
-            remaining_references.update(path.lower() for path in unity3d_reference_paths(remaining))
+            remaining_references: set[str] = set()
+            for remaining in iter_zip_csv_items(zipmod_path):
+                if (
+                    normalize_zip_path(remaining.csv_path).lower() == csv_path.lower()
+                    and remaining.item_id == str(item["item_id"])
+                ):
+                    continue
+                remaining_references.update(path.lower() for path in unity3d_reference_paths(remaining))
 
-        removals = [
-            path for path in deleted_unity3d
-            if path.lower() not in remaining_references
-        ]
-        with zipfile.ZipFile(zipmod_path, "r") as zf:
-            removals = [path for path in removals if find_zip_member(zf, path) is not None]
+            removals = [
+                path for path in deleted_unity3d
+                if path.lower() not in remaining_references
+            ]
+            with zipfile.ZipFile(zipmod_path, "r") as zf:
+                removals = [path for path in removals if find_zip_member(zf, path) is not None]
 
-        rewrite_zip_members(zipmod_path, {csv_path: new_csv}, removals)
+            rewrite_zip_members(zipmod_path, {csv_path: new_csv}, removals)
+        except OSError as exc:
+            if not queue_on_lock or not is_transient_file_lock_error(exc):
+                raise
+            pending = enqueue_pending_delete(
+                "item",
+                {
+                    "zipmod_path": str(zipmod_path),
+                    "zipmod_guid": str(zipmod["guid"] or ""),
+                    "item_id": str(item["item_id"] or ""),
+                    "csv_path": str(item["csv_path"] or ""),
+                    "db_path": str(resolved_db),
+                    "thumbnail_dir": str(Path(thumbnail_dir).resolve()),
+                },
+                str(exc),
+            )
+            return {
+                "ok": True,
+                "queued": True,
+                "pending_delete_id": pending["id"],
+                "message": "模组文件正被游戏占用，物品删除请求已排队；解除占用后会自动继续",
+                "deleted_item_id": int(mod_item_id),
+                "deleted_zipmod": False,
+            }
 
         now = utc_now()
         stat = zipmod_path.stat()
@@ -3720,6 +3804,111 @@ def get_zipmod_manifest(
         return {"ok": False, "error": str(exc)}
     finally:
         conn.close()
+
+
+def _find_pending_zipmod_row(conn: sqlite3.Connection, payload: dict):
+    target_path = str(Path(str(payload.get("zipmod_path") or "")).resolve())
+    target_guid = str(payload.get("zipmod_guid") or "")
+    rows = conn.execute("SELECT * FROM zipmods").fetchall()
+    for row in rows:
+        if str(Path(str(row["file_path"] or "")).resolve()) == target_path:
+            return row
+    if target_guid:
+        return conn.execute("SELECT * FROM zipmods WHERE guid = ?", (target_guid,)).fetchone()
+    return None
+
+
+def retry_pending_deletes() -> dict:
+    if not acquire_retry_lock():
+        return {"ok": True, "busy": True, "completed_count": 0, "waiting_count": len(list_pending_deletes())}
+    try:
+        return _retry_pending_deletes_unlocked()
+    finally:
+        release_retry_lock()
+
+
+def _retry_pending_deletes_unlocked() -> dict:
+    """Attempt all persisted deletions once and keep failures durable."""
+    completed: list[dict] = []
+    waiting: list[dict] = []
+    for record in list_pending_deletes():
+        payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+        db_path = Path(str(payload.get("db_path") or DEFAULT_DB_PATH))
+        result: dict
+        zipmod_id: int | None = None
+        item_id: int | None = None
+        missing_target = False
+        try:
+            conn = sqlite3.connect(db_path.resolve())
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+                zipmod = _find_pending_zipmod_row(conn, payload)
+                if zipmod is None:
+                    # Another operation may already have removed the row/file.
+                    source_exists = Path(str(payload.get("zipmod_path") or "")).is_file()
+                    if not source_exists:
+                        missing_target = True
+                    else:
+                        result = {"ok": False, "error": "待删除模组未在当前数据库中找到"}
+                elif record.get("operation") == "zipmod":
+                    zipmod_id = int(zipmod["id"])
+                else:
+                    item_rows = conn.execute(
+                        "SELECT * FROM mod_items WHERE zipmod_id = ? AND item_id = ?",
+                        (int(zipmod["id"]), str(payload.get("item_id") or "")),
+                    ).fetchall()
+                    item = next(
+                        (
+                            row
+                            for row in item_rows
+                            if normalize_zip_path(str(row["csv_path"] or "")).lower()
+                            == normalize_zip_path(str(payload.get("csv_path") or "")).lower()
+                        ),
+                        None,
+                    )
+                    if item is None:
+                        missing_target = True
+                    else:
+                        item_id = int(item["id"])
+            finally:
+                conn.close()
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+
+        if missing_target:
+            remove_pending_delete(str(record["id"]))
+            completed.append({"id": record["id"], "already_completed": True})
+            continue
+        if zipmod_id is not None:
+            result = delete_zipmod(zipmod_id, db_path=db_path, queue_on_lock=False)
+        elif item_id is not None:
+            result = delete_mod_item(
+                item_id,
+                db_path=db_path,
+                thumbnail_dir=Path(str(payload.get("thumbnail_dir") or DEFAULT_THUMBNAIL_DIR)),
+                queue_on_lock=False,
+            )
+
+        if result.get("ok"):
+            remove_pending_delete(str(record["id"]))
+            completed.append({"id": record["id"], "result": result})
+        else:
+            updated = update_pending_delete(record, str(result.get("error") or "删除仍在等待文件解除占用"))
+            waiting.append(
+                {
+                    "id": updated["id"],
+                    "attempts": updated["attempts"],
+                    "last_error": updated["last_error"],
+                }
+            )
+    return {
+        "ok": True,
+        "completed_count": len(completed),
+        "waiting_count": len(waiting),
+        "completed": completed,
+        "waiting": waiting,
+    }
 
 
 def update_zipmod_manifest(

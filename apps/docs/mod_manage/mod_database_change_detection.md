@@ -142,6 +142,14 @@ modified_at
 - `scan_status` 和 `scan_error` 记录具体错误。
 - 不解析 `mod_items`。
 
+## zipmod 解压错误与建库隔离
+
+- **问题背景**：建库扫描 `mods/**/*.zipmod` 时，个别 zipmod 的成员解压失败会把整次数据库构建打断，导致其余完好模组也无法入库。
+- **根因**：`ZipFile()` 读取中央目录通常仍能成功，真正解压成员时才会抛出 `zlib.error`、`EOFError`、`BadZipFile`（CRC）或 `RuntimeError`（加密包）。CSV/Studio 读取、缩略图预解压和 `prepare_mod_items()` 原先只捕获部分 ZIP 异常，解压错误会从线程池 `future.result()` 冒泡到 `build_database()`。
+- **解决方案**：统一使用 `ZIPMOD_READ_ERRORS` / `ZIPMOD_MEMBER_READ_ERRORS`。损坏成员记为该文件的 `parse_error` 或缩略图 `error` 并继续；zipmod 整体无法读取时返回 `scan_status = read_error`，由 `replace_mod_items()` 写回。`build_database()` / `index_single_zipmod()` 通过 `prepare_mod_items_for_build()` 再兜底一次，确保单个 zipmod 解压失败不影响其余模组。
+- **验证结果**：`test_prepare_mod_items_keeps_readable_csv_when_another_member_is_corrupt`、`test_build_database_continues_when_zipmod_member_decompress_fails`、`test_preextract_zip_unity_thumbnails_skips_zlib_error_without_raising` 覆盖部分成员损坏、整库继续和缩略图解压失败。
+- **适用边界**：该隔离只覆盖建库/单模组索引读取路径。写回 zipmod、合并重复模组、删除物品等修改压缩包的操作仍按原异常向上抛出，因为那些是显式维护动作，失败应返回给调用方。
+
 ## 移除文件处理
 
 建库过程中会维护本轮扫描到的 `seen_guids`。写入结束后调用 `remove_unseen_zipmods()`：

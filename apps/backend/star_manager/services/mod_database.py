@@ -77,6 +77,7 @@ from star_manager.services.mod_database_assets import (
     import_zipmod_item_thumbnail,
     iter_open_zip_csv_items,
     iter_zip_csv_items,
+    ZIPMOD_READ_ERRORS,
     get_existing_paths,
     group_valid_candidates,
     merge_duplicate_zipmod,
@@ -491,11 +492,17 @@ def prepare_mod_items(
     try:
         status_zip = zipfile.ZipFile(candidate.path, "r")
         status_zip_index = ZipMemberIndex(status_zip)
-    except (OSError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_READ_ERRORS as exc:
         status_zip_error = str(exc)
 
+    scan_status = ""
+    scan_error = ""
     try:
-        if status_zip is not None:
+        if status_zip is None:
+            scan_status = "read_error"
+            scan_error = f"zipmod read failed: {status_zip_error}"
+            csv_items = []
+        else:
             csv_items = list(iter_open_zip_csv_items(status_zip, candidate.manifest.name))
             preextract_zip_unity_thumbnails(
                 candidate,
@@ -510,8 +517,6 @@ def prepare_mod_items(
                 bundle_cache,
                 source_cache,
             )
-        else:
-            csv_items = list(iter_zip_csv_items(candidate.path))
 
         for item in csv_items:
             if not item.item_id:
@@ -521,43 +526,51 @@ def prepare_mod_items(
                 duplicate_items += 1
                 continue
             seen_keys.add(key)
-            thumbnail = (
-                ThumbnailResult("", "not_applicable", "")
-                if item.item_domain == "studio"
-                else ThumbnailResult("", "ready", "")
-                if is_map_scene_item(item) and not item.thumb_ab
-                else extract_thumbnail_from_zipmod(
-                    game_dir,
-                    candidate,
-                    item,
-                    thumbnail_dir,
-                    status_zip,
-                    status_zip_index,
-                    bundle_cache,
-                    source_cache,
+            try:
+                thumbnail = (
+                    ThumbnailResult("", "not_applicable", "")
+                    if item.item_domain == "studio"
+                    else ThumbnailResult("", "ready", "")
+                    if is_map_scene_item(item) and not item.thumb_ab
+                    else extract_thumbnail_from_zipmod(
+                        game_dir,
+                        candidate,
+                        item,
+                        thumbnail_dir,
+                        status_zip,
+                        status_zip_index,
+                        bundle_cache,
+                        source_cache,
+                    )
                 )
-            )
-            if status_zip is None:
+                if status_zip is None:
+                    unity3d = (
+                        Unity3dStatus("missing", f"zipmod read failed: {status_zip_error}")
+                        if item.parse_status == "ok"
+                        else Unity3dStatus("", "")
+                    )
+                else:
+                    unity3d = inspect_unity3d_status(
+                        game_dir,
+                        status_zip,
+                        item,
+                        status_zip_index,
+                        provider_index,
+                        str(candidate.path),
+                    )
+                    if unity3d.status == "in_mod" and thumbnail_error_indicates_unity3d_unreadable(item, thumbnail):
+                        unity3d = Unity3dStatus(
+                            "error",
+                            f"unreadable thumbnail unity3d: abdata/{normalize_zip_path(item.thumb_ab)}: {thumbnail.error}",
+                            "in_mod",
+                        )
+            except ZIPMOD_READ_ERRORS as exc:
+                thumbnail = ThumbnailResult("", "error", str(exc))
                 unity3d = (
-                    Unity3dStatus("missing", f"zipmod read failed: {status_zip_error}")
+                    Unity3dStatus("error", f"zipmod decompress failed: {exc}")
                     if item.parse_status == "ok"
                     else Unity3dStatus("", "")
                 )
-            else:
-                unity3d = inspect_unity3d_status(
-                    game_dir,
-                    status_zip,
-                    item,
-                    status_zip_index,
-                    provider_index,
-                    str(candidate.path),
-                )
-                if unity3d.status == "in_mod" and thumbnail_error_indicates_unity3d_unreadable(item, thumbnail):
-                    unity3d = Unity3dStatus(
-                        "error",
-                        f"unreadable thumbnail unity3d: abdata/{normalize_zip_path(item.thumb_ab)}: {thumbnail.error}",
-                        "in_mod",
-                    )
             prepared_items.append(
                 PreparedModItem(
                     csv_path=item.csv_path,
@@ -587,6 +600,10 @@ def prepare_mod_items(
             )
             if item.parse_status == "ok":
                 ok_count += 1
+    except ZIPMOD_READ_ERRORS as exc:
+        if not prepared_items:
+            scan_status = "read_error"
+            scan_error = f"zipmod decompress failed: {exc}"
     finally:
         if status_zip is not None:
             status_zip.close()
@@ -605,7 +622,36 @@ def prepare_mod_items(
         unity3d_other_mod_count=other_mod,
         unity3d_missing_count=missing,
         unity3d_error=unity3d_error,
+        scan_status=scan_status,
+        scan_error=scan_error,
     )
+
+
+def failed_prepared_zipmod_items(error: str) -> PreparedZipmodItems:
+    return PreparedZipmodItems(
+        items=[],
+        ok_count=0,
+        duplicate_items=0,
+        unity3d_status="",
+        unity3d_in_mod_count=0,
+        unity3d_in_game_count=0,
+        unity3d_missing_count=0,
+        unity3d_error="",
+        scan_status="read_error",
+        scan_error=error,
+    )
+
+
+def prepare_mod_items_for_build(
+    game_dir: Path,
+    candidate: ZipmodCandidate,
+    thumbnail_dir: Path,
+    provider_index: dict[str, list[Unity3dProvider]] | None = None,
+) -> PreparedZipmodItems:
+    try:
+        return prepare_mod_items(game_dir, candidate, thumbnail_dir, provider_index)
+    except ZIPMOD_READ_ERRORS as exc:
+        return failed_prepared_zipmod_items(f"zipmod decompress failed: {exc}")
 
 
 def replace_mod_items(
@@ -734,6 +780,15 @@ def replace_mod_items(
             zipmod_id,
         ),
     )
+    if prepared.scan_status:
+        conn.execute(
+            """
+            UPDATE zipmods
+            SET scan_status = ?, scan_error = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (prepared.scan_status, prepared.scan_error, now, zipmod_id),
+        )
     return prepared.ok_count, prepared.duplicate_items
 
 
@@ -934,7 +989,7 @@ def build_database(
             with ThreadPoolExecutor(max_workers=actual_worker_count) as executor:
                 future_to_candidate = {
                     executor.submit(
-                        prepare_mod_items,
+                        prepare_mod_items_for_build,
                         game_dir,
                         candidate,
                         thumbnail_dir,
@@ -962,7 +1017,7 @@ def build_database(
                         )
         else:
             for completed_count, candidate in enumerate(primary_candidates, start=1):
-                prepared_by_guid[candidate.manifest.guid] = prepare_mod_items(
+                prepared_by_guid[candidate.manifest.guid] = prepare_mod_items_for_build(
                     game_dir,
                     candidate,
                     thumbnail_dir,
@@ -1011,7 +1066,7 @@ def build_database(
                     guid in replaced_item_guids
                 )
                 if prepared is None and should_replace_items:
-                    prepared = prepare_mod_items(
+                    prepared = prepare_mod_items_for_build(
                         game_dir,
                         primary,
                         thumbnail_dir,
@@ -1138,7 +1193,7 @@ def index_single_zipmod(
         # the archive-level provider index. Those operations belong to the full
         # database rebuild; this task only needs the target archive and the
         # existing GUID row in SQLite.
-        prepared = prepare_mod_items(
+        prepared = prepare_mod_items_for_build(
             game_dir,
             candidate,
             thumbnail_dir,

@@ -2,6 +2,7 @@ import sys
 import sqlite3
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -42,6 +43,38 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
 from star_manager.services import mod_database_assets  # noqa: E402
 from star_manager.services.mod_database import build_database, prepare_mod_items, summarize_prepared_unity3d  # noqa: E402
 from star_manager.services.mod_database_queries import list_zipmods  # noqa: E402
+
+SAMPLE_CSV = (
+    "0,,,,,,,,,,,,,,\r\n"
+    "ID,Kind,Possess,Name,EN_US,MainManifest,MainAB,MainData,"
+    "TexManifest,TexAB,TexD,TexC,SetHair,ThumbAB,ThumbTex\r\n"
+    "1,210,1,Sample,0,abdata,chara/sample/main.unity3d,main,"
+    "abdata,,,,,chara/sample/thumb.unity3d,thumb\r\n"
+)
+
+
+def _write_deflated_zipmod(path: Path, members: dict[str, bytes | str]) -> None:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, payload in members.items():
+            data = payload.encode("utf-8") if isinstance(payload, str) else payload
+            zf.writestr(name, data)
+
+
+def _corrupt_zip_member(path: Path, member_name: str) -> None:
+    with zipfile.ZipFile(path, "r") as zf:
+        info = zf.getinfo(member_name)
+        header_offset = info.header_offset
+        filename_len = len(info.orig_filename.encode("utf-8"))
+        extra_len = len(info.extra)
+        data_start = header_offset + 30 + filename_len + extra_len
+        compress_size = info.compress_size
+    if compress_size <= 8:
+        raise AssertionError(f"{member_name} compressed payload is too small to corrupt")
+    raw = bytearray(path.read_bytes())
+    for index in range(data_start, data_start + min(compress_size, 24)):
+        raw[index] ^= 0xFF
+    path.write_bytes(raw)
+
 
 
 class ManifestParsingTests(unittest.TestCase):
@@ -1017,6 +1050,133 @@ class ModItemPreparationTests(unittest.TestCase):
         self.assertEqual(row[0], "chara/hair/hair_tex.unity3d")
         self.assertEqual(row[1], "in_mod")
         self.assertEqual(row[2], "")
+
+    def test_prepare_mod_items_keeps_readable_csv_when_another_member_is_corrupt(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "mixed.zipmod"
+            _write_deflated_zipmod(
+                zipmod_path,
+                {
+                    "manifest.xml": (
+                        "<manifest><guid>mixed.guid</guid><name>Mixed</name>"
+                        "<version>1</version><author>Author</author></manifest>"
+                    ),
+                    "abdata/list/characustom/good.csv": SAMPLE_CSV,
+                    "abdata/list/characustom/bad.csv": SAMPLE_CSV.replace("Sample", "Broken") * 8,
+                    "abdata/chara/sample/main.unity3d": b"main-bundle" * 32,
+                },
+            )
+            _corrupt_zip_member(zipmod_path, "abdata/list/characustom/bad.csv")
+            candidate = ZipmodCandidate(
+                manifest=ManifestData("mixed.guid", "Mixed", "1", "Author", "ok", ""),
+                path=zipmod_path,
+                relative_path="mixed.zipmod",
+                file_size=zipmod_path.stat().st_size,
+                modified_at="2026-09-21T00:00:00+00:00",
+            )
+            prepared = prepare_mod_items(root, candidate, root / "thumbs")
+
+        self.assertEqual(prepared.scan_status, "")
+        self.assertEqual([item.item_id for item in prepared.items], ["1"])
+        self.assertEqual(prepared.items[0].name, "Sample")
+
+    def test_build_database_continues_when_zipmod_member_decompress_fails(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            mods_dir = game_dir / "mods"
+            mods_dir.mkdir(parents=True)
+            good_path = mods_dir / "good.zipmod"
+            _write_deflated_zipmod(
+                good_path,
+                {
+                    "manifest.xml": (
+                        "<manifest><guid>good.guid</guid><name>Good</name>"
+                        "<version>1</version><author>Author</author></manifest>"
+                    ),
+                    "abdata/list/characustom/good.csv": SAMPLE_CSV,
+                    "abdata/chara/sample/main.unity3d": b"main-bundle" * 32,
+                },
+            )
+            bad_path = mods_dir / "bad.zipmod"
+            _write_deflated_zipmod(
+                bad_path,
+                {
+                    "manifest.xml": (
+                        "<manifest><guid>bad.guid</guid><name>Bad</name>"
+                        "<version>1</version><author>Author</author></manifest>"
+                    ),
+                    "abdata/list/characustom/bad.csv": SAMPLE_CSV.replace("Sample", "Broken") * 8,
+                    "abdata/chara/sample/main.unity3d": b"main-bundle" * 32,
+                },
+            )
+            _corrupt_zip_member(bad_path, "abdata/list/characustom/bad.csv")
+
+            db_path = root / "star_manager.sqlite"
+            stats = build_database(game_dir, db_path, root / "thumbs", worker_count=1)
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = {
+                    str(row["guid"]): row
+                    for row in conn.execute("SELECT guid, scan_status, scan_error, item_count FROM zipmods")
+                }
+                good_items = conn.execute(
+                    "SELECT COUNT(*) FROM mod_items WHERE zipmod_guid = 'good.guid'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertGreaterEqual(int(stats["primary_zipmods"]), 2)
+        self.assertEqual(rows["good.guid"]["scan_status"], "ok")
+        self.assertEqual(good_items, 1)
+        self.assertIn("bad.guid", rows)
+
+    def test_preextract_zip_unity_thumbnails_skips_zlib_error_without_raising(self):
+        class BrokenZip:
+            def read(self, _member_name):
+                raise zlib.error("Error -3 while decompressing data: invalid distance too far back")
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "sample.zipmod"
+            zipmod_path.write_bytes(b"not used")
+            candidate = ZipmodCandidate(
+                manifest=ManifestData("sample", "sample", "", "", "ok", ""),
+                path=zipmod_path,
+                relative_path="sample.zipmod",
+                file_size=zipmod_path.stat().st_size,
+                modified_at="",
+            )
+            item = CsvItem(
+                "",
+                "1",
+                "210",
+                "",
+                "",
+                "",
+                "",
+                "chara/sample/thumb.unity3d",
+                "tex_a",
+                "ok",
+                "",
+            )
+            index = type(
+                "Index",
+                (),
+                {"find_member": lambda self, _path: "abdata/chara/sample/thumb.unity3d"},
+            )()
+            preextract_zip_unity_thumbnails(
+                candidate,
+                [item],
+                root / "thumbs",
+                BrokenZip(),
+                index,
+                UnityThumbnailBundleCache(),
+                ThumbnailSourceCache(),
+            )
 
     def test_duplicate_item_signature_uses_guid_kind_and_item_id_only(self):
         first = PreparedModItem(

@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
@@ -54,6 +55,17 @@ try:
 except ImportError:
     UnityPy = None  # type: ignore
 
+
+ZIPMOD_READ_ERRORS = (
+    OSError,
+    RuntimeError,
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    EOFError,
+    zlib.error,
+)
+ZIPMOD_MEMBER_READ_ERRORS = ZIPMOD_READ_ERRORS + (KeyError, NotImplementedError)
+ZIPMOD_THUMBNAIL_TASK_ERRORS = ZIPMOD_MEMBER_READ_ERRORS + (ValueError,)
 
 THUMBNAIL_PROFILE_LOG_PATH = runtime_root() / "thumbnail_profile.log"
 _THUMBNAIL_PROFILE_LOCK = threading.Lock()
@@ -188,9 +200,11 @@ def read_manifest(zipmod_path: Path) -> ManifestData:
                 return ManifestData("", "", "", "", "missing_manifest", "manifest.xml not found")
             with zf.open("manifest.xml") as manifest_file:
                 root = ET.parse(manifest_file).getroot()
-    except zipfile.BadZipFile as exc:
+    except ZIPMOD_READ_ERRORS as exc:
+        if isinstance(exc, OSError) and not isinstance(exc, zipfile.BadZipFile):
+            return ManifestData("", "", "", "", "invalid_manifest", str(exc))
         return ManifestData("", "", "", "", "read_error", f"bad zip file: {exc}")
-    except (OSError, ET.ParseError) as exc:
+    except ET.ParseError as exc:
         return ManifestData("", "", "", "", "invalid_manifest", str(exc))
 
     def text(name: str) -> str:
@@ -225,9 +239,11 @@ def inspect_zipmod_archive(zipmod_path: Path) -> tuple[bool, str]:
                 root = ET.parse(manifest_file).getroot()
             if str(root.tag or "").strip().casefold() != "manifest":
                 return False, "manifest.xml root element is not manifest"
-    except zipfile.BadZipFile as exc:
+    except ZIPMOD_READ_ERRORS as exc:
+        if isinstance(exc, OSError) and not isinstance(exc, zipfile.BadZipFile):
+            return False, str(exc)
         return False, f"bad zip file: {exc}"
-    except (OSError, ET.ParseError) as exc:
+    except ET.ParseError as exc:
         return False, str(exc)
 
     manifest = read_manifest(zipmod_path)
@@ -843,17 +859,25 @@ def read_studio_item_list(
 
 def iter_open_zip_studio_items(zf: zipfile.ZipFile) -> Iterable[CsvItem]:
     """Resolve Studio Group/Category metadata before yielding ItemList records."""
-    members = {
-        normalize_zip_path(name): name
-        for name in zf.namelist()
-        if not name.endswith("/")
-    }
+    try:
+        members = {
+            normalize_zip_path(name): name
+            for name in zf.namelist()
+            if not name.endswith("/")
+        }
+    except ZIPMOD_READ_ERRORS as exc:
+        yield CsvItem("", "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "parse_error", str(exc))
+        return
     groups: dict[str, str] = {}
     categories: dict[tuple[str, str], str] = {}
     for normalized, member in sorted(members.items()):
         if not STUDIO_ITEM_GROUP_PATTERN.match(normalized):
             continue
-        for group_id, name in read_studio_id_name_rows(zf.read(member)):
+        try:
+            payload = zf.read(member)
+        except ZIPMOD_MEMBER_READ_ERRORS:
+            continue
+        for group_id, name in read_studio_id_name_rows(payload):
             groups[group_id] = name
     for normalized, member in sorted(members.items()):
         if not STUDIO_ITEM_CATEGORY_PATTERN.match(normalized):
@@ -861,11 +885,18 @@ def iter_open_zip_studio_items(zf: zipfile.ZipFile) -> Iterable[CsvItem]:
         filename_category_id, group_id = studio_category_file_ids(normalized)
         if not group_id:
             continue
-        for category_id, name in read_studio_id_name_rows(zf.read(member)):
+        try:
+            payload = zf.read(member)
+        except ZIPMOD_MEMBER_READ_ERRORS:
+            continue
+        for category_id, name in read_studio_id_name_rows(payload):
             categories[(group_id, category_id or filename_category_id)] = name
     for normalized, member in sorted(members.items()):
         if STUDIO_ITEM_LIST_PATTERN.match(normalized):
-            yield from read_studio_item_list(normalized, zf.read(member), groups, categories)
+            try:
+                yield from read_studio_item_list(normalized, zf.read(member), groups, categories)
+            except ZIPMOD_MEMBER_READ_ERRORS as exc:
+                yield CsvItem(normalized, "", STUDIO_ITEM_KIND, "", "", "", "", "", "", "parse_error", str(exc))
 
 
 def read_kplug_map_items(
@@ -991,7 +1022,11 @@ def iter_open_zip_csv_items(
     zf: zipfile.ZipFile,
     map_display_name: str = "",
 ) -> Iterable[CsvItem]:
-    names = sorted(zf.namelist())
+    try:
+        names = sorted(zf.namelist())
+    except ZIPMOD_READ_ERRORS as exc:
+        yield CsvItem("", "", "", "", "", "", "", "", "", "parse_error", str(exc))
+        return
     normalized_names = [name.replace("\\", "/") for name in names]
     mapinfo_paths = [
         name
@@ -1012,7 +1047,7 @@ def iter_open_zip_csv_items(
                     map_display_name,
                     thumbnail_references,
                 )
-            except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+            except ZIPMOD_MEMBER_READ_ERRORS as exc:
                 yield CsvItem(normalized, "", MAP_SCENE_KIND, "", "", "", "", "", "", "parse_error", str(exc))
             continue
         if not normalized.lower().startswith("abdata/list/"):
@@ -1021,7 +1056,7 @@ def iter_open_zip_csv_items(
             continue
         try:
             yield from read_items_from_csv(normalized, zf.read(name))
-        except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        except ZIPMOD_MEMBER_READ_ERRORS as exc:
             yield CsvItem(normalized, "", "", "", "", "", "", "", "", "parse_error", str(exc))
 
     if mapinfo_paths and not has_kplug_map:
@@ -1038,7 +1073,7 @@ def iter_zip_csv_items(zipmod_path: Path) -> Iterable[CsvItem]:
     try:
         with zipfile.ZipFile(zipmod_path, "r") as zf:
             yield from iter_open_zip_csv_items(zf)
-    except (OSError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_READ_ERRORS as exc:
         yield CsvItem("", "", "", "", "", "", "", "", "", "parse_error", str(exc))
 
 
@@ -1088,7 +1123,7 @@ def unity3d_member_signatures(
                     "modified": "%04d-%02d-%02d %02d:%02d:%02d" % info.date_time,
                     "modified_key": tuple(int(part) for part in info.date_time),
                 }
-    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_MEMBER_READ_ERRORS as exc:
         return {}, str(exc)
     return signatures, ""
 
@@ -1251,7 +1286,7 @@ def refresh_unity3d_provider_index(
         try:
             with zipfile.ZipFile(candidate.path, "r") as zf:
                 entries = _unity3d_provider_entries(zf)
-        except (OSError, zipfile.BadZipFile) as exc:
+        except ZIPMOD_READ_ERRORS as exc:
             scan_status = "error"
             scan_error = str(exc)
 
@@ -1365,7 +1400,7 @@ def unity3d_bundle_readability_error(
         if UnityPy is None:
             return "UnityPy is not available"
         env = UnityPy.load(zf.read(member_name))
-    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_MEMBER_READ_ERRORS as exc:
         return f"Unity3D read failed: {exc}"
     except Exception as exc:  # noqa: BLE001
         return f"UnityPy load failed: {exc}"
@@ -2079,7 +2114,7 @@ def zipmod_unity3d_diagnostics(
                                     "csv_path": item["csv_path"],
                                 }
                             )
-        except (OSError, zipfile.BadZipFile) as exc:
+        except ZIPMOD_READ_ERRORS as exc:
             return {"ok": False, "error": f"Cannot read zipmod: {exc}"}
 
         summary = summarize_zipmod_unity3d_status(conn, zipmod_id)
@@ -4206,8 +4241,11 @@ def resource_image_candidates(item: CsvItem) -> list[str]:
 def write_direct_thumbnail(
     zf: zipfile.ZipFile, member_name: str, output_path: Path
 ) -> ThumbnailResult:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(zf.read(member_name))
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(zf.read(member_name))
+    except ZIPMOD_MEMBER_READ_ERRORS as exc:
+        return ThumbnailResult("", "error", str(exc))
     return ThumbnailResult(str(output_path), "ready", "")
 
 
@@ -4318,7 +4356,7 @@ def preextract_zip_unity_thumbnails(
 
         try:
             bundle = bundle_cache.load(("zip", member_key), zf.read(member_name))
-        except (OSError, KeyError, RuntimeError, zipfile.BadZipFile):
+        except ZIPMOD_MEMBER_READ_ERRORS:
             continue
         if isinstance(bundle, ThumbnailResult):
             continue
@@ -4673,7 +4711,7 @@ def extract_thumbnail_from_zipmod(
             return extract_from_zip(zf, index)
         with zipfile.ZipFile(candidate.path, "r") as opened_zf:
             return extract_from_zip(opened_zf, ZipMemberIndex(opened_zf))
-    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_MEMBER_READ_ERRORS as exc:
         return finish(ThumbnailResult("", "error", str(exc)), "zip_error")
 
 
@@ -4824,7 +4862,7 @@ def ensure_mod_item_thumbnail(
             "thumbnail_status": result.status,
             "thumbnail_url": f"/mods/thumbnails?path={quote(cache_path)}",
         }
-    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as exc:
+    except ZIPMOD_THUMBNAIL_TASK_ERRORS as exc:
         return {"ok": False, "error": str(exc)}
     finally:
         conn.close()

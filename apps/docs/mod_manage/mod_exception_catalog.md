@@ -149,6 +149,26 @@
 - 删除动作会从磁盘删除对应 `.zipmod` 文件，并删除数据库主记录。
 - 这是高风险操作，调用侧必须让用户知道将删除的具体模组。
 
+### `read_error`
+
+触发条件：
+
+- zipmod 不是可读 ZIP，或中央目录损坏。
+- 或 `manifest.xml` / CSV / Studio 列表等成员解压失败（`zlib.error`、CRC 失败、截断压缩流、加密 ZIP）。
+- 建库时单个 zipmod 因此无法完成物品解析。
+
+界面表现：
+
+- 模组列表状态显示为 `读取失败` / `error` 筛选中的 `read_error`。
+
+解决方案：
+
+- 重新安装或修复该 zipmod 后再重建数据库。其余模组的建库结果应已保留。
+
+说明：
+
+- 若只有个别 CSV 或缩略图成员损坏，完好物品仍会入库；只有该 zipmod 整体无法继续解析时才把 `scan_status` 记为 `read_error`。
+
 ### `invalid_manifest`
 
 触发条件：
@@ -168,7 +188,8 @@
 ## 与列表状态的关系
 
 - `正常`：`scan_status = ok`，作者不为空，没有重复 GUID，没有主资源 `unity3d` 问题，也没有缩略图问题。
-- `错误`：包括 `invalid_manifest`、`missing_manifest`、主资源 `MainAB` 缺失、主资源 Unity3D 损坏等会影响物品本体可用性的情况。
+- `错误`：包括 `invalid_manifest`、`missing_manifest`、`read_error`、主资源 `MainAB` 缺失、主资源 Unity3D 损坏等会影响物品本体可用性的情况。
+- `读取失败`：`scan_status = read_error`，包括坏 ZIP 和成员解压失败。
 - `警告`：包括作者为空、Unity3D 不在当前 zipmod 内（来源为游戏目录或其它 zipmod）、重复 GUID、缩略图缺失或缩略图解析失败等需要人工整理但不一定影响物品本体可用性的情况。
 - `已失效`：`scan_status = stale`。
 

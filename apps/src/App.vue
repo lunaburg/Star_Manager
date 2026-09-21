@@ -2735,6 +2735,28 @@ function taskTimingRows(task) {
 }
 
 function taskResultRows(task) {
+  if (task?.task_type === "import_external_zipmods") {
+    const data = task.data || {};
+    return [
+      ["扫描 zipmod", data.zipmod_scanned_count],
+      ["扫描 zip", data.zip_scanned_count],
+      ["识别为模组的 zip", data.zip_recognized_count],
+      ["识别候选总数", data.scanned_count],
+      ["扫描 PNG", data.png_scanned_count],
+      ["复制候选", data.copied_count],
+      ["导入 zipmod", data.imported_count],
+      ["zip → zipmod", data.zip_renamed_count],
+      ["替换更完整版本", data.promoted_count],
+      ["清理重复版本", data.cleaned_count],
+      ["补入 unity3d", data.unity3d_repaired_count],
+      ["角色卡", data.card_imported_count],
+      ["服装卡", data.coordinate_imported_count],
+      ["跳过普通 PNG", data.non_card_png_count],
+      ["无效压缩包", data.invalid_count],
+      ["跳过处理", data.skipped_count],
+      ["失败", data.failure_count]
+    ].filter(([, value]) => value !== undefined && value !== null);
+  }
   if (task?.task_type !== "build_mod_database") return [];
   const stats = task.data?.stats || {};
   const cardStats = task.data?.card_stats || {};

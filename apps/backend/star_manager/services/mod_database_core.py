@@ -149,6 +149,8 @@ class PreparedZipmodItems:
     unity3d_error: str
     unity3d_not_in_mod_count: int = 0
     unity3d_other_mod_count: int = 0
+    scan_status: str = ""
+    scan_error: str = ""
 
 
 def utc_now() -> str:

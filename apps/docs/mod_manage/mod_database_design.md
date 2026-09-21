@@ -382,6 +382,8 @@ zipmods.item_count
 -> 标记不存在于本次扫描结果中的旧记录为 stale
 ```
 
+单个 zipmod 的 ZIP 解压失败不得中断整次建库。`ZipFile()` 能打开但成员解压失败时，应跳过损坏成员、保留可读 CSV/Studio 物品，并在无法继续解析该 zipmod 时把它记为 `read_error`，然后继续处理其余模组。
+
 ### 单个 zipmod 重扫
 
 ```text

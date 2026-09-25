@@ -255,6 +255,7 @@ def test_card_loader_validates_and_forwards_selected_sections(monkeypatch):
     assert seen["method"] == "POST"
     assert seen["payload"] == {
         "type": "card",
+        "target": "editor",
         "path": "UserData/chara/female/favorites/card.png",
         "face": True,
         "body": False,
@@ -305,6 +306,101 @@ def test_card_loader_forwards_clothes_and_accessory_together(monkeypatch):
     assert seen["method"] == "POST"
     assert seen["payload"]["clothes"] is True
     assert seen["payload"]["accessory"] is True
+
+
+def test_card_loader_forwards_hscene_target_and_requires_complete_card(monkeypatch):
+    from pathlib import Path
+
+    class _CardPath:
+        suffix = ".png"
+
+        def read_bytes(self):
+            return b"card"
+
+    monkeypatch.setattr(
+        game_item_probe,
+        "validate_card_root",
+        lambda _game_dir: (True, Path("D:/HS2/UserData/chara"), ""),
+    )
+    monkeypatch.setattr(game_item_probe, "resolve_card_file", lambda _root, _path: _CardPath())
+    monkeypatch.setattr(game_item_probe, "is_ais_card", lambda _path: True)
+    monkeypatch.setattr(game_item_probe, "make_card_data", lambda _data: (b"card-data", 0))
+    monkeypatch.setattr(game_item_probe, "read_card_marker", lambda _data: "【AIS_Chara】")
+
+    seen = {}
+
+    def fake_proxy(api_path, *, method="GET", query=None, payload=None, timeout=2.0):
+        del query, timeout
+        seen["api_path"] = api_path
+        seen["method"] = method
+        seen["payload"] = payload
+        return {"ok": True, "data": {"accepted": True, "commandId": "hscene-card"}}
+
+    monkeypatch.setattr(game_item_probe, "proxy_game_item_probe", fake_proxy)
+    result = game_item_probe.load_character_card_to_game(
+        "D:/HS2",
+        "female/card.png",
+        {
+            "target": "hscene",
+            "sex": 1,
+            "characterIndex": 2,
+            "targetCharacterId": 12345,
+            **{name: True for name in game_item_probe.CARD_LOAD_SECTIONS},
+        },
+    )
+
+    assert result["ok"] is True
+    assert seen["payload"] == {
+        "type": "card",
+        "target": "hscene",
+        "path": "UserData/chara/female/card.png",
+        "face": True,
+        "body": True,
+        "hair": True,
+        "parameter": True,
+        "clothes": True,
+        "accessory": True,
+        "sex": 1,
+        "characterIndex": 2,
+        "targetCharacterId": 12345,
+    }
+
+
+def test_card_loader_rejects_partial_hscene_card(monkeypatch):
+    from pathlib import Path
+
+    class _CardPath:
+        suffix = ".png"
+
+        def read_bytes(self):
+            return b"card"
+
+    monkeypatch.setattr(
+        game_item_probe,
+        "validate_card_root",
+        lambda _game_dir: (True, Path("D:/HS2/UserData/chara"), ""),
+    )
+    monkeypatch.setattr(game_item_probe, "resolve_card_file", lambda _root, _path: _CardPath())
+    monkeypatch.setattr(game_item_probe, "is_ais_card", lambda _path: True)
+    monkeypatch.setattr(game_item_probe, "make_card_data", lambda _data: (b"card-data", 0))
+    monkeypatch.setattr(game_item_probe, "read_card_marker", lambda _data: "【AIS_Chara】")
+
+    result = game_item_probe.load_character_card_to_game(
+        "D:/HS2",
+        "female/card.png",
+        {
+            "target": "hscene",
+            "sex": 1,
+            "characterIndex": 0,
+            **{name: name == "face" for name in game_item_probe.CARD_LOAD_SECTIONS},
+        },
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "H 场景读取会完整替换人物卡，必须选择全部卡片内容",
+        "error_code": "invalid_card_selection",
+    }
 
 
 def test_card_loader_rejects_empty_selection(monkeypatch):

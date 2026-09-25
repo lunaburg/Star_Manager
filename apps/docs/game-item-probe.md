@@ -89,7 +89,7 @@ H 场景单件物品请求示例（以下为服装）：
 }
 ```
 
-`target` 缺省或为 `editor` 时保持原有角色制作器行为；设置为 `hscene` 后必须提供 `sex`（`0` 男性、`1` 女性）以及 `characterIndex` 或 `targetCharacterId`。女性索引对应 `HScene.GetFemales()`，男性索引对应 `HScene.GetMales()`；同时提供索引和 `targetCharacterId` 时必须指向同一个 `ChaControl`。H 场景支持 `type: "clothes"`、`"hair"`、`"face"`、`"body"` 和 `"accessory"` 的单件换装；仍不接受 `type: "card"` 的整卡替换。
+`target` 缺省或为 `editor` 时保持原有角色制作器行为；设置为 `hscene` 后必须提供 `sex`（`0` 男性、`1` 女性）以及 `characterIndex` 或 `targetCharacterId`。女性索引对应 `HScene.GetFemales()`，男性索引对应 `HScene.GetMales()`；同时提供索引和 `targetCharacterId` 时必须指向同一个 `ChaControl`。H 场景支持 `type: "clothes"`、`"hair"`、`"face"`、`"body"` 和 `"accessory"` 的单件换装，也支持完整 `type: "card"` 人物卡读取；整卡读取与单件换装使用不同的执行流程。
 
 H 场景目标的实际调用链是：
 
@@ -100,6 +100,37 @@ Manager.HSceneManager.Instance.Hscene
 ```
 
 它不会调用 `LoadCharaFile`、`ChangeNowCoordinate` 或 `Reload`，因此保留当前 H 场景角色、动画状态以及 H 场景控制器引用。`succeeded` 仍只表示原生方法已接受调用，模组资源的异步加载应另行通过画面或当前状态确认。
+
+### H 场景人物卡读取
+
+H 场景整卡命令示例：
+
+```json
+{
+  "type": "card",
+  "target": "hscene",
+  "sex": 1,
+  "characterIndex": 0,
+  "targetCharacterId": 12345,
+  "path": "UserData/chara/female/favorites/example.png",
+  "face": true,
+  "body": true,
+  "hair": true,
+  "parameter": true,
+  "clothes": true,
+  "accessory": true
+}
+```
+
+H 场景人物卡必须六项全选。探针在已定位的 `ChaControl` 上调用：
+
+```text
+ChaFileControl.LoadCharaFile(path, sex, false, true)
+ChaControl.ChangeNowCoordinate(false, true)
+ChaControl.Reload(false, false, false, false, true)
+```
+
+该流程与已经验证的 `HS2_HCharaSwitcher` 原生换人路径一致。原生 `Reload` 返回后命令立即完成，不再额外调用 `HSceneManager.SetFemaleState`、碰撞/命中、动态骨骼、Yure、FeelHit、声音、角色选择 UI 或 `ProcBase.setAnimationParamater()` 的反射重绑定。HTTP 线程仍只入队，Unity 调用都在主线程的延迟命令协程中执行。
 
 场景和角色枚举使用只读接口：
 
@@ -366,4 +397,7 @@ Star Manager 当前界面把服饰类别 `140`、`141`、`144`、`147`、`240`�
 - `0.7.1` 已在当前 HS2 角色编辑器中完成“仅衣服”和“仅装饰”实测：两次命令均返回 `succeeded`，仅装饰不会覆盖已读取的服装，用户确认人物、服装和装饰在画面中均正常显示。
 - `0.8.0` 增加面部栏位写入。脸型使用 `ChangeHead`，面部贴图类别使用游戏原生面部更新方法；眼睛类别 `317`/`318` 通过 `facePartNo` 严格绑定左右眼。当前完成程序集级编译验证和代理 payload 测试，仍需将新 DLL 安装到目标 HS2 并在角色制作器内逐类实机验证资源加载结果。
 - `0.9.0` 增加身体栏位写入。身体类别已加入静态目录扫描和装配模式；普通身体项直接执行，身体彩绘通过 `bodyPartNo=0/1` 绑定彩绘层。当前完成代码接入和代理 payload 测试，仍需将新 DLL 安装到目标 HS2 并在角色制作器内逐类实机验证资源加载结果。
-- `0.9.0` 增加 H 场景角色枚举、完整当前装配状态和单件物品目标。通过 `Manager.HSceneManager.Instance.Hscene` 获取活动场景，再按 `sex + characterIndex` 调用 `GetFemales()`/`GetMales()`；服装、头发、面部、身体和配饰均只执行对应的原生单件更新方法，不执行整卡替换或 H 场景重载。当前已完成程序集级编译验证，尚未在目标 H 场景中逐类实测女性、男性和模组物品的资源加载结果。
+- `0.9.0` 增加 H 场景角色枚举、完整当前装配状态和单件物品目标。通过 `Manager.HSceneManager.Instance.Hscene` 获取活动场景，再按 `sex + characterIndex` 调用 `GetFemales()`/`GetMales()`；服装、头发、面部、身体和配饰均只执行对应的原生单件更新方法。
+- `2026-09-24` 增加 H 场景人物卡完整读取：解析器接受 `target: "hscene"` 的 `type: "card"`，使用 `LoadCharaFile → ChangeNowCoordinate → Reload`；后端 payload 测试、前端生产构建和当前 HS2 程序集编译均已通过。
+- `2026-09-24` 修复 H 场景人物卡加载超时：完整 `type: "card"` 流程使用 120 秒专用延迟超时。此前沿用 12 秒通用超时，遇到 `ChaControl.Reload`、Sideloader 或第三方角色控制器同步耗时时，会在人物卡已经写入后误报 `execution_error`。该调整不改变普通单件换装和角色编辑器人物卡读取。
+- `2026-09-25` 根据 `HS2_HCharaSwitcher` 实机探针记录移除额外 HScene 控制器重绑定和后台队列锁；原生 `Reload` 返回后直接释放命令队列，避免连续读取时后续命令过期。

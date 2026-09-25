@@ -10,6 +10,10 @@ const {
   getBundledPluginDirectory
 } = require("./game-plugins.cjs");
 
+function getPluginInstallDirectory(gameDir) {
+  return path.join(gameDir, "BepInEx", "Plugins", "StarManager");
+}
+
 function createPluginFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "star-manager-plugins-"));
   const gameDir = path.join(root, "game");
@@ -35,16 +39,17 @@ test("bundled plugin installation copies only missing plugins atomically", () =>
     assert.equal(first.installed_count, 3);
     for (const fileName of REQUIRED_PLUGIN_FILE_NAMES) {
       assert.equal(
-        fs.readFileSync(path.join(fixture.gameDir, "BepInEx", "Plugins", fileName), "utf8").startsWith("plugin-"),
+        fs.readFileSync(path.join(getPluginInstallDirectory(fixture.gameDir), fileName), "utf8").startsWith("plugin-"),
         true
       );
     }
 
-    const target = path.join(fixture.gameDir, "BepInEx", "Plugins", REQUIRED_PLUGIN_FILE_NAMES[0]);
+    const target = path.join(getPluginInstallDirectory(fixture.gameDir), REQUIRED_PLUGIN_FILE_NAMES[0]);
     fs.writeFileSync(target, "user-version");
     const second = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
     assert.equal(second.ok, true);
     assert.equal(second.installed_count, 0);
+    assert.equal(second.destination_dir, getPluginInstallDirectory(fixture.gameDir));
     assert.equal(fs.readFileSync(target, "utf8"), "user-version");
   } finally {
     removeFixture(fixture.root);
@@ -54,7 +59,7 @@ test("bundled plugin installation copies only missing plugins atomically", () =>
 test("a disabled plugin counts as installed without being re-enabled", () => {
   const fixture = createPluginFixture();
   try {
-    const pluginDir = path.join(fixture.gameDir, "BepInEx", "Plugins");
+    const pluginDir = getPluginInstallDirectory(fixture.gameDir);
     fs.mkdirSync(pluginDir, { recursive: true });
     fs.writeFileSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0].slice(0, -4)}.dl_`), "disabled");
 
@@ -71,7 +76,7 @@ test("a disabled plugin counts as installed without being re-enabled", () => {
 test("a legacy disabled plugin is still treated as installed", () => {
   const fixture = createPluginFixture();
   try {
-    const pluginDir = path.join(fixture.gameDir, "BepInEx", "Plugins");
+    const pluginDir = getPluginInstallDirectory(fixture.gameDir);
     fs.mkdirSync(pluginDir, { recursive: true });
     fs.writeFileSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0]}.disabled`), "legacy");
 

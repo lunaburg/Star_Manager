@@ -633,10 +633,18 @@ const CARD_LOAD_OPTIONS = [
   { key: "accessory", label: "装饰", description: "配饰栏位；不会改变衣服" },
   { key: "parameter", label: "人物设定", description: "姓名、性格、生日、声线等参数" }
 ];
+const CARD_LOAD_POLL_INTERVAL_MS = 250;
+const CARD_LOAD_EDITOR_MAX_WAIT_MS = 20_000;
+const CARD_LOAD_HSCENE_MAX_WAIT_MS = 130_000;
 const cardLoadPrompt = reactive({
   open: false,
   busy: false,
+  contextLoading: false,
   error: "",
+  target: "editor",
+  targetSex: null,
+  targetCharacterIndex: null,
+  targetCharacterId: null,
   selected: CARD_LOAD_OPTIONS.map((option) => option.key)
 });
 const cardLoadNotice = reactive({ type: "", message: "" });
@@ -1298,6 +1306,7 @@ watch([
 });
 let currentGameStatePollTimer = null;
 let currentGameStateRequestSeq = 0;
+let cardLoadPromptContextRequestSeq = 0;
 const selectedMod = ref(null);
 const workbenchTemplateSelection = reactive({
   active: false,
@@ -2858,8 +2867,8 @@ function databaseTaskHint(task) {
 
 function taskSummary(task) {
   if (task.task_type === "export_character_dependency_package") {
-    const archive = task.data?.compressed ? "压缩包" : "文件夹";
-    return `已生成${archive}，包含 ${task.data?.exported_zipmod_count ?? 0} 个 zipmod`;
+    const archive = task.data?.compressed ? "ZIP 包" : "文件夹";
+    return `${archive}已生成，包含 ${task.data?.exported_zipmod_count ?? 0} 个 zipmod`;
   }
   if (task.task_type === "extract_mods") {
     const count = task.data?.card_paths?.length ?? task.data?.card_count ?? selectedCount.value;
@@ -4471,8 +4480,15 @@ async function applyItemToGame(item, { accessorySlotNo = null, hairSlotNo = null
     itemGameApply.commandId = commandId;
     itemGameApply.status = String(accepted.status || "queued");
 
-    for (let attempt = 0; attempt < 70; attempt += 1) {
-      await sleep(attempt === 0 ? 80 : 250);
+    const hSceneLoad = cardLoadPrompt.target === "hscene";
+    const maxWaitMs = hSceneLoad
+      ? CARD_LOAD_HSCENE_MAX_WAIT_MS
+      : CARD_LOAD_EDITOR_MAX_WAIT_MS;
+    const deadline = Date.now() + maxWaitMs;
+    let firstPoll = true;
+    while (Date.now() < deadline) {
+      await sleep(firstPoll ? 80 : CARD_LOAD_POLL_INTERVAL_MS);
+      firstPoll = false;
       const polled = await request(`/game-item-probe/command?id=${encodeURIComponent(commandId)}`);
       if (!polled?.ok) throw new Error(formatGameItemProbeError(polled));
       const command = polled.data || {};
@@ -8538,6 +8554,76 @@ function buildDependencyRemoteSummary(dependencies) {
 const cardDependencyRemoteSummary = computed(() => (
   buildDependencyRemoteSummary(selectedCardDependencies.value)
 ));
+
+function characterCardSex(card = selectedCardDetail.value) {
+  const firstPart = String(card?.relativePath || "").split(/[\\/]/)[0].toLowerCase();
+  return firstPart === "female" ? 1 : firstPart === "male" ? 0 : null;
+}
+
+const cardLoadTargetOptions = computed(() => {
+  const cardSex = characterCardSex();
+  if (assemblyContext.scene === "hscene") {
+    const roles = cardSex === 1
+      ? assemblyContext.hscene.females
+      : cardSex === 0
+        ? assemblyContext.hscene.males
+        : [];
+    return roles.map((character) => ({
+      key: `hscene-${character.sex}-${character.characterIndex}-${character.characterId}`,
+      target: "hscene",
+      character,
+      name: character.characterName || `${character.sex === 1 ? "女性" : "男性"}角色 ${character.characterIndex + 1}`,
+      meta: `${character.sex === 1 ? "女性" : "男性"} · 角色 ${character.characterIndex + 1}`
+    }));
+  }
+  if (assemblyContext.editor?.available && (cardSex === null || Number(assemblyContext.editor.sex) === cardSex)) {
+    return [{
+      key: "editor",
+      target: "editor",
+      character: assemblyContext.editor,
+      name: assemblyContext.editor.characterName || "角色编辑器角色",
+      meta: `角色编辑器 · ${assemblySexLabel(assemblyContext.editor.sex)}`
+    }];
+  }
+  return [];
+});
+
+function selectDefaultCardLoadTarget() {
+  const options = cardLoadTargetOptions.value;
+  const selected = options.find((option) => (
+    option.target === "hscene"
+      && assemblyCharacterTarget.target === "hscene"
+      && option.character?.sex === assemblyCharacterTarget.sex
+      && option.character?.characterIndex === assemblyCharacterTarget.characterIndex
+      && option.character?.characterId === assemblyCharacterTarget.characterId
+  )) || options[0];
+  if (!selected) {
+    Object.assign(cardLoadPrompt, {
+      target: assemblyContext.scene === "hscene" ? "hscene" : "editor",
+      targetSex: null,
+      targetCharacterIndex: null,
+      targetCharacterId: null
+    });
+    return;
+  }
+  Object.assign(cardLoadPrompt, {
+    target: selected.target,
+    targetSex: selected.character?.sex ?? null,
+    targetCharacterIndex: selected.character?.characterIndex ?? null,
+    targetCharacterId: selected.character?.characterId ?? null
+  });
+}
+
+function selectCardLoadTarget(option) {
+  if (cardLoadPrompt.busy || cardLoadPrompt.contextLoading || !option) return;
+  Object.assign(cardLoadPrompt, {
+    target: option.target,
+    targetSex: option.character?.sex ?? null,
+    targetCharacterIndex: option.character?.characterIndex ?? null,
+    targetCharacterId: option.character?.characterId ?? null,
+    error: ""
+  });
+}
 const clothesDependencyRemoteSummary = computed(() => (
   buildDependencyRemoteSummary(selectedClothesCard.value?.dependencies)
 ));
@@ -8819,11 +8905,35 @@ function openCardLoadPrompt() {
   cardLoadPrompt.error = "";
   cardLoadNotice.type = "";
   cardLoadNotice.message = "";
+  const requestSeq = ++cardLoadPromptContextRequestSeq;
+  cardLoadPrompt.contextLoading = true;
   cardLoadPrompt.open = true;
+  selectDefaultCardLoadTarget();
+  void refreshAssemblyContext({ silent: true })
+    .then(() => {
+      if (requestSeq !== cardLoadPromptContextRequestSeq) return;
+      selectDefaultCardLoadTarget();
+      if (assemblyContext.scene === "hscene") {
+        cardLoadPrompt.selected = CARD_LOAD_OPTIONS.map((option) => option.key);
+      }
+    })
+    .catch((error) => {
+      if (requestSeq !== cardLoadPromptContextRequestSeq) return;
+      log(`[Game Context Error] ${error instanceof Error ? error.message : String(error)}`);
+    })
+    .finally(() => {
+      if (requestSeq === cardLoadPromptContextRequestSeq) {
+        cardLoadPrompt.contextLoading = false;
+      }
+    });
 }
 
 function toggleCardLoadOption(key) {
-  if (cardLoadPrompt.busy || !CARD_LOAD_OPTIONS.some((option) => option.key === key)) return;
+  if (cardLoadPrompt.busy || cardLoadPrompt.contextLoading || !CARD_LOAD_OPTIONS.some((option) => option.key === key)) return;
+  if (cardLoadPrompt.target === "hscene") {
+    cardLoadPrompt.error = "H 场景读取必须完整读取人物卡，不能拆分卡片区块。";
+    return;
+  }
   const selected = new Set(cardLoadPrompt.selected);
   if (selected.has(key)) selected.delete(key);
   else selected.add(key);
@@ -8838,7 +8948,11 @@ function toggleCardLoadOption(key) {
 
 async function loadSelectedCardToGame() {
   const card = selectedCardDetail.value;
-  if (!card?.relativePath || cardLoadPrompt.busy) return;
+  if (!card?.relativePath || cardLoadPrompt.busy || cardLoadPrompt.contextLoading) return;
+  if (cardLoadPrompt.target === "hscene" && cardLoadPrompt.selected.length !== CARD_LOAD_OPTIONS.length) {
+    cardLoadPrompt.error = "H 场景读取必须完整读取人物卡。";
+    return;
+  }
   if (!cardLoadPrompt.selected.length) {
     cardLoadPrompt.error = "请至少选择一项人物卡内容。";
     return;
@@ -8852,8 +8966,14 @@ async function loadSelectedCardToGame() {
 
   const body = {
     game_dir: paths.gameDir,
-    path: card.relativePath
+    path: card.relativePath,
+    target: cardLoadPrompt.target
   };
+  if (cardLoadPrompt.target === "hscene") {
+    body.sex = cardLoadPrompt.targetSex;
+    body.characterIndex = cardLoadPrompt.targetCharacterIndex;
+    body.targetCharacterId = cardLoadPrompt.targetCharacterId;
+  }
   for (const option of CARD_LOAD_OPTIONS) {
     body[option.key] = cardLoadPrompt.selected.includes(option.key);
   }
@@ -8874,23 +8994,37 @@ async function loadSelectedCardToGame() {
       throw new Error(formatGameItemProbeError(accepted));
     }
 
-    for (let attempt = 0; attempt < 70; attempt += 1) {
-      await sleep(attempt === 0 ? 80 : 250);
+    const hSceneLoad = cardLoadPrompt.target === "hscene";
+    const maxWaitMs = hSceneLoad
+      ? CARD_LOAD_HSCENE_MAX_WAIT_MS
+      : CARD_LOAD_EDITOR_MAX_WAIT_MS;
+    const deadline = Date.now() + maxWaitMs;
+    let firstPoll = true;
+    while (Date.now() < deadline) {
+      await sleep(firstPoll ? 80 : CARD_LOAD_POLL_INTERVAL_MS);
+      firstPoll = false;
       const polled = await request(`/game-item-probe/command?id=${encodeURIComponent(commandId)}`);
       if (!polled?.ok) throw new Error(formatGameItemProbeError(polled));
       const command = polled.data || {};
       if (command.status === "succeeded") {
         cardLoadPrompt.open = false;
         cardLoadNotice.type = "success";
-        cardLoadNotice.message = `已将人物卡「${card.name}」的所选内容读取到当前角色。`;
-        log(`[Game] 已读取人物卡：${card.relativePath}（${cardLoadPrompt.selected.join(", ")}）`);
+        cardLoadNotice.message = cardLoadPrompt.target === "hscene"
+          ? `已将人物卡「${card.name}」读取到 H 场景，场景控制器正在同步。`
+          : `已将人物卡「${card.name}」的所选内容读取到当前角色。`;
+        log(`[Game] 已读取人物卡：${card.relativePath}（target=${cardLoadPrompt.target}，${cardLoadPrompt.selected.join(", ")}${hSceneLoad ? "；H 场景控制器后台同步中" : ""}）`);
+        if (cardLoadPrompt.target === "hscene") void refreshAssemblyContext({ silent: true });
         return;
       }
       if (["failed", "expired"].includes(command.status)) {
         throw new Error(formatGameItemProbeError(command));
       }
     }
-    throw new Error("人物卡读取命令超过 15 秒未完成，请确认角色制作器仍处于打开状态。");
+    throw new Error(
+      hSceneLoad
+        ? "H 场景人物卡读取命令超过 130 秒未完成，请确认游戏仍处于 H 场景。"
+        : "人物卡读取命令超过 20 秒未完成，请确认角色制作器仍处于打开状态。"
+    );
   } catch (error) {
     cardLoadPrompt.error = error instanceof Error ? error.message : String(error);
     cardLoadNotice.type = "error";
@@ -9107,7 +9241,7 @@ async function exportSelectedCardPortablePackage() {
           ? `，${missingCount} 个依赖缺失，${failureCount} 个文件复制失败`
           : "";
         portablePackageNotice.type = missingCount || failureCount ? "warning" : "success";
-        portablePackageNotice.message = `已生成${task.data?.compressed ? "压缩包" : "便携文件夹"}，包含 ${task.data?.exported_zipmod_count || 0} 个 zipmod 和 ${task.data?.exported_unity3d_count || 0} 个外部 Unity3D${issueHint}`;
+        portablePackageNotice.message = `${task.data?.compressed ? "ZIP 包" : "便携文件夹"}已生成，包含 ${task.data?.exported_zipmod_count || 0} 个 zipmod 和 ${task.data?.exported_unity3d_count || 0} 个外部 Unity3D${issueHint}`;
         portablePackageNotice.path = task.data?.target_path || "";
         log(`[Cards] 便携依赖包已生成: ${portablePackageNotice.path}`);
       }
@@ -9565,7 +9699,9 @@ const appCtx = reactive({
   CARD_LOAD_OPTIONS,
   cardLoadPrompt,
   cardLoadNotice,
+  cardLoadTargetOptions,
   openCardLoadPrompt,
+  selectCardLoadTarget,
   toggleCardLoadOption,
   loadSelectedCardToGame,
   exitCardBulkMode,
@@ -10413,7 +10549,7 @@ watch(backendStatus, (status, previousStatus) => {
             <label class="portable-compress-option">
               <input v-model="portablePackagePrompt.compress" type="checkbox">
               <span>
-                <strong>压缩为 ZIP</strong>
+                <strong>打包为 ZIP</strong>
                 <small>{{ portablePackagePrompt.compress ? '生成便于分享的单个文件' : '生成可直接浏览的文件夹' }}</small>
               </span>
             </label>

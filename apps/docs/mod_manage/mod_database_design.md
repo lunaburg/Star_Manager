@@ -638,11 +638,11 @@ Summary priority is `error` > `missing` > `not_in_mod` > `in_mod` > empty. An ex
 
 **问题背景**：部分发型模组（例如 Sakuraba 风格的 CSV）除了 `MainAB` 主 Mesh 包，还通过 `TexAB` 引用外部贴图 Unity3D 包。实际资源中，`TexAB` 可能只是公共头发资源、兼容占位包或由 `MainAB` 自带纹理替代；把所有缺失 `TexAB` 都判为错误会把仍能正常显示的发型模组误报为异常。
 
-**解决方案**：CSV 解析器继续保存 `TexAB` 引用，但状态判定将缺失 `TexAB` 视为可选依赖；资源检查按“当前 zipmod → 游戏目录 → 其它 zipmod”三步执行。位于游戏公共 `abdata/chara/00`–`60` 目录的外部 `MainAB` 与 `TexAB` 不产生异常；其它游戏目录位置的外部资源和其它 zipmod 提供的资源统一标记为 `not_in_mod`，再用 `unity3d_source` 区分是否需要补入。`MainAB` 仍按必需主资源处理，但公共目录中的本体资源视为正常。
+**解决方案**：CSV 解析器继续保存 `TexAB` 引用，但状态判定将缺失 `TexAB` 视为可选依赖；资源检查按“当前 zipmod → 游戏目录 → 其它 zipmod”三步执行。位于游戏公共 `abdata/chara/00`–`60` 目录的外部 `MainAB` 与 `TexAB` 不产生异常；即使公共路径的实际文件由其它 zipmod 提供，也按共享资源处理，不把模组标成警告。其它游戏目录位置的外部资源和其它 zipmod 提供的非公共路径资源统一标记为 `not_in_mod`，再用 `unity3d_source` 区分是否需要补入。`MainAB` 仍按必需主资源处理，但公共目录中的本体资源视为正常。
 
 批量补入任务会按诊断结果处理仅存在于游戏 `abdata` 且不在公共 `chara/00`–`60` 范围内的 `MainAB` 或 `TexAB`；同一个外部资源源文件被多个选中 zipmod 共用时，会分别复制到各 zipmod，并保留游戏目录中的源文件。
 
-**验证结果**：回归测试覆盖 `TexAB` 字段解析、缺失 `TexAB` 不产生错误、公共 `chara/60` 路径豁免、公共目录外游戏资源的 `not_in_mod/game_abdata` 状态，以及其它 zipmod 提供资源的 `not_in_mod/other_zipmod` 状态和提供者展示。
+**验证结果**：回归测试覆盖 `TexAB` 字段解析、缺失 `TexAB` 不产生错误、公共 `chara/60` 路径豁免、公共目录由其它 zipmod 提供时仍按正常处理、公共目录外游戏资源的 `not_in_mod/game_abdata` 状态，以及其它 zipmod 提供资源的 `not_in_mod/other_zipmod` 状态和提供者展示。
 
 **适用边界**：当前只把字段值以 `.unity3d` 结尾的 `TexAB` 作为外部贴图引用；缺失 `TexAB` 不作为错误，公共目录范围仅按 `chara/00`–`chara/60` 的目录名识别，且该范围对 `MainAB` 和 `TexAB` 均适用。`ThumbAB` 仍属于缩略图依赖，只有与 `MainAB` 共用且主资源不可读时才升级为主 Unity3D 错误。扫描仍按 CSV 引用定位，不会把 mod 内未被引用的孤立 `.unity3d` 自动计入。
 

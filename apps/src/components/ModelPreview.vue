@@ -79,6 +79,20 @@ function disposeModelObject(object) {
   });
 }
 
+function configurePreviewMaterials(object) {
+  if (!object || !threeApi) return;
+  object.traverse?.((child) => {
+    if (!child.isMesh) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.filter(Boolean).forEach((material) => {
+      // Clothing and accessory meshes are often authored as thin surfaces.
+      // Keep both winding directions visible in the interactive preview.
+      material.side = threeApi.DoubleSide;
+      material.needsUpdate = true;
+    });
+  });
+}
+
 function handleExpandedKeydown(event) {
   if (event.key === "Escape") setExpanded(false);
 }
@@ -388,10 +402,8 @@ function prepareWorkbenchModelVisibility(object, url) {
       material.polygonOffsetFactor = -1;
       material.polygonOffsetUnits = -1;
       material.visible = true;
-      // Workbench clothing is an outward-facing surface.  Rendering both
-      // sides makes reversed/overlapping faces appear as triangular z-fighting
-      // patterns, so discard back-facing polygons in the preview.
-      material.side = threeApi?.FrontSide ?? material.side;
+      // Keep both sides visible for thin or reversed clothing surfaces.
+      material.side = threeApi?.DoubleSide ?? material.side;
       if (!material.alphaMap) material.alphaTest = 0;
       material.blending = threeApi?.NormalBlending ?? material.blending;
       // Some Sims 4 FBX exporters leave an alpha flag on an otherwise opaque
@@ -549,6 +561,7 @@ async function renderModel(url, generation = previewGeneration) {
   applyBackground();
   applyLighting();
   clothingObject = modelObject;
+  configurePreviewMaterials(clothingObject);
   // The Workbench exporter writes TS4 GEOM coordinates in the source game's
   // unit scale.  HS2's reference body is centimeters, so an exported FBX is
   // intentionally one tenth of the mannequin until it is displayed here.
@@ -566,6 +579,7 @@ async function renderModel(url, generation = previewGeneration) {
   scene.add(clothingObject);
   if (loadedMannequin) {
     mannequinObject = loadedMannequin;
+    configurePreviewMaterials(mannequinObject);
     mannequinObject.name = "StarManagerMannequin";
     mannequinObject.visible = mannequinVisible.value;
     scene.add(mannequinObject);

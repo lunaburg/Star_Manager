@@ -8,9 +8,9 @@
     <Deterministic>true</Deterministic>
     <AssemblyName>StarManager.GameItemProbe</AssemblyName>
     <RootNamespace>StarManager.GameItemProbe</RootNamespace>
-    <Version>0.9.0</Version>
-    <AssemblyVersion>0.9.0.0</AssemblyVersion>
-    <FileVersion>0.9.0.0</FileVersion>
+    <Version>0.9.3</Version>
+    <AssemblyVersion>0.9.3.0</AssemblyVersion>
+    <FileVersion>0.9.3.0</FileVersion>
     <GameDir Condition="'$(GameDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\test\hs2</GameDir>
   </PropertyGroup>
 

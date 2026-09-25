@@ -310,7 +310,7 @@ launchGameExecutable("game | studio | vr", gameDir)
 ### Star Manager 插件自动安装（2026-09-15）
 
 - **背景**：人物卡读取、运行时换装和读取审计依赖 `StarManager.CardMetadata`、`StarManager.GameItemProbe` 和 `StarManager.CharacterCardReadProbe` 三个 BepInEx 插件；更换游戏目录后，用户不应再手动复制插件。
-- **解决方案**：发行包将三个 DLL 放在 `resources/StarManager/`。Electron 主进程在选择游戏目录以及启动时恢复已保存目录后，检查 `BepInEx/Plugins/`；缺失的同名 DLL 通过管理器原子复制安装，已有 DLL、`.dll.dl_` 和历史 `.dll.disabled` 文件不覆盖、不重新启用。
+- **解决方案**：发行包将三个 DLL 放在 `resources/StarManager/`。Electron 主进程在选择游戏目录以及启动时恢复已保存目录后，检查 `BepInEx/Plugins/StarManager/`；缺失的同名 DLL 通过管理器原子复制安装，已有 DLL、`.dll.dl_` 和历史 `.dll.disabled` 文件不覆盖、不重新启用。
 - **验证结果**：插件安装逻辑通过 Electron 单元测试；发行输入检查会在 `package:win` 前验证三个 DLL 均存在；前端生产构建与 `git diff --check` 作为交付检查。
 - **适用边界**：只安装这三个 Star Manager DLL，不负责安装 BepInEx 框架或其他第三方插件；目标目录必须是包含 `HoneySelect2.exe` 的 HS2 根目录，文件权限不足时会保留目录选择并将错误写入运行日志。
 

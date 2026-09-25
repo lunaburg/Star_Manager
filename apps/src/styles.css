@@ -11636,6 +11636,79 @@ body.model-preview-expanded { overflow: hidden; }
   white-space: nowrap;
 }
 
+.card-load-destination {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #cfd8e2;
+  background: #f7fbff;
+}
+
+.card-load-destination-head {
+  display: grid;
+  gap: 3px;
+}
+
+.card-load-destination-head small,
+.card-load-destination-option small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.card-load-destination-list {
+  display: grid;
+  gap: 6px;
+}
+
+.card-load-destination-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 54px;
+  padding: 8px 9px;
+  border: 1px solid #d5dce5;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+  box-shadow: none;
+}
+
+.card-load-destination-option > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.card-load-destination-option.selected {
+  border-color: #8a6cc2;
+  background: #f2ecff;
+}
+
+.card-load-destination-radio {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #a8aeba;
+  border-radius: 50%;
+}
+
+.card-load-destination-option.selected .card-load-destination-radio {
+  border-color: #7653ae;
+  box-shadow: inset 0 0 0 3px #f2ecff;
+  background: #7653ae;
+}
+
+.card-load-destination-empty,
+.card-load-hscene-warning {
+  padding: 8px 9px;
+  color: #795b21;
+  background: #fff8e8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .card-load-option {
   display: grid;
   grid-template-columns: 25px minmax(0, 1fr);

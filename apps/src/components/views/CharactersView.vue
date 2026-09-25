@@ -1246,6 +1246,36 @@ const cardModeMeta = computed(() => {
                   <strong>{{ ctx.selectedCardDetail.name }}</strong>
                 </span>
               </div>
+              <div class="card-load-destination">
+                <div class="card-load-destination-head">
+                  <strong>读取目标</strong>
+                  <small v-if="ctx.cardLoadPrompt.contextLoading">正在同步游戏角色列表…</small>
+                  <small v-else-if="ctx.cardLoadPrompt.target === 'hscene'">H 场景将完整读取人物卡，并在读取后重绑定场景控制器</small>
+                  <small v-else>选择角色编辑器或 H 场景中的目标角色</small>
+                </div>
+                <div v-if="ctx.cardLoadPrompt.contextLoading" class="card-load-destination-empty">正在同步游戏角色列表，请稍候…</div>
+                <div v-else-if="ctx.cardLoadTargetOptions.length" class="card-load-destination-list">
+                  <button
+                    v-for="option in ctx.cardLoadTargetOptions"
+                    :key="option.key"
+                    type="button"
+                    class="card-load-destination-option"
+                    :class="{ selected: ctx.cardLoadPrompt.target === option.target && (option.target !== 'hscene' || (ctx.cardLoadPrompt.targetSex === option.character?.sex && ctx.cardLoadPrompt.targetCharacterIndex === option.character?.characterIndex && ctx.cardLoadPrompt.targetCharacterId === option.character?.characterId)) }"
+                    :disabled="ctx.cardLoadPrompt.busy || ctx.cardLoadPrompt.contextLoading"
+                    @click="ctx.selectCardLoadTarget(option)"
+                  >
+                    <span class="card-load-destination-radio" aria-hidden="true"></span>
+                    <span>
+                      <strong>{{ option.name }}</strong>
+                      <small>{{ option.meta }}</small>
+                    </span>
+                  </button>
+                </div>
+                <div v-else class="card-load-destination-empty">当前场景没有与人物卡性别匹配的可用角色。</div>
+              </div>
+              <div v-if="ctx.cardLoadPrompt.target === 'hscene' && !ctx.cardLoadPrompt.contextLoading" class="card-load-hscene-warning">
+                H 场景读取会覆盖目标角色的完整人物卡内容（包括衣服、配饰和人物设定），然后重新绑定 H 场景运行时引用。
+              </div>
               <div class="card-load-option-list two-column-grid">
                 <button
                   v-for="option in ctx.CARD_LOAD_OPTIONS"
@@ -1253,7 +1283,7 @@ const cardModeMeta = computed(() => {
                   type="button"
                   class="card-load-option"
                   :class="{ selected: ctx.cardLoadPrompt.selected.includes(option.key) }"
-                  :disabled="ctx.cardLoadPrompt.busy"
+                  :disabled="ctx.cardLoadPrompt.busy || ctx.cardLoadPrompt.contextLoading || ctx.cardLoadPrompt.target === 'hscene'"
                   :aria-pressed="ctx.cardLoadPrompt.selected.includes(option.key)"
                   @click="ctx.toggleCardLoadOption(option.key)"
                 >
@@ -1269,7 +1299,7 @@ const cardModeMeta = computed(() => {
               <div v-if="ctx.cardLoadPrompt.error" class="prompt-error" role="alert">{{ ctx.cardLoadPrompt.error }}</div>
               <div class="prompt-actions">
                 <button type="button" :disabled="ctx.cardLoadPrompt.busy" @click="ctx.cardLoadPrompt.open = false">取消</button>
-                <button class="primary" type="button" :disabled="ctx.cardLoadPrompt.busy || !ctx.cardLoadPrompt.selected.length" @click="ctx.loadSelectedCardToGame">
+                <button class="primary" type="button" :disabled="ctx.cardLoadPrompt.busy || ctx.cardLoadPrompt.contextLoading || !ctx.cardLoadPrompt.selected.length || (ctx.cardLoadPrompt.target === 'hscene' && !ctx.cardLoadTargetOptions.length)" @click="ctx.loadSelectedCardToGame">
                   {{ ctx.cardLoadPrompt.busy ? '读取中...' : '读取到游戏' }}
                 </button>
               </div>

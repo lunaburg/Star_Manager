@@ -26,7 +26,7 @@ namespace StarManager.GameItemProbe
     {
         public const string PluginGuid = "star.manager.gameitemprobe";
         public const string PluginName = "Star Manager Game Item Probe";
-        public const string PluginVersion = "0.9.0";
+        public const string PluginVersion = "0.9.3";
         private const float MinimumCurrentPollSeconds = 1f;
 
         private ConfigEntry<int> port;
@@ -346,6 +346,15 @@ namespace StarManager.GameItemProbe
         {
             object customBase = GetSingletonInstance(typeof(CharaCustom.CustomBase));
             return GetPropertyValue(customBase, "chaCtrl") as ChaControl;
+        }
+
+        internal static void SetCharacterActive(ChaControl character, bool active)
+        {
+            if (character == null || character.gameObject == null)
+            {
+                return;
+            }
+            character.gameObject.SetActive(active);
         }
 
         internal static ContextState BuildContext(
@@ -2160,53 +2169,72 @@ namespace StarManager.GameItemProbe
             ApplyResult result = null;
             Exception failure = null;
             float startedAt = Time.realtimeSinceStartup;
-            while (deferred != null && deferred.Routine != null)
+            try
             {
-                float timeoutSeconds = deferred.TimeoutSeconds > 0f
-                    ? deferred.TimeoutSeconds
-                    : DeferredCommandTimeoutSeconds;
-                if (Time.realtimeSinceStartup - startedAt > timeoutSeconds)
+                while (deferred != null && deferred.Routine != null)
                 {
-                    failure = new TimeoutException(
-                        $"The deferred game item command exceeded its {timeoutSeconds:0.#} second timeout."
-                    );
-                    break;
+                    float timeoutSeconds = deferred.TimeoutSeconds > 0f
+                        ? deferred.TimeoutSeconds
+                        : DeferredCommandTimeoutSeconds;
+                    if (Time.realtimeSinceStartup - startedAt > timeoutSeconds)
+                    {
+                        failure = new TimeoutException(
+                            $"The deferred game item command exceeded its {timeoutSeconds:0.#} second timeout."
+                        );
+                        break;
+                    }
+
+                    bool hasNext;
+                    object current = null;
+                    try
+                    {
+                        hasNext = deferred.Routine.MoveNext();
+                        if (hasNext)
+                        {
+                            current = deferred.Routine.Current;
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        hasNext = false;
+                        failure = exception;
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+                    yield return current;
                 }
 
-                bool hasNext;
-                object current = null;
-                try
+                if (failure == null)
                 {
-                    hasNext = deferred.Routine.MoveNext();
-                    if (hasNext)
+                    try
                     {
-                        current = deferred.Routine.Current;
+                        result = deferred == null || deferred.Completed == null
+                            ? ApplyResult.Success(null)
+                            : deferred.Completed();
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = exception;
                     }
                 }
-                catch (Exception exception)
-                {
-                    hasNext = false;
-                    failure = exception;
-                }
-
-                if (!hasNext)
-                {
-                    break;
-                }
-                yield return current;
             }
-
-            if (failure == null)
+            finally
             {
-                try
+                if (failure != null && deferred?.Routine is IDisposable disposable)
                 {
-                    result = deferred == null || deferred.Completed == null
-                        ? ApplyResult.Success(null)
-                        : deferred.Completed();
-                }
-                catch (Exception exception)
-                {
-                    failure = exception;
+                    try
+                    {
+                        disposable.Dispose();
+                    }
+                    catch (Exception disposeException)
+                    {
+                        logger.LogWarning(
+                            $"Could not dispose deferred game item command {command.CommandId}: {disposeException.Message}"
+                        );
+                    }
                 }
             }
 
@@ -2297,13 +2325,7 @@ namespace StarManager.GameItemProbe
             type = type.Trim().ToLowerInvariant();
             if (type == "card")
             {
-                if (target != "editor")
-                {
-                    errorCode = "invalid_target";
-                    error = "Character-card loading is only supported for the editor target.";
-                    return false;
-                }
-                return TryParseCard(values, out command, out errorCode, out error);
+                return TryParseCard(values, target, out command, out errorCode, out error);
             }
 
             if (type != "clothes" && type != "hair" && type != "face" && type != "body" && type != "accessory")
@@ -2508,6 +2530,7 @@ namespace StarManager.GameItemProbe
 
         private static bool TryParseCard(
             Dictionary<string, string> values,
+            string target,
             out ApplyCommand command,
             out string errorCode,
             out string error
@@ -2550,10 +2573,66 @@ namespace StarManager.GameItemProbe
                 return false;
             }
 
+            int? targetSex = null;
+            int? targetCharacterIndex = null;
+            int? targetCharacterId = null;
+            if (target == "hscene")
+            {
+                int parsedSex;
+                if (!TryGetInt(values, "sex", out parsedSex)
+                    || (parsedSex != 0 && parsedSex != 1))
+                {
+                    errorCode = "invalid_target_sex";
+                    error = "sex must be 0 (male) or 1 (female) for the hscene target.";
+                    return false;
+                }
+                targetSex = parsedSex;
+
+                int parsedIndex;
+                if (TryGetInt(values, "characterIndex", out parsedIndex))
+                {
+                    if (parsedIndex < 0)
+                    {
+                        errorCode = "invalid_character_index";
+                        error = "characterIndex must not be negative.";
+                        return false;
+                    }
+                    targetCharacterIndex = parsedIndex;
+                }
+
+                int parsedId;
+                if (TryGetInt(values, "targetCharacterId", out parsedId))
+                {
+                    if (parsedId < 0)
+                    {
+                        errorCode = "invalid_character_id";
+                        error = "targetCharacterId must not be negative.";
+                        return false;
+                    }
+                    targetCharacterId = parsedId;
+                }
+
+                if (!targetCharacterIndex.HasValue && !targetCharacterId.HasValue)
+                {
+                    errorCode = "invalid_target";
+                    error = "characterIndex or targetCharacterId is required for the hscene target.";
+                    return false;
+                }
+                if (!face || !body || !hair || !parameter || !clothes || !accessory)
+                {
+                    errorCode = "invalid_card_selection";
+                    error = "HScene character-card loading requires every card section.";
+                    return false;
+                }
+            }
+
             command = new ApplyCommand
             {
                 Type = "card",
-                Target = "editor",
+                Target = target,
+                TargetSex = targetSex,
+                TargetCharacterIndex = targetCharacterIndex,
+                TargetCharacterId = targetCharacterId,
                 CardPath = path.Trim(),
                 CardFace = face,
                 CardBody = body,
@@ -2603,6 +2682,12 @@ namespace StarManager.GameItemProbe
 
     internal static class GameItemCommandExecutor
     {
+        // A full H-scene card reload can synchronously spend tens of seconds
+        // in ChaControl.Reload while Sideloader and other character
+        // controllers resolve assets. The normal deferred-command timeout is
+        // intended for single-item updates and is too short for this path.
+        private const float HSceneCardTimeoutSeconds = 120f;
+
         internal static ApplyResult Execute(ApplyCommand command, ManualLogSource logger)
         {
             bool hSceneTarget = string.Equals(
@@ -2635,21 +2720,18 @@ namespace StarManager.GameItemProbe
             if (character == null)
             {
                 return ApplyResult.Failure(
-                    "not_in_editor",
-                    "CharaCustom.CustomBase.chaCtrl is not available. Enter the character maker first."
+                    hSceneTarget ? "not_in_hscene" : "not_in_editor",
+                    hSceneTarget
+                        ? "The requested HScene character is not available. Enter an H scene first."
+                        : "CharaCustom.CustomBase.chaCtrl is not available. Enter the character maker first."
                 );
             }
 
             if (string.Equals(command.Type, "card", StringComparison.OrdinalIgnoreCase))
             {
-                if (hSceneTarget)
-                {
-                    return ApplyResult.Failure(
-                        "invalid_target",
-                        "Character-card loading is only supported for the editor target."
-                    );
-                }
-                return LoadCharacterCard(command, character, logger);
+                return hSceneTarget
+                    ? LoadCharacterCardIntoHScene(command, character, logger)
+                    : LoadCharacterCard(command, character, logger);
             }
 
             if (!command.CategoryNo.HasValue)
@@ -3323,6 +3405,133 @@ namespace StarManager.GameItemProbe
             }
         }
 
+        private static ApplyResult LoadCharacterCardIntoHScene(
+            ApplyCommand command,
+            ChaControl character,
+            ManualLogSource logger
+        )
+        {
+            string cardPath;
+            int cardSex;
+            ApplyResult pathError;
+            if (!TryResolveCharacterCardPath(
+                command.CardPath,
+                out cardPath,
+                out cardSex,
+                out pathError
+            ))
+            {
+                return pathError;
+            }
+
+            if (!command.TargetSex.HasValue || cardSex != command.TargetSex.Value)
+            {
+                return ApplyResult.Failure(
+                    "card_sex_mismatch",
+                    $"The card is for sex {cardSex}, but the HScene target is sex {command.TargetSex.GetValueOrDefault(-1)}."
+                );
+            }
+            if (character.sex != cardSex)
+            {
+                return ApplyResult.Failure(
+                    "card_sex_mismatch",
+                    $"The card is for sex {cardSex}, but the HScene character is sex {character.sex}."
+                );
+            }
+            if (character.chaFile == null)
+            {
+                return ApplyResult.Failure(
+                    "target_unavailable",
+                    "The selected HScene character data is not ready."
+                );
+            }
+            if (!command.CardFace
+                || !command.CardBody
+                || !command.CardHair
+                || !command.CardParameter
+                || !command.CardClothes
+                || !command.CardAccessory)
+            {
+                return ApplyResult.Failure(
+                    "invalid_card_selection",
+                    "HScene character-card loading requires every card section."
+                );
+            }
+
+            HScene hScene = GameItemSnapshotBuilder.FindHScene(logger);
+            if (hScene == null)
+            {
+                return ApplyResult.Failure(
+                    "not_in_hscene",
+                    "The active HScene instance is not available. Enter an H scene first."
+                );
+            }
+
+            return ApplyResult.Defer(
+                LoadHSceneCardRoutine(character, cardPath, cardSex),
+                delegate
+                {
+                    logger.LogInfo(
+                        $"Loaded character card {cardPath} into HScene character {character.chaID}; "
+                            + "native HScene card replacement completed; no extra HScene controller rebinding was scheduled."
+                    );
+                    return ApplyResult.Success(null);
+                },
+                delegate
+                {
+                    try
+                    {
+                        GameItemSnapshotBuilder.SetCharacterActive(character, true);
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.LogDebug($"Could not restore HScene character visibility: {exception.Message}");
+                    }
+                },
+                HSceneCardTimeoutSeconds
+            );
+        }
+
+        private static IEnumerator LoadHSceneCardRoutine(
+            ChaControl character,
+            string cardPath,
+            int cardSex
+        )
+        {
+            ChaFileControl target = character.chaFile;
+            bool previousSkipRangeCheck = target.skipRangeCheck;
+            bool customLoadGCClearChanged = false;
+            try
+            {
+                target.skipRangeCheck = true;
+                // HCharaSwitcher uses the complete ChaFileControl loader here.
+                // The status block is intentionally excluded so the active H
+                // scene state is not replaced by the card's saved game status.
+                target.LoadCharaFile(cardPath, (byte)cardSex, false, true);
+                character.ChangeNowCoordinate(false, true);
+
+                customLoadGCClearChanged =
+                    GameItemSnapshotBuilder.TrySetCustomLoadGCClear(false);
+                try
+                {
+                    character.Reload(false, false, false, false, true);
+                }
+                finally
+                {
+                    if (customLoadGCClearChanged)
+                    {
+                        GameItemSnapshotBuilder.TrySetCustomLoadGCClear(true);
+                    }
+                }
+
+            }
+            finally
+            {
+                target.skipRangeCheck = previousSkipRangeCheck;
+            }
+            yield break;
+        }
+
         private static ChaFile CloneCoordinate(ChaFile source)
         {
             var copy = new ChaFile();
@@ -3491,6 +3700,933 @@ namespace StarManager.GameItemProbe
             }
             localSlot = command.LocalSlot.Value;
             return true;
+        }
+    }
+
+    // HScene keeps several character-specific controller references outside
+    // ChaControl. A normal card load updates the ChaFile, but those references
+    // still point at the old character state. This rebinder intentionally uses
+    // reflection for optional HScene controllers: their field layout differs
+    // between HS2 updates and between H plugins, while the stable controller
+    // method names are the same ones used by HCharaSwitcher.
+    internal static class HSceneCardRebinder
+    {
+        private const BindingFlags InstanceFlags =
+            BindingFlags.Public
+                | BindingFlags.NonPublic
+                | BindingFlags.Instance
+                | BindingFlags.FlattenHierarchy;
+        private const BindingFlags StaticFlags =
+            BindingFlags.Public
+                | BindingFlags.NonPublic
+                | BindingFlags.Static
+                | BindingFlags.FlattenHierarchy;
+
+        private sealed class AnimationState
+        {
+            internal readonly List<AnimationFieldValue> Values = new List<AnimationFieldValue>();
+        }
+
+        private sealed class AnimationFieldValue
+        {
+            internal object Owner;
+            internal FieldInfo Field;
+            internal object Value;
+        }
+
+        internal static object CaptureAnimationState(HScene hScene)
+        {
+            var state = new AnimationState();
+            foreach (object controller in CollectSceneControllers(hScene))
+            {
+                if (controller == null || controller.GetType().Name != "HSceneFlagCtrl")
+                {
+                    continue;
+                }
+                for (Type current = controller.GetType(); current != null; current = current.BaseType)
+                {
+                    foreach (FieldInfo field in current.GetFields(InstanceFlags | BindingFlags.DeclaredOnly))
+                    {
+                        if (field.Name != "nowAnimationInfo"
+                            && field.Name != "selectAnimationListInfo"
+                            && field.Name != "_selectAnimationListInfo"
+                            && field.Name != "nowOrgasm"
+                            && field.Name != "isFaintness"
+                            && field.Name != "FaintnessType"
+                            && field.Name != "isFaintnessVoice")
+                        {
+                            continue;
+                        }
+                        try
+                        {
+                            state.Values.Add(
+                                new AnimationFieldValue
+                                {
+                                    Owner = controller,
+                                    Field = field,
+                                    Value = field.GetValue(controller),
+                                }
+                            );
+                        }
+                        catch (Exception)
+                        {
+                            // A third-party flag controller may expose a field
+                            // that is not readable during a transition.
+                        }
+                    }
+                }
+            }
+            return state;
+        }
+
+        internal static void RestoreAnimationState(HScene hScene, object animationState)
+        {
+            AnimationState state = animationState as AnimationState;
+            if (state == null)
+            {
+                return;
+            }
+            foreach (AnimationFieldValue value in state.Values)
+            {
+                try
+                {
+                    if (value.Owner != null && value.Field != null)
+                    {
+                        value.Field.SetValue(value.Owner, value.Value);
+                    }
+                }
+                catch (Exception)
+                {
+                    // The animation controller may have been replaced by the
+                    // native reload. The new controller is refreshed below.
+                }
+            }
+        }
+
+        internal static IEnumerator Rebind(HScene hScene, ManualLogSource logger)
+        {
+            if (hScene == null)
+            {
+                throw new InvalidOperationException("The active HScene disappeared during card loading.");
+            }
+
+            ChaControl[] females = hScene.GetFemales() ?? new ChaControl[0];
+            ChaControl[] males = hScene.GetMales() ?? new ChaControl[0];
+            object manager = GetSingleton(typeof(Manager.HSceneManager));
+            if (manager != null)
+            {
+                ChaControl player = males.FirstOrDefault(character => character != null);
+                TrySetMember(manager, "females", females);
+                TrySetMember(manager, "player", player);
+                TrySetMember(
+                    manager,
+                    "Personality",
+                    females.Select(ReadPersonality).ToArray()
+                );
+                if (!InvokeCompatible(manager, "SetFemaleState", females))
+                {
+                    logger?.LogWarning(
+                        "Could not invoke HSceneManager.SetFemaleState while rebinding the HScene card."
+                    );
+                }
+            }
+            else
+            {
+                logger?.LogWarning(
+                    "HSceneManager.Instance was unavailable while rebinding the HScene card."
+                );
+            }
+
+            var controllerBindings = new List<ControllerBinding>();
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlFemaleCollisionCtrls"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlMaleCollisionCtrls"),
+                males
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlHitObjectFemales"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlHitObjectMales"),
+                males
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlEyeNeckFemale"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlEyeNeckMale"),
+                males
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlDynamics"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlYures"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "ctrlYureMale"),
+                males
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "RootmotionOffsetF"),
+                females
+            );
+            AddControllerBindings(
+                controllerBindings,
+                GetMember(hScene, "RootmotionOffsetM"),
+                males
+            );
+            TrySetMember(hScene, "chaFemales", females);
+            TrySetMember(hScene, "chaMales", males);
+
+            object[] controllers = CollectSceneControllers(hScene);
+            foreach (object controller in controllers)
+            {
+                IEnumerator controllerWork = RebindController(
+                    controller,
+                    hScene,
+                    females,
+                    males,
+                    FindBoundCharacter(controller, controllerBindings),
+                    logger
+                );
+                if (controllerWork != null)
+                {
+                    yield return controllerWork;
+                }
+            }
+
+            RefreshSceneSprite(hScene, females, males, logger);
+            InvokeProcBaseAnimationParameter(logger);
+        }
+
+        private static object[] CollectSceneControllers(HScene hScene)
+        {
+            var result = new List<object>();
+            AddUnique(result, hScene);
+
+            try
+            {
+                Component[] components = hScene.GetComponentsInChildren<Component>(true);
+                if (components != null)
+                {
+                    foreach (Component component in components)
+                    {
+                        AddUnique(result, component);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // The field scan below still covers controllers not attached
+                // directly below the HScene root.
+            }
+
+            AddMemberObjects(result, hScene);
+            return result.ToArray();
+        }
+
+        private static void AddMemberObjects(List<object> result, object instance)
+        {
+            if (instance == null)
+            {
+                return;
+            }
+            for (Type current = instance.GetType(); current != null; current = current.BaseType)
+            {
+                FieldInfo[] fields = current.GetFields(InstanceFlags | BindingFlags.DeclaredOnly);
+                foreach (FieldInfo field in fields)
+                {
+                    object value;
+                    try
+                    {
+                        value = field.GetValue(instance);
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+                    AddUnique(result, value);
+                    IEnumerable values = value as IEnumerable;
+                    if (values == null || value is string)
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        foreach (object item in values)
+                        {
+                            AddUnique(result, item);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Optional controller collections may be mid-transition.
+                    }
+                }
+            }
+        }
+
+        private static void AddUnique(List<object> result, object value)
+        {
+            if (value == null || value is string)
+            {
+                return;
+            }
+            foreach (object existing in result)
+            {
+                if (ReferenceEquals(existing, value))
+                {
+                    return;
+                }
+            }
+            result.Add(value);
+        }
+
+        private static IEnumerator RebindController(
+            object controller,
+            HScene hScene,
+            ChaControl[] females,
+            ChaControl[] males,
+            ChaControl boundCharacter,
+            ManualLogSource logger
+        )
+        {
+            string name = controller?.GetType().Name ?? string.Empty;
+            IEnumerator deferredRoutine = null;
+            try
+            {
+                if (name == "CollisionCtrl")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    InvokeCompatible(
+                        controller,
+                        "Init",
+                        character,
+                        GetMember(character, "objHead"),
+                        GetMember(character, "objBody")
+                    );
+                }
+                else if (name == "HitObjectCtrl")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    deferredRoutine = InvokeCompatibleResult(
+                        controller,
+                        "HitObjInit",
+                        character == null ? 0 : character.sex,
+                        GetMember(character, "objBody"),
+                        character
+                    ) as IEnumerator;
+                }
+                else if (name == "H_Lookat_dan")
+                {
+                    InvokeCompatible(
+                        controller,
+                        "DankonInit",
+                        males.Length == 0 ? null : males[0],
+                        females
+                    );
+                }
+                else if (name == "YureCtrl")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    TrySetMember(controller, "chaFemale", character);
+                    TrySetMember(controller, "femaleID", character == null ? 0 : character.chaID);
+                    InvokeCompatible(controller, "Init");
+                }
+                else if (name == "YureCtrlMale")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    TrySetMember(controller, "chaMale", character);
+                    TrySetMember(controller, "MaleID", character == null ? 0 : character.chaID);
+                    InvokeCompatible(controller, "Init");
+                }
+                else if (name == "HMotionEyeNeckFemale")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    InvokeCompatible(
+                        controller,
+                        "Init",
+                        character,
+                        FindBoundIndex(controller, hScene, females, males),
+                        hScene
+                    );
+                }
+                else if (name == "HMotionEyeNeckMale")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    InvokeCompatible(
+                        controller,
+                        "Init",
+                        character,
+                        FindBoundIndex(controller, hScene, females, males)
+                    );
+                }
+                else if (name == "RootmotionOffset")
+                {
+                    TrySetMember(
+                        controller,
+                        "chara",
+                        boundCharacter ?? FindClosestCharacter(controller, females, males)
+                    );
+                }
+                else if (name == "ProcBase")
+                {
+                    TrySetMember(controller, "chaFemales", females);
+                    TrySetMember(controller, "chaMales", males);
+                    TrySetMember(controller, "ctrlFlag", GetMember(hScene, "ctrlFlag"));
+                    InvokeCompatible(controller, "setAnimationParamater");
+                }
+                else if (name == "HAutoCtrl")
+                {
+                    ChaControl character = females.FirstOrDefault(value => value != null);
+                    object manager = GetSingleton(typeof(Manager.HSceneManager));
+                    string assetPath = GetMember(manager, "strAssetHAutoListFolder") as string;
+                    int attribute = ReadIntMember(
+                        GetMember(character?.chaFile, "parameter2"),
+                        "hAttribute",
+                        0
+                    );
+                    InvokeCompatible(
+                        controller,
+                        "Load",
+                        assetPath ?? string.Empty,
+                        ReadPersonality(character),
+                        attribute
+                    );
+                }
+                else if (name == "DynamicBoneReferenceCtrl")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    InvokeCompatible(controller, "Init", character);
+                }
+                else if (name == "FeelHit")
+                {
+                    ChaControl character = boundCharacter
+                        ?? FindClosestCharacter(controller, females, males);
+                    int personality = ReadPersonality(character);
+                    InvokeCompatible(controller, "FeelHitInit", personality);
+                    InvokeCompatible(controller, "SetFeelCha", character);
+                }
+                else if (name == "HVoiceCtrl")
+                {
+                    ChaControl female = females.FirstOrDefault(character => character != null);
+                    ChaControl male = males.FirstOrDefault(character => character != null);
+                    TrySetMember(controller, "personality", new[] {
+                        ReadPersonality(female),
+                        ReadPersonality(male),
+                    });
+                    TrySetMember(controller, "param", female);
+                    TrySetMember(controller, "param_sub", male);
+                    deferredRoutine = InvokeCompatibleResult(
+                        controller,
+                        "Init",
+                        ReadPersonality(female),
+                        ReadVoiceRate(female),
+                        female,
+                        ReadPersonality(male),
+                        ReadVoiceRate(male),
+                        male
+                    ) as IEnumerator;
+                }
+                else if (name == "HSceneSpriteChaChoice")
+                {
+                    TrySetMember(controller, "females", females);
+                    TrySetMember(controller, "males", males);
+                    TrySetMember(controller, "hScene", hScene);
+                    InvokeCompatible(controller, "Init");
+                }
+            }
+            catch (Exception exception)
+            {
+                logger?.LogWarning($"Could not rebind HScene controller {name}: {exception.Message}");
+            }
+            if (deferredRoutine != null)
+            {
+                yield return deferredRoutine;
+            }
+            yield break;
+        }
+
+        private sealed class ControllerBinding
+        {
+            internal object Controller;
+            internal ChaControl Character;
+            internal int Index;
+        }
+
+        private static void AddControllerBindings(
+            List<ControllerBinding> bindings,
+            object collection,
+            ChaControl[] characters
+        )
+        {
+            if (collection == null || characters == null)
+            {
+                return;
+            }
+            IEnumerable values = collection as IEnumerable;
+            if (values == null || collection is string)
+            {
+                return;
+            }
+            int index = 0;
+            try
+            {
+                foreach (object controller in values)
+                {
+                    if (controller != null && index < characters.Length)
+                    {
+                        bindings.Add(
+                            new ControllerBinding
+                            {
+                                Controller = controller,
+                                Character = characters[index],
+                                Index = index,
+                            }
+                        );
+                    }
+                    index++;
+                }
+            }
+            catch (Exception)
+            {
+                // Controller arrays can be resized while the scene changes.
+            }
+        }
+
+        private static ChaControl FindBoundCharacter(
+            object controller,
+            List<ControllerBinding> bindings
+        )
+        {
+            foreach (ControllerBinding binding in bindings)
+            {
+                if (ReferenceEquals(binding.Controller, controller))
+                {
+                    return binding.Character;
+                }
+            }
+            return null;
+        }
+
+        private static int FindBoundIndex(
+            object controller,
+            HScene hScene,
+            ChaControl[] females,
+            ChaControl[] males
+        )
+        {
+            foreach (ControllerBinding binding in new[] {
+                FindControllerBinding(controller, hScene, "ctrlEyeNeckFemale", females),
+                FindControllerBinding(controller, hScene, "ctrlEyeNeckMale", males),
+                FindControllerBinding(controller, hScene, "ctrlDynamics", females),
+                FindControllerBinding(controller, hScene, "ctrlYures", females),
+                FindControllerBinding(controller, hScene, "ctrlYureMale", males),
+                FindControllerBinding(controller, hScene, "RootmotionOffsetF", females),
+                FindControllerBinding(controller, hScene, "RootmotionOffsetM", males),
+            })
+            {
+                if (binding != null)
+                {
+                    return binding.Index;
+                }
+            }
+            return 0;
+        }
+
+        private static ControllerBinding FindControllerBinding(
+            object controller,
+            HScene hScene,
+            string fieldName,
+            ChaControl[] characters
+        )
+        {
+            object collection = GetMember(hScene, fieldName);
+            if (collection == null || characters == null)
+            {
+                return null;
+            }
+            IEnumerable values = collection as IEnumerable;
+            if (values == null || collection is string)
+            {
+                return null;
+            }
+            int index = 0;
+            foreach (object candidate in values)
+            {
+                if (ReferenceEquals(candidate, controller))
+                {
+                    return new ControllerBinding { Controller = controller, Index = index };
+                }
+                index++;
+            }
+            return null;
+        }
+
+        private static void RefreshSceneSprite(
+            HScene hScene,
+            ChaControl[] females,
+            ChaControl[] males,
+            ManualLogSource logger
+        )
+        {
+            try
+            {
+                object sceneSprite = GetMember(hScene, "sprite");
+                if (sceneSprite != null)
+                {
+                    InvokeCompatible(sceneSprite, "Setting", females, males);
+                }
+                else
+                {
+                    UnityEngine.Object[] sprites = Resources.FindObjectsOfTypeAll(typeof(HSceneSprite));
+                    foreach (UnityEngine.Object value in sprites)
+                    {
+                        InvokeCompatible(value, "Setting", females, males);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                logger?.LogDebug($"Could not refresh HScene character UI: {exception.Message}");
+            }
+        }
+
+        private static void InvokeProcBaseAnimationParameter(ManualLogSource logger)
+        {
+            try
+            {
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    Type type = assembly.GetType("ProcBase", false)
+                        ?? assembly.GetType("Manager.ProcBase", false);
+                    if (type == null)
+                    {
+                        continue;
+                    }
+                    TrySetMember(type, "endInit", false);
+                    InvokeCompatible(type, "setAnimationParamater");
+                    break;
+                }
+            }
+            catch (Exception exception)
+            {
+                logger?.LogDebug($"Could not refresh HScene animation parameters: {exception.Message}");
+            }
+        }
+
+        private static int ReadPersonality(ChaControl character)
+        {
+            object parameter = GetMember(character?.chaFile, "parameter");
+            object value = GetMember(parameter, "personality");
+            return value is int ? (int)value : 0;
+        }
+
+        private static float ReadVoiceRate(ChaControl character)
+        {
+            object parameter = GetMember(character?.chaFile, "parameter");
+            object value = GetMember(parameter, "voiceRate");
+            return value is float ? (float)value : 0f;
+        }
+
+        private static ChaControl FindClosestCharacter(
+            object controller,
+            ChaControl[] females,
+            ChaControl[] males
+        )
+        {
+            int femaleId = ReadIntMember(controller, "femaleID", -1);
+            int maleId = ReadIntMember(controller, "MaleID", -1);
+            foreach (ChaControl character in females)
+            {
+                if (character != null && character.chaID == femaleId)
+                {
+                    return character;
+                }
+            }
+            foreach (ChaControl character in males)
+            {
+                if (character != null && character.chaID == maleId)
+                {
+                    return character;
+                }
+            }
+            return females.FirstOrDefault(character => character != null)
+                ?? males.FirstOrDefault(character => character != null);
+        }
+
+        private static int ReadIntMember(object instance, string name, int fallback)
+        {
+            object value = GetMember(instance, name);
+            return value is int ? (int)value : fallback;
+        }
+
+        private static object GetSingleton(Type type)
+        {
+            for (Type current = type; current != null; current = current.BaseType)
+            {
+                try
+                {
+                    PropertyInfo property = current.GetProperty("Instance", StaticFlags);
+                    if (property != null && property.GetMethod != null)
+                    {
+                        object value = property.GetValue(null, null);
+                        if (value != null)
+                        {
+                            return value;
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // The singleton may not be initialized during a scene transition.
+                }
+            }
+            return null;
+        }
+
+        private static object GetMember(object instance, string name)
+        {
+            if (instance == null || string.IsNullOrEmpty(name))
+            {
+                return null;
+            }
+            for (Type current = instance.GetType(); current != null; current = current.BaseType)
+            {
+                try
+                {
+                    FieldInfo field = current.GetField(name, InstanceFlags | BindingFlags.DeclaredOnly);
+                    if (field != null)
+                    {
+                        return field.GetValue(instance);
+                    }
+                    PropertyInfo property = current.GetProperty(name, InstanceFlags | BindingFlags.DeclaredOnly);
+                    if (property != null && property.GetMethod != null)
+                    {
+                        return property.GetValue(instance, null);
+                    }
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        private static bool TrySetMember(object instance, string name, object value)
+        {
+            if (instance == null || string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+            if (instance is Type type)
+            {
+                FieldInfo field = type.GetField(name, StaticFlags);
+                if (field != null && CanAssign(field.FieldType, value))
+                {
+                    field.SetValue(null, value);
+                    return true;
+                }
+                return false;
+            }
+            for (Type current = instance.GetType(); current != null; current = current.BaseType)
+            {
+                try
+                {
+                    FieldInfo field = current.GetField(name, InstanceFlags | BindingFlags.DeclaredOnly);
+                    if (field != null && CanAssign(field.FieldType, value))
+                    {
+                        field.SetValue(instance, value);
+                        return true;
+                    }
+                    PropertyInfo property = current.GetProperty(name, InstanceFlags | BindingFlags.DeclaredOnly);
+                    if (property != null && property.SetMethod != null && CanAssign(property.PropertyType, value))
+                    {
+                        property.SetValue(instance, value, null);
+                        return true;
+                    }
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        private static bool CanAssign(Type destination, object value)
+        {
+            return value == null
+                ? !destination.IsValueType
+                : destination.IsInstanceOfType(value)
+                    || destination.IsAssignableFrom(value.GetType());
+        }
+
+        private static bool InvokeCompatible(object instance, string name, params object[] args)
+        {
+            if (instance == null || string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+            Type type = instance as Type ?? instance.GetType();
+            BindingFlags flags = instance is Type ? StaticFlags : InstanceFlags;
+            MethodInfo[] methods = type.GetMethods(flags);
+            foreach (MethodInfo method in methods)
+            {
+                if (!string.Equals(method.Name, name, StringComparison.Ordinal)
+                    || method.GetParameters().Length != (args?.Length ?? 0))
+                {
+                    continue;
+                }
+                ParameterInfo[] parameters = method.GetParameters();
+                bool compatible = true;
+                for (int index = 0; index < parameters.Length; index++)
+                {
+                    if (!CanAssign(parameters[index].ParameterType, args[index]))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+                if (!compatible)
+                {
+                    continue;
+                }
+                method.Invoke(instance is Type ? null : instance, args);
+                return true;
+            }
+            return false;
+        }
+
+        private static object InvokeCompatibleResult(object instance, string name, params object[] args)
+        {
+            if (instance == null || string.IsNullOrEmpty(name))
+            {
+                return null;
+            }
+            Type type = instance as Type ?? instance.GetType();
+            BindingFlags flags = instance is Type ? StaticFlags : InstanceFlags;
+            MethodInfo[] methods = type.GetMethods(flags);
+            foreach (MethodInfo method in methods)
+            {
+                if (!string.Equals(method.Name, name, StringComparison.Ordinal)
+                    || method.GetParameters().Length != (args?.Length ?? 0))
+                {
+                    continue;
+                }
+                ParameterInfo[] parameters = method.GetParameters();
+                bool compatible = true;
+                for (int index = 0; index < parameters.Length; index++)
+                {
+                    if (!CanAssign(parameters[index].ParameterType, args[index]))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+                if (!compatible)
+                {
+                    continue;
+                }
+                return method.Invoke(instance is Type ? null : instance, args);
+            }
+            return null;
+        }
+
+        private static bool InvokeContextMethod(
+            object instance,
+            string name,
+            HScene hScene,
+            ChaControl[] females,
+            ChaControl[] males
+        )
+        {
+            if (instance == null)
+            {
+                return false;
+            }
+            foreach (MethodInfo method in instance.GetType().GetMethods(InstanceFlags))
+            {
+                if (!string.Equals(method.Name, name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                ParameterInfo[] parameters = method.GetParameters();
+                var args = new object[parameters.Length];
+                bool compatible = true;
+                for (int index = 0; index < parameters.Length; index++)
+                {
+                    Type parameterType = parameters[index].ParameterType;
+                    string parameterName = parameters[index].Name ?? string.Empty;
+                    object value = null;
+                    if (parameterType.IsInstanceOfType(hScene))
+                    {
+                        value = hScene;
+                    }
+                    else if (parameterType == typeof(ChaControl[]))
+                    {
+                        value = parameterName.IndexOf("male", StringComparison.OrdinalIgnoreCase) >= 0
+                            ? males
+                            : females;
+                    }
+                    else if (parameterType == typeof(ChaControl))
+                    {
+                        value = parameterName.IndexOf("male", StringComparison.OrdinalIgnoreCase) >= 0
+                            ? males.FirstOrDefault(character => character != null)
+                            : females.FirstOrDefault(character => character != null);
+                    }
+                    else if (parameterType == typeof(int))
+                    {
+                        value = 0;
+                    }
+                    else if (parameterType == typeof(bool))
+                    {
+                        value = false;
+                    }
+                    else if (parameterType.IsValueType)
+                    {
+                        value = Activator.CreateInstance(parameterType);
+                    }
+                    if (!CanAssign(parameterType, value))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                    args[index] = value;
+                }
+                if (compatible)
+                {
+                    method.Invoke(instance, args);
+                    return true;
+                }
+            }
+            return false;
         }
     }
 

@@ -293,7 +293,7 @@ The item browser uses the existing `StarManager.GameItemProbe` BepInEx plugin th
 - `GET /game-item-probe/command?id=<command_id>`
   - Returns one queued command state in `data`; the plugin states are `queued`, `executing`, `succeeded`, `failed`, and `expired`.
 - `POST /game-item-probe/apply`
-  - Body for clothing: `{ "type": "clothes", "guid": "mod.guid", "categoryNo": 240, "slot": 1 }`. To target a character in an active H scene instead of the character maker, add `target: "hscene"`, `sex` (`0` male or `1` female), and `characterIndex` (the index in `HScene.GetMales()`/`GetFemales()`), for example `{ "type": "clothes", "target": "hscene", "sex": 1, "characterIndex": 0, "categoryNo": 240, "localSlot": 100008284 }`. `targetCharacterId` may be used instead of `characterIndex`; if both are supplied they must identify the same character. H-scene targets accept the same single-item `clothes`, `hair`, `face`, `body`, and `accessory` types as the editor target and call the corresponding native `ChaControl` update method without card/coordinate reload. `type: "card"` remains editor-only.
+  - Body for clothing: `{ "type": "clothes", "guid": "mod.guid", "categoryNo": 240, "slot": 1 }`. To target a character in an active H scene instead of the character maker, add `target: "hscene"`, `sex` (`0` male or `1` female), and `characterIndex` (the index in `HScene.GetMales()`/`GetFemales()`), for example `{ "type": "clothes", "target": "hscene", "sex": 1, "characterIndex": 0, "categoryNo": 240, "localSlot": 100008284 }`. `targetCharacterId` may be used instead of `characterIndex`; if both are supplied they must identify the same character. H-scene targets accept the same single-item `clothes`, `hair`, `face`, `body`, and `accessory` types as the editor target and call the corresponding native `ChaControl` update method without card/coordinate reload. `type: "card"` uses a separate full-card H-scene flow described below.
   - Body for hair: `{ "type": "hair", "guid": "mod.guid", "categoryNo": 300, "slot": 1, "hairSlotNo": 0 }`; the only valid mappings are `300→0` (HairBack), `301→1` (HairFront), `302→2` (HairSide), and `303→3` (HairOption).
   - Body for a face item: `{ "type": "face", "guid": "mod.face", "categoryNo": 317, "slot": 4, "facePartNo": 1 }`; face categories include `110`–`112`, `121`, `210`–`212`, `314`–`320`, `322`, and `323`. Only eye-specific categories `317` (pupil) and `318` (black pupil) require `facePartNo` (`0` left, `1` right).
   - Body for a body item: `{ "type": "body", "guid": "mod.body", "categoryNo": 313, "slot": 4, "bodyPartNo": 1 }`; male body categories are `8`, `131`–`133`, female body categories are `231`–`233`, `313`, `334`, and `335`. Only body-paint categories `8` and `313` require `bodyPartNo` (`0` paint layer 1, `1` paint layer 2); category `8` updates the male paint layout and `313` updates the female paint texture ID.
@@ -307,11 +307,12 @@ The probe port does not authenticate a game directory. The user must ensure that
 
 ## Character card loading bridge
 
-The character-card detail tool uses the existing `StarManager.GameItemProbe` plugin to load selected native card sections into the current HS2 character-maker character. `POST /game-card-loader/load` is a single-card direct mutation route, not a batch task:
+The character-card detail tool uses the existing `StarManager.GameItemProbe` plugin to load selected native card sections into the current HS2 character-maker character, or to fully replace a selected H-scene character. `POST /game-card-loader/load` is a single-card direct mutation route, not a batch task:
 
 ```json
 {
   "game_dir": "D:\\Games\\HoneySelect 2 DX",
+  "target": "editor",
   "path": "female/favorites/example.png",
   "face": true,
   "body": false,
@@ -322,9 +323,28 @@ The character-card detail tool uses the existing `StarManager.GameItemProbe` plu
 }
 ```
 
-The backend validates the selected game directory, the `female`/`male` card branch, the PNG and `AIS_Chara` marker, then forwards an allow-listed `type: "card"` request to the probe with `UserData/chara/...` path. The plugin calls `LoadFileLimited` on the initialized current `ChaFileControl`, preserves unselected coordinate children, synchronizes `nowCoordinate`, and submits the refresh through the native `ChaControl.Reload(...)` path while temporarily disabling `customLoadGCClear`; `Reload` internally starts the non-hiding `ReloadAsync(..., asyncFlags=false)` flow. The renderer polls the existing `/game-item-probe/command?id=...` route.
+For an H-scene target, the body must include the matching card sex and at least one stable character selector; the renderer sends both selectors when available and the plugin verifies they identify the same character:
 
-The route never forwards an arbitrary URL or path. It does not copy `status`, `gameinfo`, unknown plugin extensions, or game progress. Clothing and accessory are separate UI selections even though the native card coordinate envelope is read as one block; the plugin copies only the selected coordinate child. The card sex must match the current character-maker character, and the probe must be connected to the same game directory selected in Star Manager.
+```json
+{
+  "game_dir": "D:\\Games\\HoneySelect 2 DX",
+  "target": "hscene",
+  "sex": 1,
+  "characterIndex": 0,
+  "targetCharacterId": 12345,
+  "path": "female/favorites/example.png",
+  "face": true,
+  "body": true,
+  "hair": true,
+  "parameter": true,
+  "clothes": true,
+  "accessory": true
+}
+```
+
+The backend validates the selected game directory, the `female`/`male` card branch, the PNG and `AIS_Chara` marker, then forwards an allow-listed `type: "card"` request to the probe with `UserData/chara/...` path. Editor targets call `LoadFileLimited` with the selected sections and preserve unselected coordinate children. H-scene targets require all six sections and call `LoadCharaFile(..., noLoadPng=false, noLoadStatus=true)`, `ChangeNowCoordinate(false, true)`, and `Reload(false, false, false, false, true)` before rebinding the H-scene controllers and restoring the current animation state. The renderer polls the existing `/game-item-probe/command?id=...` route.
+
+The route never forwards an arbitrary URL or path. It does not copy `status`, `gameinfo`, unknown plugin extensions, or game progress. Clothing and accessory are separate UI selections for editor reads; H-scene reads are intentionally full-card only. The card sex must match the selected editor/H-scene character, and the probe must be connected to the same game directory selected in Star Manager.
 
 ## Task API
 
@@ -408,7 +428,7 @@ Current task types:
   - Exports selected zipmods preserving the original mods tree, and also exports repairable external item main `.unity3d` files from game `abdata` under their original `abdata/...` paths.
 - `export_character_dependency_package`
   - Payload: `{ "game_dir": "D:\\HS2", "path": "female/card.png", "target_dir": "...", "compress": true, "dependency_types": ["face", "hair", "body", "clothes", "accessory"] }`
-  - Generates one portable dependency package for a character card. `dependency_types` independently selects any combination of face/features, hair, body/skin, clothes, and accessories; an empty array exports only the card and manifest, while omitting the field keeps all five types for backward compatibility. Dependencies are classified from resolver `Property`, then `CategoryNo`, then matched item Kind. The package mirrors game-root paths under `UserData/chara`, `mods`, and `abdata`, includes a UTF-8 JSON dependency manifest with selection/count metadata, deduplicates selected zipmods by database id, and reports missing GUIDs and copy failures only for selected types. `compress=true` produces a ZIP; otherwise it produces a folder. Source files are always copied.
+  - Generates one portable dependency package for a character card. `dependency_types` independently selects any combination of face/features, hair, body/skin, clothes, and accessories; an empty array exports only the card and manifest, while omitting the field keeps all five types for backward compatibility. Dependencies are classified from resolver `Property`, then `CategoryNo`, then matched item Kind. The package mirrors game-root paths under `UserData/chara`, `mods`, and `abdata`, includes a UTF-8 JSON dependency manifest with selection/count metadata, deduplicates selected zipmods by database id, and reports missing GUIDs and copy failures only for selected types. `compress=true` produces a ZIP whose entries use `ZIP_STORED` without recompression; otherwise it produces a folder. Source files are always copied.
 - `bulk_organize_zipmods`
   - Payload: `{ "zipmod_ids": [1, 2], "target_dir": "..." }`
   - Copies selected zipmods into author-named folders.

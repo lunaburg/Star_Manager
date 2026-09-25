@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("StarManager.GameItemProbe")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("0.9.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.9.0+8046d99ca413b0c4a209f3fe8d29a68b96526416")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("0.9.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.9.3+1cde8915723d3b0fa036bc9981b74abfaa6bd952")]
 [assembly: System.Reflection.AssemblyProductAttribute("StarManager.GameItemProbe")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StarManager.GameItemProbe")]
-[assembly: System.Reflection.AssemblyVersionAttribute("0.9.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("0.9.3.0")]
 
 // 由 MSBuild WriteCodeFragment 类生成。
 

@@ -226,7 +226,7 @@ zipmod 级 Unity3D 状态优先级是：
 error > missing > not_in_mod > in_mod > empty
 ```
 
-因此只要有任意 item 的 Unity3D 资源不可用，整个 zipmod 就会标记为 `error`；没有 error 但有缺失引用时标记为 `missing`；没有缺失但资源在当前 zipmod 外时标记为 `not_in_mod`。`game_abdata` 与 `other_zipmod` 两种来源都会让模组进入警告状态；`unity3d_in_game_count` 和 `unity3d_other_mod_count` 分别保留来源统计。
+因此只要有任意 item 的 Unity3D 资源不可用，整个 zipmod 就会标记为 `error`；没有 error 但有缺失引用时标记为 `missing`；没有缺失但资源在当前 zipmod 外时通常标记为 `not_in_mod`。但游戏公共 `abdata/chara/00`–`60` 路径属于共享资源：即使该路径当前由其它 zipmod 提供，诊断也不生成异常，列表状态同步按正常处理。只有诊断实际产生的 `game_abdata` 或非公共路径 `other_zipmod` 项才会让模组进入警告状态；`unity3d_in_game_count` 和 `unity3d_other_mod_count` 分别保留来源统计。
 
 ## 角色卡依赖关联更新
 

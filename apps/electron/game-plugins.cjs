@@ -88,7 +88,7 @@ function ensureBundledPlugins(gameDir, { sourceDirectory } = {}) {
   const sourcePaths = REQUIRED_PLUGIN_FILE_NAMES.map((fileName) => ({
     fileName,
     sourcePath: path.join(bundledDirectory, fileName),
-    destinationPath: path.join(normalizedGameDir, "BepInEx", "Plugins", fileName)
+    destinationPath: path.join(normalizedGameDir, "BepInEx", "Plugins", "StarManager", fileName)
   }));
   const missingSources = sourcePaths
     .filter(({ sourcePath }) => !isRegularFile(sourcePath))
@@ -111,7 +111,7 @@ function ensureBundledPlugins(gameDir, { sourceDirectory } = {}) {
     return {
       ok: false,
       error: `插件目标是符号链接，未执行安装：${conflicts.map((item) => item.file_name).join("、")}`,
-      destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins"),
+      destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins", "StarManager"),
       plugins: states
     };
   }
@@ -119,7 +119,7 @@ function ensureBundledPlugins(gameDir, { sourceDirectory } = {}) {
   const installStates = states.filter((item) => item.status === "missing");
   try {
     if (installStates.length) {
-      fs.mkdirSync(path.join(normalizedGameDir, "BepInEx", "Plugins"), { recursive: true });
+      fs.mkdirSync(path.join(normalizedGameDir, "BepInEx", "Plugins", "StarManager"), { recursive: true });
       for (const item of installStates) {
         copyPluginAtomically(path.join(bundledDirectory, item.file_name), item.destination_path);
         item.status = "installed";
@@ -129,7 +129,7 @@ function ensureBundledPlugins(gameDir, { sourceDirectory } = {}) {
     return {
       ok: false,
       error: `安装 Star Manager 插件失败：${error.message}`,
-      destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins"),
+      destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins", "StarManager"),
       plugins: states
     };
   }
@@ -137,7 +137,7 @@ function ensureBundledPlugins(gameDir, { sourceDirectory } = {}) {
   return {
     ok: true,
     game_dir: normalizedGameDir,
-    destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins"),
+    destination_dir: path.join(normalizedGameDir, "BepInEx", "Plugins", "StarManager"),
     plugins: states,
     installed_count: states.filter((item) => item.status === "installed").length,
     existing_count: states.filter((item) => item.status === "existing" || item.status === "disabled").length

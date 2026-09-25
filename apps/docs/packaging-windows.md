@@ -104,11 +104,11 @@ The packaging configuration lives in the `build` field of `apps/package.json`. T
 - `tools/StarManager/*.dll` as `resources/StarManager/*.dll` (the three manager companion plugins)
 
 The three bundled plugins are installed by the Electron main process into the selected
-game directory's `BepInEx/Plugins/` folder. The package does not overwrite an existing
+game directory's `BepInEx/Plugins/StarManager/` folder. The package does not overwrite an existing
 same-name DLL; an existing `.dl_` or historical `.dll.disabled` file is also treated as installed so a user's
 disabled-plugin choice is preserved. The check runs when a game directory is selected and
 when the saved directory is restored at application startup. Missing `BepInEx` and
-`Plugins` directories are created as needed.
+`Plugins/StarManager` directories are created as needed.
 
 ## Verification
 

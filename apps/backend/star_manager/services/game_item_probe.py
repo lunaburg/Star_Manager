@@ -142,7 +142,7 @@ def load_character_card_to_game(
     relative_path: str,
     sections: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Validate one library card, then submit its selected sections to the probe."""
+    """Validate one library card, then submit it to the editor or H scene probe target."""
 
     is_valid, root, root_error = validate_card_root(game_dir)
     if not is_valid:
@@ -180,6 +180,52 @@ def load_character_card_to_game(
     except (OSError, TypeError, ValueError) as error:
         return {"ok": False, "error": f"人物卡读取失败：{error}", "error_code": "invalid_card"}
 
+    target = str((sections or {}).get("target") or "editor").strip().lower()
+    if target not in {"editor", "hscene"}:
+        return {
+            "ok": False,
+            "error": "读取目标必须是角色编辑器或 H 场景",
+            "error_code": "invalid_target",
+        }
+
+    card_sex = 1 if parts[0].casefold() == "female" else 0
+    target_sex: int | None = None
+    target_index: int | None = None
+    target_character_id: int | None = None
+    if target == "hscene":
+        try:
+            target_sex = int((sections or {}).get("sex"))
+        except (TypeError, ValueError):
+            target_sex = None
+        if target_sex not in {0, 1}:
+            return {
+                "ok": False,
+                "error": "H 场景读取必须指定女性或男性目标",
+                "error_code": "invalid_target_sex",
+            }
+        if target_sex != card_sex:
+            return {
+                "ok": False,
+                "error": "人物卡性别与 H 场景目标性别不一致",
+                "error_code": "target_gender_mismatch",
+            }
+        try:
+            if (sections or {}).get("characterIndex") is not None:
+                target_index = int((sections or {}).get("characterIndex"))
+        except (TypeError, ValueError):
+            target_index = None
+        try:
+            if (sections or {}).get("targetCharacterId") is not None:
+                target_character_id = int((sections or {}).get("targetCharacterId"))
+        except (TypeError, ValueError):
+            target_character_id = None
+        if target_index is None and target_character_id is None:
+            return {
+                "ok": False,
+                "error": "H 场景读取必须指定目标角色",
+                "error_code": "invalid_target",
+            }
+
     selected = {
         name: sections.get(name) is True
         for name in CARD_LOAD_SECTIONS
@@ -190,11 +236,24 @@ def load_character_card_to_game(
             "error": "请至少选择一项人物卡内容",
             "error_code": "invalid_card_selection",
         }
+    if target == "hscene" and not all(selected.values()):
+        return {
+            "ok": False,
+            "error": "H 场景读取会完整替换人物卡，必须选择全部卡片内容",
+            "error_code": "invalid_card_selection",
+        }
 
     game_relative_path = Path("UserData") / "chara" / Path(*parts)
     payload: dict[str, Any] = {
         "type": "card",
+        "target": target,
         "path": str(game_relative_path).replace(os.sep, "/"),
         **selected,
     }
+    if target == "hscene":
+        payload["sex"] = target_sex
+        if target_index is not None:
+            payload["characterIndex"] = target_index
+        if target_character_id is not None:
+            payload["targetCharacterId"] = target_character_id
     return proxy_game_item_probe("/api/apply", method="POST", payload=payload)

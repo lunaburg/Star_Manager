@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="setting-row setting-row--footer">
-            <span class="setting-copy"><strong>依赖包默认压缩为 ZIP</strong><small>关闭后输出为便携文件夹。</small></span>
+            <span class="setting-copy"><strong>依赖包默认打包为 ZIP</strong><small>关闭后输出为便携文件夹。</small></span>
             <button class="setting-switch" :class="{ on: ctx.portablePackageCompress }" type="button" role="switch" :aria-checked="ctx.portablePackageCompress" @click="ctx.updatePortablePackageCompress(!ctx.portablePackageCompress)"><span></span></button>
           </div>
         </div>

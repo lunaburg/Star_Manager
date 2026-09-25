@@ -27,6 +27,60 @@
 - **验证结果**：通过前端生产构建、Electron 主进程语法检查和 `git diff --check` 验证；人物卡选择、读取请求构造和游戏侧读取逻辑未改变。
 - **适用边界**：该设置对所有人物卡共用，不按人物卡、目录或性别区分；它只控制读取弹窗中的六个区块，不改变人物卡文件内容或后端读取接口。
 
+### 2026-09-24 新增 H 场景完整读取
+
+- **背景**：原有“读取到游戏”只找到 `CharaCustom.CustomBase.chaCtrl`，因此在 H 场景中最多只能操作单件物品，不能把人物卡读入场景角色。
+- **根因**：H 场景角色由 `HScene.GetFemales()`/`GetMales()` 管理；人物卡读取必须定位正确的 `ChaControl`，但不应重复执行 `HS2_HCharaSwitcher` 已经使用的原生换人之后置流程。
+- **解决方案**：新增 `target: "hscene"`、`sex`、`characterIndex` 和 `targetCharacterId` 目标字段。H 场景读取强制完整读取六个卡片区块，并复现已验证的 `LoadCharaFile(path, sex, false, true) → ChangeNowCoordinate(false, true) → Reload(false, false, false, false, true)` 调用链；原生 `Reload` 完成后直接释放命令队列，不再额外重绑定 HSceneManager、碰撞/命中、动态骨骼、声音、角色选择 UI 或动画参数。
+- **验证结果**：后端 H 场景 payload 测试通过；前端 `npm run build` 通过；使用目标 HS2 的 `Assembly-CSharp.dll` 编译探针通过（0 警告、0 错误）。尚未宣称已经在实际 H 场景中完成女性、男性和模组卡的画面实测。
+- **适用边界**：H 场景目标必须与卡片 `female`/`male` 分支一致，并且必须提供索引或角色 ID；H 场景不支持选择性区块读取。命令成功表示原生卡片替换已经完成，模组资源异步加载仍受游戏及其他插件影响；角色制作器继续使用原有 `LoadFileLimited` 选择性读取。
+
+### 2026-09-24 修复 H 场景整卡加载超时
+
+- **背景**：实机读取两张有效女性人物卡时，角色名称、卡片文件名、头发、服装和配饰都已经替换，但命令最终返回 `execution_error`。
+- **根因**：H 场景整卡流程复用了延迟命令的 12 秒超时；完整 `ChaControl.Reload` 可能在主线程同步等待 Sideloader 资源和第三方角色控制器回调，当前环境实测超过 12 秒。超时检查只能在协程让出控制权后执行，因此会出现“卡片已写入、状态却报告失败”的不一致。
+- **解决方案**：为 H 场景 `type: "card"` 增加独立的 120 秒延迟超时，保留有界等待和异常恢复；普通单件换装、角色编辑器人物卡读取不改变超时策略。
+- **验证结果**：使用目标游戏程序集重新编译探针；代码级检查确认 H 场景流程传入 120 秒专用超时。实际运行时还需替换目标游戏中的 DLL 并重启 HS2，再复测命令最终状态。
+- **适用边界**：120 秒只解决 Star Manager 的过早失败判定；如果模组资源损坏、第三方插件抛出异常或原生重载超过 120 秒，仍可能失败，日志中的根因需单独处理。
+
+### 2026-09-24 修正 H 场景管理器通知判定
+
+- **背景**：H 场景卡片替换后，需要把新的女性角色数组同步给 `HSceneManager`，否则场景状态、角色选择和部分控制器可能继续使用旧引用。
+- **根因**：`SetFemaleState(ChaControl[])` 是 `void` 方法，旧的通用反射辅助函数通过“返回值非空”判断调用成功，因此无法正确确认这类通知是否已执行；同时超时恢复会提前结束后续重绑定。
+- **解决方案**：H 场景重绑定现在直接以“找到匹配方法并完成调用”作为成功条件，并在 `HSceneManager.Instance` 缺失或 `SetFemaleState` 未匹配时输出明确警告；同时保留管理器 `females`、`player`、`Personality` 字段同步，以及场景控制器、角色选择 UI 和动画参数刷新。
+- **验证结果**：使用当前目标 HS2 的 `Assembly-CSharp.dll` 编译探针，0 警告、0 错误；新 DLL 安装并重启游戏后，需查看日志确认没有 `HSceneManager... unavailable` 或 `Could not invoke ... SetFemaleState` 警告。
+- **适用边界**：该修正只保证探针能正确报告并执行已确认的 HS2 原生管理器调用；第三方 H 插件拥有的私有引用仍可能因版本差异无法通过反射重绑定。
+
+### 2026-09-25 卡片替换完成后立即返回成功（历史实现）
+
+- **背景**：实测 H 场景人物卡约 2 秒已经替换并能从 `/api/context` 读到新角色，但完整控制器重绑定约需 34 秒，前端一直等待最终命令状态。
+- **解决方案**：当时将 H 场景流程拆成“原生卡片替换”和“后台控制器重绑定”两段。该方案已在后续实机对照 `HS2_HCharaSwitcher` 后移除，当前实现见下方“移除 H 场景整卡读取的额外控制器重绑定”。
+- **验证结果**：修改后需重新编译并安装探针 DLL、构建前端，再实测命令成功时间和后台重绑定日志；目标是命令成功接近卡片替换完成时间，而不是等待全部后台控制器结束。
+- **适用边界**：该历史实现不代表当前行为；当前成功提示表示原生卡片替换完成，且不会再启动额外重绑定。
+
+### 2026-09-25 移除 H 场景整卡读取的额外控制器重绑定
+
+- **背景**：使用 `StarManager.CharacterCardReadProbe` 观察 `HS2_HCharaSwitcher` 后确认，换人流程只执行 `ChangeNowCoordinate → ReloadAsync/Reload → ChangeClothes/ChangeAccessory` 及正常的 ABMX/KSOX 回调，没有额外的 Star Manager H 场景控制器重绑定；原先的后台重绑定会锁住命令队列，导致连续读取的后续命令在 15 秒队列寿命内过期。
+- **解决方案**：H 场景人物卡读取保留目标校验和原生 `LoadCharaFile → ChangeNowCoordinate → Reload`，移除额外重绑定和命令队列的后台任务锁。原生读取完成后立即释放队列，后续场景资源仍由游戏原生流程处理。
+- **验证结果**：使用当前 HS2 程序集编译通过，0 警告、0 错误；此前探针连续测试中第一张卡约 0.4–0.8 秒完成，后续请求曾因额外重绑定锁而排队过期。
+- **适用边界**：该改动不负责修复第三方插件或损坏模组资源导致的原生 `Reload` 异常；命令成功仍表示原生换卡流程完成，不承诺所有异步贴图已经加载。
+
+### 2026-09-24 修复管理器前端过早结束轮询
+
+- **背景**：插件已经在约 38 秒后返回 `succeeded`，但管理器界面仍显示“读取中…”或先报未完成。
+- **根因**：前端固定轮询 70 次，第一次等待 80 毫秒、之后每次 250 毫秒，最多只等待约 17 秒；H 场景整卡流程的专用超时已经调整为 120 秒，前端却仍在更早时间停止等待。
+- **解决方案**：H 场景读取改为最多等待 130 秒，覆盖插件的 120 秒执行窗口并保留少量通信余量；角色编辑器读取使用 20 秒等待窗口。前端继续以探针返回的 `succeeded`、`failed` 或 `expired` 为最终状态，不根据固定等待次数提前判定成功或失败。
+- **验证结果**：通过前端生产构建；已知 H 场景实测命令约 38 秒完成，新的轮询窗口能够继续等待并显示完成结果。
+- **适用边界**：如果游戏或模组资源实际超过 120 秒，插件仍会按有界超时失败；前端 130 秒窗口不会延长游戏侧执行上限。
+
+### 2026-09-24 读取弹窗先显示再同步角色列表
+
+- **背景**：点击人物卡工具中的“选择读取”后，弹窗会延迟约一到两秒才出现。
+- **根因**：`openCardLoadPrompt()` 原先先等待 `/game-item-probe/context` 返回，再设置弹窗的 `open` 状态；探针未连接、游戏切换场景或请求超时时，等待时间直接阻塞了弹窗渲染。
+- **解决方案**：点击后立即打开弹窗，并在后台刷新上下文；弹窗内显示“正在同步游戏角色列表”，同步期间暂时禁止目标切换和提交，返回后重新计算角色编辑器/H 场景目标列表。请求序号避免旧的后台刷新覆盖用户重新打开的弹窗状态。
+- **验证结果**：通过 `npm run build` 和 `git diff --check` 验证；该改动不改变人物卡读取接口或游戏侧读取流程。
+- **适用边界**：弹窗可以立即显示，但游戏角色列表仍取决于探针和 HS2 当前场景；同步失败时会保留探针错误状态并显示无可用目标，不会伪造 H 场景角色。
+
 后端接口为：
 
 ```http
@@ -54,6 +108,7 @@ Content-Type: application/json
 ```json
 {
   "type": "card",
+  "target": "editor",
   "path": "UserData/chara/female/favorites/example.png",
   "face": true,
   "body": false,
@@ -64,6 +119,25 @@ Content-Type: application/json
 }
 ```
 
+H 场景请求使用当前 `/game-item-probe/context` 返回的角色身份，并必须完整选择六个区块：
+
+```json
+{
+  "type": "card",
+  "target": "hscene",
+  "sex": 1,
+  "characterIndex": 0,
+  "targetCharacterId": 12345,
+  "path": "UserData/chara/female/favorites/example.png",
+  "face": true,
+  "body": true,
+  "hair": true,
+  "parameter": true,
+  "clothes": true,
+  "accessory": true
+}
+```
+
 插件收到命令后执行以下流程：
 
 1. 限制路径在游戏根目录的 `UserData/chara/female` 或 `UserData/chara/male` 分支内，并根据目录确定性别。
@@ -71,6 +145,15 @@ Content-Type: application/json
 3. 衣服和装饰共用原生 `coordinate` 读取开关，因此只选择其中一项时先备份并在加载后恢复另一项；脸、身体、头发和人物设定由原生方法按开关写入。
 4. 先用 `ChaControl.ChangeNowCoordinate(false, true)` 将 coordinate 同步到当前角色，再复现原生人物卡窗口的 `Manager.Character.customLoadGCClear=false → ChaControl.Reload(...) → customLoadGCClear=true` 调用链。五参数 `Reload` 会按原生方式启动 `ReloadAsync(..., asyncFlags=false)`，在同一条链中调用 `ChangeClothes(true)` 和 `ChangeAccessory(true)`；不再自行拆分或重排服装、装饰协程，也不进入会隐藏角色的 `asyncFlags=true` 路径。命令在原生 `Reload` 调用返回后报告成功，后续贴图/模组资源仍由游戏自己的加载器处理。
 5. 返回已有 `/game-item-probe/command?id=...` 可轮询的命令状态。
+
+H 场景使用不同的原生入口：
+
+1. 通过 `sex + characterIndex` 查找 `HScene.GetFemales()` 或 `GetMales()`，并用 `targetCharacterId` 做一致性校验。
+2. 在目标角色已有的 `ChaFileControl` 上调用 `LoadCharaFile(..., noLoadPng=false, noLoadStatus=true)`，不把卡片保存的游戏状态带入 H 场景。
+3. 完整同步 coordinate 后调用 `Reload(false, false, false, false, true)`，再等待资源重载进入稳定帧。
+4. 卡片读取命令在原生 `Reload` 返回后报告成功并释放队列；不额外重新设置 H 场景女性状态、碰撞、HitObject、动态骨骼、Yure、FeelHit、声音、角色选择 UI 或动画参数。
+
+H 场景命令在原生 `Reload` 返回、卡片已经替换后立即标记为 `succeeded`。后续资源加载和插件回调由游戏原生流程处理。
 
 ## 骨骼与覆盖贴图的选择边界（2026-08-29）
 
@@ -128,13 +211,15 @@ UI 六项选择
 ## 安全和适用边界
 
 - 只允许读取单张位于人物卡库中的 AIS 人物卡，拒绝路径穿越、非 PNG、`navi` 分支和非 `AIS_Chara` 文件。
-- 卡片性别必须和当前角色制作器角色一致；未进入角色制作器时返回 `not_in_editor`。
+- 角色编辑器模式下，卡片性别必须和当前角色制作器角色一致；未进入角色制作器时返回 `not_in_editor`。H 场景模式下，卡片性别必须和选中的 `ChaControl` 一致，目标不存在或场景退出时返回 H 场景目标错误。
+- H 场景读取是完整卡片替换，不提供六个区块的选择性语义；前端会锁定区块选择，后端和插件也会再次拒绝不完整请求。
 - 衣服和装饰在界面上可以独立选择。游戏的原生 `coordinate` 读取粒度是整体区块，但插件只把选中的 `clothes` 或 `accessory` 子对象写入目标，因此不会因选择衣服而覆盖装饰，反之亦然。
 - “身体”包含原生身体比例和肌肤数据；当前没有把“皮肤/眼睛覆盖”或未知插件扩展数据伪装成独立字段。
 - “身体骨骼”“面部骨骼”在当前程序集没有独立于 `shapeValueBody` / `shapeValueFace` 的原生人物卡区块，因此暂不提供会造成误解的独立开关；它们随对应的身体或脸部区块一起读取。
 - 不复制 `status`、`gameinfo`、游戏进度或未知插件扩展数据，避免把角色编辑器之外的运行状态覆盖到当前角色。
 - 命令成功表示原生 `Reload` 已被调用并接受资源重载请求；服装、发型和模组资源的后续内部加载仍由游戏处理，界面提示不会承诺所有贴图已经完成。
 - 探针仍只监听 `127.0.0.1`。探针端口不携带游戏目录认证，用户需要确认运行中的 HS2 与 Star Manager 当前选择的是同一份游戏目录。
+- H 场景人物卡读取不再依赖 HScene 控制器反射字段或额外重绑定；不同游戏版本和第三方 H 插件的原生 `Reload` 行为仍可能影响资源加载时间和最终画面。
 
 ## 验证
 

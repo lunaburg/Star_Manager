@@ -1834,19 +1834,22 @@ def inspect_unity3d_status(
         if find_zip_unity3d_or_directory(zf, reference, index) is not None:
             continue
         game_resource = resolve_game_unity3d_or_directory(game_dir, reference)
-        if game_resource is not None:
-            if is_common_game_chara_path(reference):
-                continue
-            found_in_game.append(reference)
         providers = find_other_unity3d_providers(
             provider_index,
             reference,
             current_zipmod_path,
         )
+        if game_resource is not None or providers:
+            # The shared game chara/00..60 resources are intentionally not
+            # treated as a per-mod dependency, even when the local game copy
+            # has been replaced by another zipmod's provider.
+            if is_common_game_chara_path(reference):
+                continue
         if providers:
             found_in_other_mod.append(reference)
             continue
         if game_resource is not None:
+            found_in_game.append(reference)
             continue
         if role == "main":
             missing.append(reference)

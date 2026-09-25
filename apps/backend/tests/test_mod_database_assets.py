@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from star_manager.services.mod_database_core import CsvItem, PreparedModItem, STUDIO_ITEM_KIND, ThumbnailResult  # noqa: E402
+from star_manager.services.mod_database_core import CsvItem, PreparedModItem, STUDIO_ITEM_KIND, ThumbnailResult, Unity3dProvider  # noqa: E402
 from star_manager.services.mod_database_core import ManifestData, ZipmodCandidate, init_db  # noqa: E402
 from star_manager.services.mod_database_assets import (  # noqa: E402
     _duplicate_keep_sort_key,
@@ -739,6 +739,50 @@ class Unity3dDirectoryFallbackTests(unittest.TestCase):
                 status = inspect_unity3d_status(root, zf, item)
 
         self.assertEqual(status.status, "in_mod")
+        self.assertEqual(status.error, "")
+
+    def test_texab_in_common_game_chara_slot_from_other_zipmod_is_ignored(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "sample.zipmod"
+            provider_path = root / "provider.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr("abdata/chara/hair/main.unity3d", b"main-bundle")
+            provider = Unity3dProvider(
+                zipmod_path=str(provider_path),
+                relative_path="provider.zipmod",
+                guid="provider.guid",
+                resource_path="abdata/chara/00/hair_tex.unity3d",
+                member_path="abdata/chara/00/hair_tex.unity3d",
+                source_kind="file",
+            )
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/hair.csv",
+                item_id="171",
+                kind="348",
+                name="hair-01",
+                main_manifest="abdata",
+                main_ab="chara/hair/main.unity3d",
+                main_data="hair",
+                tex_ab="chara/00/hair_tex.unity3d",
+                thumb_ab="",
+                thumb_tex="",
+                parse_status="ok",
+                parse_error="",
+            )
+
+            with zipfile.ZipFile(zipmod_path) as zf:
+                status = inspect_unity3d_status(
+                    root,
+                    zf,
+                    item,
+                    provider_index={"abdata/chara/00/hair_tex.unity3d": [provider]},
+                    current_zipmod_path=str(zipmod_path),
+                )
+
+        self.assertEqual(status.status, "in_mod")
+        self.assertEqual(status.source, "")
         self.assertEqual(status.error, "")
 
     def test_texab_outside_common_game_chara_slots_is_external_warning(self):

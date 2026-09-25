@@ -2591,12 +2591,12 @@ def export_character_dependency_package(
             progress_callback(82, "依赖清单已生成")
 
         if compress:
-            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_STORED) as archive:
                 files = [path for path in bundle_root.rglob("*") if path.is_file()]
                 for index, path in enumerate(files, start=1):
                     archive.write(path, path.relative_to(bundle_root))
                     if progress_callback is not None and (index == len(files) or index % 10 == 0):
-                        progress_callback(82 + int((index / max(len(files), 1)) * 17), f"正在压缩 {index}/{len(files)}")
+                        progress_callback(82 + int((index / max(len(files), 1)) * 17), f"正在打包 {index}/{len(files)}")
             shutil.rmtree(bundle_root)
 
         return {

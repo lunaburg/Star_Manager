@@ -89,7 +89,7 @@
 | --- | --- | --- |
 | 人物卡元数据插件 | [Card metadata 插件](card-metadata-plugin.md) | `KKEx` 注册数据、游戏保存覆盖规则、编译和安装 |
 | 游戏物品运行时探针 | [游戏物品运行时探针](game-item-probe.md) | `ChaListControl`、UniversalAutoResolver、localSlot、头发/面部/身体栏位与 zipmod/CSV 物品映射 |
-| 人物卡读取到游戏 | [人物卡选择性读取](game-card-loading.md) | 使用现有 BepInEx 探针将人物卡的选定区块读取到当前角色制作器 |
+| 人物卡读取到游戏 | [人物卡选择性读取](game-card-loading.md) | 角色制作器选择性读取，以及 H 场景完整读取后的角色控制器重绑定；H 场景整卡流程使用 120 秒专用超时 |
 | 独立人物卡读取审计探针 | [独立人物卡读取审计探针](character-card-read-probe.md) | 监听原生卡片读取、Harmony 插件介入、角色骨骼、Renderer、材质和贴图元数据 |
 | SB3UtilityScript | [SB3UtilityScript 调用说明](sb3utility-script.md) | Unity3D 脚本调用、MainData/GameObject 修改、保存验证和 GUI 脚本兼容性 |
 | Sims 4 FBX 灰黑块 | [FBX 灰黑块修复记录](sims4-fbx-gray-black-artifact-repair.md) | FBX 源模型切线/法线诊断、MikkTSpace 修复和验证边界 |
@@ -107,7 +107,7 @@
 | 将 Studio 女性姿势转换为 zipmod | [Studio 女性姿势转换](mod_manage/pose_zipmod_conversion.md) + [标准模组结构记录](mod_manage/standard_mod_structure_record.md) |
 | 补全 KK Animations 的 ForMaker 注册 | [KK Animations ForMaker 注册补全](mod_manage/kk_animations_formaker_completion.md) + [标准模组结构记录](mod_manage/standard_mod_structure_record.md) |
 | 修改角色卡解析、依赖或导出 | [角色卡解析说明](mod_manage/character_card_parsing.md) + [角色卡库布局](frontend-ui/character-cards-layout.md) |
-| 增加人物卡到游戏的选择性读取 | [人物卡选择性读取](game-card-loading.md) + [角色卡库布局](frontend-ui/character-cards-layout.md) + [前后端接口](backend-interface.md) |
+| 增加人物卡到游戏的选择性读取或 H 场景读取 | [人物卡选择性读取](game-card-loading.md) + [角色卡库布局](frontend-ui/character-cards-layout.md) + [前后端接口](backend-interface.md) |
 | 调查游戏如何读取人物卡或哪个插件介入 | [独立人物卡读取审计探针](character-card-read-probe.md) + [角色卡解析说明](mod_manage/character_card_parsing.md) |
 | 解析服装卡样本或扩展服装卡浏览 | [服装卡样本解析报告](mod_manage/clothes_card_sample_analysis.md) + [角色卡解析说明](mod_manage/character_card_parsing.md) |
 | 修改收藏、评分或标签 | [Card metadata 插件](card-metadata-plugin.md) + [人物卡收藏视觉状态](frontend-ui/character-card-favorite-effects.md) |

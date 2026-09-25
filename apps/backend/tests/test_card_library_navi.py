@@ -147,6 +147,8 @@ class CardLibraryNaviTests(unittest.TestCase):
                 self.assertIn("mods/Sideloader/sample.zipmod", names)
                 self.assertIn("abdata/chara/sample.unity3d", names)
                 self.assertIn("Star_Manager_依赖清单.json", names)
+                self.assertTrue(all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist()))
+                self.assertEqual(archive.read("mods/Sideloader/sample.zipmod"), b"zipmod")
 
     def test_filters_portable_dependencies_by_selected_types(self):
         with tempfile.TemporaryDirectory() as temp_dir:

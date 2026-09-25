@@ -4,7 +4,7 @@
 
 本插件源于对 GameBridge 物品映射方式的调查：zipmod 的 GUID、CSV `slot`、`kind` 和名称与游戏运行时使用的 `localSlot` 并不等价。插件通过读取 `ChaListControl` 和 UniversalAutoResolver 输出精确映射，并提供主线程换装接口。
 
-当前版本为 `0.9.0`。完整目录约包含 33000 个游戏物品和 83000 条 UAR 记录，因此目录只在首次初始化成功或手动刷新时扫描；角色状态独立轻量更新，避免周期性卡顿。角色编辑器和 H 场景角色都使用相同的状态读取模型。人物卡读取会先同步当前 coordinate，再触发游戏自身的分段资源加载；探针不会隐藏角色，也不会等待第三方资源协程，避免资源异常时角色长期消失或命令队列卡死。
+当前版本为 `0.9.3`。完整目录约包含 33000 个游戏物品和 83000 条 UAR 记录，因此目录只在首次初始化成功或手动刷新时扫描；角色状态独立轻量更新，避免周期性卡顿。角色编辑器和 H 场景角色都使用相同的状态读取模型。角色编辑器人物卡读取使用选择性 `LoadFileLimited`；H 场景人物卡读取使用完整 `LoadCharaFile`，随后复用原生 `ChangeNowCoordinate`/`Reload` 流程，不执行额外的 H 场景控制器重绑定。探针不会把状态区块带入 H 场景，也不会在 HTTP 工作线程调用 Unity API。
 
 这是一个 HS2 BepInEx 探针插件，用于回答“游戏原生物品界面当前这一项究竟对应什么”，并提供受控的主线程换装命令接口。它不依赖物品名称作为主键。
 
@@ -222,8 +222,8 @@ targetCharacter.ChangeClothes(kind, localSlot, false);
 
 不会调用整卡 `LoadCharaFile`、`ChangeNowCoordinate` 或 `Reload`，因此不会替换人物、
 动作状态和 H 场景控制器引用。H 场景目标现在也接受 `hair`、`face`、`body` 和
-`accessory`，分别复用角色编辑器的原生单件更新方法；人物卡 `type: "card"` 仍然
-只允许角色编辑器目标。Star Manager 装配模式会在右侧角色选择器中列出 H 场景角色，
+`accessory`，分别复用角色编辑器的原生单件更新方法。人物卡 `type: "card"` 使用下面
+的 H 场景完整读取流程。Star Manager 装配模式会在右侧角色选择器中列出 H 场景角色，
 选中后复用同一组栏位和换装逻辑。
 
 配饰需要额外提供角色配饰槽 `slotNo`（`0..19`）：
@@ -238,7 +238,7 @@ targetCharacter.ChangeClothes(kind, localSlot, false);
 {"type":"hair","hairSlotNo":0,"categoryNo":300,"localSlot":100000291}
 ```
 
-选择性读取人物卡也使用这个主线程命令队列，但不会把卡片整体覆盖到当前角色：
+选择性读取人物卡也使用这个主线程命令队列；角色制作器不会把卡片整体覆盖到当前角色：
 
 ```json
 {
@@ -254,6 +254,27 @@ targetCharacter.ChangeClothes(kind, localSlot, false);
 ```
 
 `path` 必须位于游戏根目录的 `UserData/chara/female` 或 `male` 下，且性别必须与当前角色制作器角色一致。插件在当前角色的 `ChaFileControl` 上调用原生 `LoadFileLimited`，服装/配饰区块随后通过 `ChangeNowCoordinate(false, true)` 同步到当前坐标，再复现原生的 `customLoadGCClear=false → Reload(...) → customLoadGCClear=true` 调用链。五参数 `Reload` 内部按游戏原生方式启动不隐藏角色的 `ReloadAsync(..., asyncFlags=false)`，并负责服装、装饰及其它已选区块的资源重载；插件不再直接调用 `ReloadAsync`、`ChangeClothesAsync` 或 `ChangeAccessoryAsync`。未勾选的区块不会写入当前角色；服装和配饰在插件内可以独立选择，即使游戏原生 `coordinate` 区块需要一起读取，也不会把未选择的另一部分复制过去。命令在原生重载调用返回、资源加载请求已启动后结束。
+
+H 场景人物卡读取必须显式提供 `target: "hscene"`、`sex` 以及 `characterIndex` 或 `targetCharacterId`，并且六个区块必须全部为 `true`：
+
+```json
+{
+  "type": "card",
+  "target": "hscene",
+  "sex": 1,
+  "characterIndex": 0,
+  "targetCharacterId": 12345,
+  "path": "UserData/chara/female/favorites/example.png",
+  "face": true,
+  "body": true,
+  "hair": true,
+  "parameter": true,
+  "clothes": true,
+  "accessory": true
+}
+```
+
+探针调用 `LoadCharaFile(path, sex, false, true)`、`ChangeNowCoordinate(false, true)` 和 `Reload(false, false, false, false, true)`；原生 `Reload` 返回后立即报告卡片替换成功，不再启动额外的 HSceneManager、碰撞/命中、动态骨骼、Yure、FeelHit、声音、角色选择 UI 或动画参数重绑定。该流程已完成目标 HS2 程序集编译验证；需要安装后重启游戏，再在实际 H 场景中验证女性、男性及模组卡。
 
 提交成功返回 `202` 和 `commandId`；再查询：
 
@@ -280,9 +301,12 @@ GameBridge 当前使用的 `zipInfo` 适合查询某个已知 resolved ID，但�
 - 头发的 `hairSlotNo` 是 `ChaFileHair.parts` 的目标索引，不是物品的 `localSlot`；接口限制为 `0..3`，并且必须与 `categoryNo 300..303` 的固定映射一致。
 - 身体的 `bodyPartNo` 只用于 `8`/`313` 身体彩绘，接口限制为 `0..1`；男性 `8` 使用布局 ID，女性 `313` 使用纹理 ID，身体类别仍必须与当前角色性别匹配。
 - 当前调用的是游戏原生 `ChaControl.ChangeClothes(..., false)` / `ChangeAccessory(..., false)` / `ChangeHair(..., false)` 以及面部的 `ChangeHead`、面部类别刷新和 `CreateFaceTexture`。换装后资源加载仍受游戏和模组异步加载状态影响，调用方应轮询命令状态和 `/api/current`。
-- `type: "card"` 使用当前探针已有的 `ChaFileControl.LoadFileLimited`、`ChangeNowCoordinate` 和 `ChaControl.Reload`（内部启动原生 `ReloadAsync`），不依赖 `GameBridge.dll`；读取接口只接受位于游戏 `UserData/chara/female` 或 `male` 分支中的 PNG。
+- 角色编辑器的 `type: "card"` 使用 `ChaFileControl.LoadFileLimited`、`ChangeNowCoordinate` 和 `ChaControl.Reload`（内部启动原生 `ReloadAsync`）；H 场景的 `type: "card"` 使用完整 `LoadCharaFile(..., false, true)` 和同一套原生 `ChangeNowCoordinate`/`Reload` 换人路径，不依赖 `GameBridge.dll`。两种读取接口都只接受位于游戏 `UserData/chara/female` 或 `male` 分支中的 PNG。
 - 人物卡读取的 `face`、`body`、`hair`、`parameter`、`clothes`、`accessory` 是独立选择项；插件不复制 `status`、游戏进度或未知插件扩展数据。
 - 这些选择项不是“身体骨骼”“面部骨骼”“身体纹理覆盖贴图”或“衣服覆盖贴图”的独立开关。身体/面部分别通过原生 `custom.body` / `custom.face` 及重载参数处理；ABMX 依据 `KKABMPlugin.ABMData` 中的骨骼名称和 `BoneLocation` 应用骨骼修改；KSOX 依据 `TexType` 应用身体/面部覆盖贴图；KCOX 依据服装 ID 和 Renderer 应用衣服覆盖贴图。详细边界见 `apps/docs/game-card-loading.md`。
 - `0.8.0` 根据人物卡读取审计探针恢复原生 `ChangeNowCoordinate(false, true) → Reload(...)` 调用链；`Reload` 的第一个参数按衣服/装饰是否选择设置，并在调用前后同步 `Manager.Character.customLoadGCClear`。人物卡读取不再直接调用 `ReloadAsync` 或额外的服装/装饰协程，避免与原生状态机及 `Reload` 的第三方补丁脱节；异常路径仍会回滚已选区块并尝试恢复角色显示。
 - 2026-09-05 复测发现，衣服和装饰同时选择时，coordinate 子区块保护逻辑错误地恢复了旧装饰，导致原生 `ChangeAccessory(true)` 虽被调用但卡片装饰不在当前角色中。现已改为仅在单独读取衣服时恢复旧装饰、单独读取装饰时恢复旧服装；同时选择两者时保留卡片的完整 coordinate 数据。修复版已编译，需重启游戏后实测。
  - `0.9.0` 增加 H 场景角色枚举、完整当前装配读取和目标换装。通过 `Manager.HSceneManager.Instance.Hscene` 获取活动场景，再按 `sex + characterIndex` 调用 `GetFemales()`/`GetMales()`；服装、头发、面部、身体和配饰分别复用对应的原生单件更新路径，不执行整卡替换或 H 场景重载。程序集级编译已验证；需要重启游戏后在目标 H 场景中实测女性、男性及模组资源加载结果。
+- `2026-09-24` 增加 H 场景人物卡完整读取：解析器接受 `target: "hscene"` 的 `type: "card"`，使用 `LoadCharaFile → ChangeNowCoordinate → Reload`，不再额外刷新 HScene 控制器引用。
+- `2026-09-24` 修复 H 场景人物卡加载超时：完整卡片重载可能在 `ChaControl.Reload`、Sideloader 资源解析和第三方角色控制器回调中同步耗时数十秒，原先沿用的 12 秒延迟命令超时会在角色已经换卡后误报失败。H 场景整卡流程现在使用 120 秒专用超时，仍保留超时保护；超时修改只影响 H 场景 `type: "card"`，普通单件换装和角色编辑器读取继续使用原有策略。
+- `2026-09-25` 根据 `HS2_HCharaSwitcher` 实机探针记录移除 H 场景人物卡读取的额外控制器重绑定和后台队列锁；原生 `Reload` 返回后直接释放命令队列，避免连续读取时后续命令过期。

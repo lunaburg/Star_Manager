@@ -61,7 +61,10 @@ def _import_fbx(path: Path) -> None:
         filepath=str(path),
         use_anim=False,
         use_custom_normals=True,
-        ignore_leaf_bones=True,
+        # Keep the complete FBX skeleton.  Some HS2 shared bones are terminal
+        # ``*_s_*`` bones; dropping leaf bones makes Blender fold their groups
+        # onto a parent and prevents exact common-bone matching.
+        ignore_leaf_bones=False,
         automatic_bone_orientation=False,
     )
     if "FINISHED" not in result:
@@ -165,13 +168,32 @@ def _nearest_weight_transfer(
 ) -> tuple[int, float, int]:
     source_bones = {_canonical_bone_name(bone.name) for bone in target_armature.data.bones}
     source_weights = _source_vertex_weights(source_mesh, source_bones)
-    mapping = _build_bone_mapping(source_mesh, target_armature)
+    source_weighted_names = {
+        canonical
+        for vertex_weights in source_weights
+        for canonical, weight in vertex_weights.items()
+        if weight > 0
+    }
+    mapping = {
+        source_group_name: target_name
+        for source_group_name, target_name in _build_bone_mapping(source_mesh, target_armature).items()
+        if _canonical_bone_name(source_group_name) in source_weighted_names
+    }
     if not mapping:
         raise RuntimeError("No source vertex groups match the target Armature bones")
 
-    for group in list(target_mesh.vertex_groups):
-        target_mesh.vertex_groups.remove(group)
-    target_groups = {bone.name: target_mesh.vertex_groups.new(name=bone.name) for bone in target_armature.data.bones if bone.name in mapping.values()}
+    # Only the source/target common bone groups are touched.  Existing target
+    # groups for every other bone must remain intact, including their exact
+    # per-vertex weights.  Create a missing common group only when the source
+    # has usable weights for that bone.
+    target_groups = {
+        _canonical_bone_name(group.name): group
+        for group in target_mesh.vertex_groups
+    }
+    for target_name in mapping.values():
+        target_key = _canonical_bone_name(target_name)
+        if target_key not in target_groups:
+            target_groups[target_key] = target_mesh.vertex_groups.new(name=target_name)
     if not target_groups:
         raise RuntimeError("No target vertex groups could be created from the source weights")
 
@@ -224,13 +246,19 @@ def _nearest_weight_transfer(
         combined = _combined_weights(source_weights, indices_and_factors, max(0.0, float(weight_threshold)))
         if max_influences > 0 and len(combined) > max_influences:
             combined = dict(sorted(combined.items(), key=lambda item: item[1], reverse=True)[:max_influences])
-        total_weight = sum(combined.values())
-        if total_weight <= 0:
-            continue
-        for canonical, weight in combined.items():
-            target_name = next((name for name in target_groups if _canonical_bone_name(name) == canonical), "")
-            if target_name:
-                target_groups[target_name].add([target_vertex.index], weight / total_weight, "REPLACE")
+        # Remove only the common groups on this vertex, then write the
+        # interpolated source values.  All non-common target groups are left
+        # untouched.  The source values are normalized among the copied
+        # groups, matching the previous transfer behavior without renormalizing
+        # or clearing unrelated target influences.
+        for source_group_name, target_name in mapping.items():
+            canonical = _canonical_bone_name(source_group_name)
+            target_group = target_groups.get(_canonical_bone_name(target_name))
+            if target_group is None:
+                continue
+            target_group.remove([target_vertex.index])
+            if canonical in combined:
+                target_group.add([target_vertex.index], combined[canonical], "REPLACE")
         weighted_vertices += 1
 
     modifier = next((modifier for modifier in target_mesh.modifiers if modifier.type == "ARMATURE"), None)
@@ -241,7 +269,7 @@ def _nearest_weight_transfer(
     if method == "vertices":
         distance_divisor *= neighbor_count
     average_distance = distance_sum / max(1, distance_divisor)
-    return len(target_groups), average_distance, weighted_vertices
+    return len(mapping), average_distance, weighted_vertices
 
 
 def _normalize_mesh_transforms(target_meshes: list[bpy.types.Object]) -> None:
@@ -287,6 +315,7 @@ def _export(output_path: Path, target_meshes: list[bpy.types.Object], target_arm
         use_space_transform=True,
         bake_space_transform=False,
         apply_scale_options="FBX_SCALE_NONE",
+        add_leaf_bones=False,
     )
     if "FINISHED" not in result or not output_path.is_file():
         raise RuntimeError(f"FBX export failed: {sorted(result)}")

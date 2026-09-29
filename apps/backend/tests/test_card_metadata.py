@@ -15,7 +15,12 @@ from star_manager.core.card_metadata import (
     set_card_rating_file,
     set_card_tags_file,
 )
-from star_manager.core.card_parser import extract_png_extra_data, get_card_block, unpack_msgpack
+from star_manager.core.card_parser import (
+    extract_png_extra_data,
+    get_card_block,
+    is_ais_card,
+    unpack_msgpack,
+)
 from star_manager.core.coordinate_card import pack_dotnet_string, pack_msgpack
 
 
@@ -70,6 +75,13 @@ def add_obsolete_smfr_chunk(card: bytes) -> bytes:
 
 
 class CardMetadataTests(unittest.TestCase):
+    def test_marker_probe_does_not_read_the_full_card_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "card.png"
+            path.write_bytes(build_character_card() + b"X" * (2 * 1024 * 1024))
+
+            self.assertTrue(is_ais_card(path))
+
     def test_reads_all_listing_metadata_in_one_result(self):
         metadata = [1, {"favorite": True, "rating": 3, "tags": ["古装", "红发"]}]
         with tempfile.TemporaryDirectory() as temp_dir:

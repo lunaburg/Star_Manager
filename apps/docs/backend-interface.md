@@ -54,7 +54,7 @@ Defined in `apps/electron/preload.cjs`.
 - `exportWorkbenchProcessedTexture(payload)`: validate the current Workbench project and renderer-generated PNG data, open a native save dialog rooted at that project, verify the PNG signature and size limit, and write one user-selected output file for later SB3Utility import.
 - `applyWorkbenchMainResource(payload)`: select an existing project resource, import an external Unity3D, copy the built-in template, or copy a database item Unity3D template; every newly copied resource receives a verified unique CAB before one Workbench CSV row is updated with `MainManifest`, `MainAB`, `MainData`, and `StateType`.
 - `preprocessWorkbenchTemplate(payload)`: create a disposable Workbench Unity3D copy containing only the selected GameObject hierarchy before resource write-back.
-- `packageWorkbenchMod(payload)`: package one validated Workbench project into a formal zipmod under the configured game's `mods` directory; include only `manifest.xml`, Workbench CSV files, Unity3D files referenced by `MainAB`/Unity3D `ThumbAB`, and directly referenced thumbnail files, replacing older archives with the same manifest GUID. After the archive is written, Electron waits for `index_single_zipmod`, which indexes only that generated archive.
+- `packageWorkbenchMod(payload)`: package one validated Workbench project into `<game_dir>/mods/Package/<author>/[<author>]_<mod_name>.zipmod`; include only `manifest.xml`, Workbench CSV files, Unity3D files referenced by `MainAB`/Unity3D `ThumbAB`, and directly referenced thumbnail files, replacing older archives with the same manifest GUID. After the archive is written, Electron waits for `index_single_zipmod`, which indexes only that generated archive.
 - `onWorkbenchPackageProgress(callback)`: subscribe to Workbench packaging progress events and receive an unsubscribe function.
 - `launchGameExecutable(launchType, gameDir)`: launch `HoneySelect2.exe`, `StudioNEOV2.exe`, or `HoneySelect2VR.exe`.
 - `openFbxInBlender(blenderPath, fbxPath)`: validate the configured Blender executable and one `.fbx` file, then launch Blender with a Python FBX import expression and the FBX directory as its working directory.
@@ -63,7 +63,7 @@ Defined in `apps/electron/preload.cjs`.
 - `transformWorkbenchFbx(payload)`: validate one project-contained `.fbx` and Blender, apply the imported rotation and scale to Mesh objects only while preserving Armature coordinate/unit transforms, detect Mesh local translation beyond the `1e-6` tolerance and bake that translation into the mesh data before resetting the Mesh transform, then export a unique `_transformed.fbx` or atomically replace the source. The response includes `alignmentIssueDetected`, `alignmentRepairApplied`, `translationIssueCount`, `translationRepairedCount`, and `translationRepairedMeshNames`. FBX export disables automatic leaf-bone creation. The fixed workflow does not accept custom angle or scale fields.
 - `removeWorkbenchFbxSkin(payload)`: validate one project-contained `.fbx` and the configured Blender executable. When `backupOriginal` is true, copy the source to a unique `_backup.fbx` sibling and write a unique mesh-only output; when false, atomically replace the source after successful processing. This is a single-file local IPC operation, not a batch task or Python HTTP route.
 - `bindWorkbenchHs2Skeleton(payload)`: validate one project-contained Mesh FBX, one external skeleton FBX, and Blender; optionally create a backup, then run the bundled non-skinned HS2 skeleton binding script and return output statistics.
-- `transferWorkbenchFbxWeights(payload)`: validate one external skinned source FBX and one project-contained target FBX, optionally back up the target, then run the bundled nearest-vertex weight transfer script and return mapping statistics.
+- `transferWorkbenchFbxWeights(payload)`: validate one external skinned source FBX and one project-contained target FBX, optionally back up the target, then run the bundled common-bone-only weight transfer script. Existing target weights for non-common bones are preserved and mapping statistics are returned.
 - `apps/build-resources/workbench-templates/blender_bind_hs2_skeleton.py`: standalone Blender script for adding the Armature from a reference `body.fbx` to an unskinned mesh as an object parent only; it deliberately creates no Armature Modifier or Vertex Groups.
 - `loadSettings()`: load persisted app settings.
 - `saveSettings(settings)`: save persisted app settings, including `blenderExecutablePath` and `sb3utilityExecutablePath`.
@@ -160,8 +160,10 @@ Read and file routes:
   - Returns the character-card folder tree.
 - `GET /library/cards/changes?game_dir=&path=`
   - Compares the direct AIS cards in the selected folder with the indexed file-size and nanosecond-modification-time signatures. Returns added, removed, and modified counts; it does not rebuild the card database.
-- `GET /library/cards?game_dir=&path=&scope=&tag=`
-  - Returns direct AIS card files under one card folder by default. `scope=library` together with a non-empty `tag` recursively returns every matching card under `UserData/chara`, excluding `navi`; tag comparison is case-insensitive. When the card database contains a current row for a returned file, each card also includes `dependency_count` and `missing_count`; unindexed cards return `null` for both fields.
+- `GET /library/cards/duplicate-clothing?game_dir=&threshold=&min_dependency_count=&min_shared_count=&include_accessories=0|1`
+  - Reads indexed character-card dependencies and returns exact or near duplicate groups using `0.7 × Jaccard + 0.3 × coverage`. The endpoint is read-only; cleanup uses the existing `bulk_delete_character_cards` task and recycle-bin flow.
+- `GET /library/cards?game_dir=&path=&scope=&tag=&offset=&limit=`
+  - Returns direct AIS card files under one card folder by default. Ordinary directory listings accept `offset` and `limit` (the renderer uses 96 per page) and return `total`, `has_more`, and timing fields; `scope=library` together with a non-empty `tag` recursively returns every matching card under `UserData/chara`, excluding `navi`, and keeps the unpaged behavior. Tag comparison is case-insensitive. When the card database contains a current row for a returned file, each card also includes `dependency_count` and `missing_count`; unindexed cards return `null` for both fields.
 - `GET /library/cards/detail?game_dir=&path=`
   - Returns one character-card profile plus parsed dependency information, resolved against indexed zipmods and mod items when available.
 - `GET /library/cards/missing-mods?game_dir=&path=`
@@ -400,7 +402,7 @@ Current task types:
   - Payload: `{ "input_dir": "...", "output_dir": "...", "delete_empty": false }`
   - Sorts zipmods by manifest metadata.
 - `build_mod_database`
-  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1 }`; `worker_count` is clamped by the backend to the range `1..min(8, floor(available logical processors / 2))`.
+  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1, "card_changes": { "added": 0, "removed": 0, "modified": 0 } }`; `worker_count` is clamped by the backend to the range `1..min(8, floor(available logical processors / 2))`. `card_changes` is an optional snapshot from `/mods/database/changes`; when all three counts are zero and no mod GUID is affected, the incremental task reuses the character-card index without rescanning PNG files. Manual callers may omit it; the backend then computes the snapshot before the mod build, so manual incremental builds use the same fast path.
   - Rebuilds the SQLite mod database, thumbnail cache, character-card database, and card preview cache. The frontend uses incremental mode for automatic small-change rebuilds.
   - Mod item preparation and character-card preparation always use the configured worker count; neither stage is reduced because the current task is small. SQLite writes remain serialized on the main thread.
   - On success, `data.stats.worker_count` and `data.stats.worker_limit` report the effective worker count and the current machine limit.
@@ -434,7 +436,7 @@ Current task types:
   - Copies selected zipmods into author-named folders.
 - `organize_all_zipmods_by_author`
   - Payload: `{ "game_dir": "D:\\HS2" }`
-  - Moves every `*.zipmod` below the current game `mods` directory into `mods/<author>/`. Missing authors use `未知作者`, invalid Windows path characters are replaced, and filename collisions receive a numeric suffix instead of overwriting files. After moving files, empty directories below `mods` are deleted without deleting the `mods` root, then the task refreshes the mod database.
+  - Moves every `*.zipmod` below the current game `mods` directory into `mods/StandardEditionAuthor/<author>/`. Missing authors use `未知作者`, invalid Windows path characters are replaced, and filename collisions receive a numeric suffix instead of overwriting files. After moving files, empty directories below `mods` are deleted without deleting the `mods` root, then the task refreshes the mod database.
 - `bulk_repair_zipmods_unity3d`
   - Payload: `{ "zipmod_ids": [1, 2] }`
   - Repairs repairable item Unity3D issues for selected zipmods. The task processes `.unity3d` references from both `MainAB` and `TexAB` when the referenced file is present only in the game `abdata`. The backend groups references by game-directory source path; sources needed by multiple selected zipmods are copied into each zipmod and kept in game `abdata`, while sources needed by only one selected zipmod may be moved into that zipmod.

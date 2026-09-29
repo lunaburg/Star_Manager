@@ -75,6 +75,48 @@ class BuiltinDatabaseTests(unittest.TestCase):
 
             conn.close()
 
+    def test_reuses_completed_index_for_same_game_path_and_rebuilds_for_new_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_a = root / "game-a"
+            game_b = root / "game-b"
+            for game in (game_a, game_b):
+                bundle = game / "abdata" / "list" / "characustom" / "00.unity3d"
+                bundle.parent.mkdir(parents=True, exist_ok=True)
+                bundle.write_bytes(b"bundle")
+            conn = sqlite3.connect(root / "star-manager.sqlite")
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            item = BuiltinItem(
+                game_dir_key=normalize_game_dir_key(game_a),
+                game_dir=str(game_a.resolve()),
+                category_no="240",
+                item_id="1",
+                name="原版上衣",
+                name_en="Top",
+                name_zh_cn="",
+                name_zh_tw="",
+                source_path="abdata/list/characustom/00.unity3d",
+                source_asset="top",
+                main_manifest="",
+                main_ab="",
+                main_data="",
+                thumb_ab="",
+                thumb_tex="",
+            )
+            with patch(
+                "star_manager.services.builtin_database._read_bundle_items",
+                return_value=[item],
+            ) as read_bundle:
+                build_builtin_items_index(conn, game_a, root / "thumbnails", mode="full")
+                reused = build_builtin_items_index(conn, game_a, root / "thumbnails", mode="full")
+                rebuilt = build_builtin_items_index(conn, game_b, root / "thumbnails", mode="full")
+
+            self.assertTrue(reused["builtin_scan_skipped"])
+            self.assertFalse(rebuilt.get("builtin_scan_skipped", False))
+            self.assertEqual(read_bundle.call_count, 2)
+            conn.close()
+
     def test_coordinate_ids_resolve_by_category_and_skip_empty_slots(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

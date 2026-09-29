@@ -1,5 +1,6 @@
 <script setup>
 import { getAchievementIcon } from "../../achievementIcons";
+import LazyThumbnail from "../LazyThumbnail.vue";
 
 const { ctx } = defineProps({
   ctx: { type: Object, required: true }
@@ -70,6 +71,7 @@ const { ctx } = defineProps({
                 <div class="action-list">
                   <button class="action-item" @click="ctx.importExternalZipmods"><span><strong>导入外部模组</strong><small>扫描 zipmod 和标准结构的 zip，诊断并保留更完整版本。</small></span><span>→</span></button>
                   <button class="action-item action-item--organize" @click="ctx.openOrganizeAllPrompt"><span><strong>一键整理</strong><small>将 mods 下全部 zipmod 移入对应的作者子目录。</small></span><span>→</span></button>
+                  <button class="action-item action-item--card-cleanup" @click="ctx.openDuplicateClothingPrompt"><span><strong>人物卡清理</strong><small>分析服装依赖重复度，找出可以移入回收站的重复人物卡。</small></span><span>→</span></button>
                 </div>
               </section>
               <section v-if="ctx.recentTasks.length" class="panel overview-task-panel">
@@ -88,6 +90,43 @@ const { ctx } = defineProps({
                   </button>
                 </div>
               </section>
+            </aside>
+          </div>
+          <div v-if="ctx.duplicateClothingPrompt.open" class="task-drawer-backdrop" @click.self="ctx.duplicateClothingPrompt.open = false">
+            <aside class="task-drawer duplicate-clothing-drawer" role="dialog" aria-modal="true" aria-labelledby="duplicate-clothing-title">
+              <button class="task-drawer-close" type="button" aria-label="关闭人物卡清理" @click="ctx.duplicateClothingPrompt.open = false">×</button>
+              <div class="task-drawer-heading"><div><h2 id="duplicate-clothing-title">人物卡清理</h2><span>按服装依赖计算重复度</span></div></div>
+              <div class="duplicate-clothing-controls">
+                <label>阈值 <input v-model.number="ctx.duplicateClothingPrompt.threshold" type="number" min="50" max="100" step="1" @change="ctx.analyzeDuplicateClothingCards">%</label>
+                <label>最少共同服装 <input v-model.number="ctx.duplicateClothingPrompt.minSharedCount" type="number" min="1" max="50" @change="ctx.analyzeDuplicateClothingCards"></label>
+                <label>最少服装依赖 <input v-model.number="ctx.duplicateClothingPrompt.minDependencyCount" type="number" min="1" max="50" @change="ctx.analyzeDuplicateClothingCards"></label>
+                <label class="duplicate-clothing-check"><input v-model="ctx.duplicateClothingPrompt.includeAccessories" type="checkbox" @change="ctx.analyzeDuplicateClothingCards"> 包含配饰</label>
+              </div>
+              <div v-if="ctx.duplicateClothingPrompt.stats" class="duplicate-clothing-stats">
+                <span>扫描 {{ ctx.duplicateClothingPrompt.stats.cards_scanned }} 张</span><span>符合 {{ ctx.duplicateClothingPrompt.stats.eligible_cards }} 张</span><span>发现 {{ ctx.duplicateClothingPrompt.stats.matched_groups }} 组</span>
+              </div>
+              <div v-if="ctx.duplicateClothingPrompt.loading" class="detail-inline-state">正在分析人物卡依赖…</div>
+              <div v-else-if="!ctx.duplicateClothingPrompt.groups.length" class="detail-inline-state">没有达到当前阈值的重复人物卡。</div>
+              <div v-else class="duplicate-clothing-groups">
+                <section v-for="group in ctx.duplicateClothingPrompt.groups" :key="group.id" class="duplicate-clothing-group">
+                  <header><strong>{{ group.type === 'exact' ? '完全重复' : '高度重复' }} · {{ Math.round(group.score * 100) }}%</strong><span>{{ group.shared_count }} 个共同服装</span></header>
+                  <label v-for="card in group.cards" :key="card.id" class="duplicate-clothing-card">
+                    <input type="checkbox" :checked="ctx.duplicateClothingPrompt.selected.has(card.id)" @change="ctx.toggleDuplicateClothingCard(card.id)">
+                    <LazyThumbnail
+                      :src="ctx.backendAssetUrl(card.cover_url || card.thumbnail_url)"
+                      :alt="`${card.name} 封面`"
+                      :eager="false"
+                    />
+                    <span><strong>{{ card.name }}</strong><small>{{ card.relative_path }}</small><small>服装依赖 {{ card.dependency_count }} · 缺失 {{ card.missing_count }}</small></span>
+                    <em v-if="card.favorite">收藏</em>
+                  </label>
+                </section>
+              </div>
+              <p v-if="ctx.duplicateClothingPrompt.error" class="prompt-error">{{ ctx.duplicateClothingPrompt.error }}</p>
+              <div class="prompt-actions">
+                <button type="button" @click="ctx.selectSuggestedDuplicateCards">选择建议清理</button>
+                <button type="button" :disabled="!ctx.duplicateClothingPrompt.selected.size || ctx.duplicateClothingPrompt.deleting" @click="ctx.deleteDuplicateClothingCards">{{ ctx.duplicateClothingPrompt.deleting ? '移入中…' : `移入回收站（${ctx.duplicateClothingPrompt.selected.size}）` }}</button>
+              </div>
             </aside>
           </div>
           <div v-if="ctx.selectedTask" class="task-drawer-backdrop" @click.self="ctx.selectedTask = null">

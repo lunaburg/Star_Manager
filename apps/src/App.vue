@@ -552,6 +552,7 @@ const trashRoot = ref("");
 const pendingDeleteEntries = ref([]);
 const pendingDeleteAction = ref(false);
 const trashFilter = ref("all");
+const emptyTrashPrompt = reactive({ open: false, count: 0 });
 const filteredTrashEntries = computed(() => {
   if (trashFilter.value === "all") return trashEntries.value;
   return trashEntries.value.filter((item) => item.kind === trashFilter.value);
@@ -726,6 +727,7 @@ let clothesListRequestId = 0;
 let clothesIndexRetryTimer = 0;
 let clothesTreeRefreshTimer = 0;
 let sceneListRequestId = 0;
+let cardListRequestId = 0;
 const selectedCardProfileError = ref("");
 const cardProfileEditor = reactive({
   editing: false,
@@ -744,9 +746,26 @@ const cardProfileEditor = reactive({
 const cardLibrary = reactive({
   checked: false,
   loading: false,
+  loadingMore: false,
   error: "",
   validGameDir: false,
-  root: ""
+  root: "",
+  total: null,
+  nextOffset: 0,
+  hasMore: false
+});
+const duplicateClothingPrompt = reactive({
+  open: false,
+  loading: false,
+  deleting: false,
+  error: "",
+  threshold: 85,
+  minDependencyCount: 3,
+  minSharedCount: 3,
+  includeAccessories: false,
+  groups: [],
+  stats: null,
+  selected: new Set()
 });
 const clothesLibrary = reactive({
   checked: false,
@@ -780,6 +799,7 @@ const sceneLibrary = reactive({
 const ITEM_PAGE_SIZE = 96;
 // The grid is image-first. LazyThumbnail still requests only rows near the
 // viewport; card payload parsing happens only when a user opens a detail view.
+const CHARACTER_CARD_PAGE_SIZE = 96;
 const CLOTHES_CARD_PAGE_SIZE = 96;
 const SCENE_CARD_PAGE_SIZE = 96;
 const MOD_PAGE_SIZE = 200;
@@ -1511,6 +1531,8 @@ const modDatabase = reactive({
   offset: 0,
   limit: MOD_PAGE_SIZE,
   total: 0,
+  // Database-wide count stays independent from the current list filters.
+  filteredTotal: 0,
   hasMore: false
 });
 
@@ -1563,6 +1585,9 @@ const visibleCards = computed(() => {
   return baseVisibleCards.value.filter((card) => card.favorite);
 });
 const cardBrowserCountText = computed(() => {
+  const loadedCountText = cardLibrary.total != null && Number(cardLibrary.total) > cards.value.length
+    ? `${cards.value.length} / ${Number(cardLibrary.total)}`
+    : String(cards.value.length);
   if (cardFavoriteFilter.value) {
     return `收藏 ${visibleCards.value.length} / ${baseVisibleCards.value.length}`;
   }
@@ -1578,7 +1603,7 @@ const cardBrowserCountText = computed(() => {
     }
     return `标签“${cardDependencyFilter.value.slice(4)}” ${visibleCards.value.length} / ${cards.value.length}`;
   }
-  return `已加载 ${cards.value.length}`;
+  return `已加载 ${loadedCountText}`;
 });
 const selectedCardDetail = computed(() => {
   return visibleCards.value.find((card) => card.absolutePath === selectedCardDetailPath.value) || null;
@@ -2065,6 +2090,80 @@ const overviewSummaryCards = computed(() => {
   }
   return cards;
 });
+
+function toggleDuplicateClothingCard(path) {
+  if (!path) return;
+  const next = new Set(duplicateClothingPrompt.selected);
+  if (next.has(path)) next.delete(path);
+  else next.add(path);
+  duplicateClothingPrompt.selected = next;
+}
+
+function selectSuggestedDuplicateCards() {
+  const next = new Set();
+  for (const group of duplicateClothingPrompt.groups || []) {
+    for (const path of group.suggested_delete || []) next.add(path);
+  }
+  duplicateClothingPrompt.selected = next;
+}
+
+async function analyzeDuplicateClothingCards() {
+  if (!paths.gameDir) {
+    duplicateClothingPrompt.error = "请先选择有效的 HS2 目录。";
+    return;
+  }
+  duplicateClothingPrompt.loading = true;
+  duplicateClothingPrompt.error = "";
+  try {
+    const query = new URLSearchParams({
+      game_dir: paths.gameDir,
+      threshold: String(Number(duplicateClothingPrompt.threshold) / 100),
+      min_dependency_count: String(duplicateClothingPrompt.minDependencyCount),
+      min_shared_count: String(duplicateClothingPrompt.minSharedCount),
+      include_accessories: duplicateClothingPrompt.includeAccessories ? "1" : "0"
+    });
+    const result = await window.desktopApi?.backendRequest?.(`/library/cards/duplicate-clothing?${query.toString()}`);
+    if (!result?.ok) throw new Error(result?.error || "人物卡重复分析失败");
+    duplicateClothingPrompt.groups = result.groups || [];
+    duplicateClothingPrompt.stats = result.stats || null;
+    duplicateClothingPrompt.selected = new Set();
+    selectSuggestedDuplicateCards();
+  } catch (error) {
+    duplicateClothingPrompt.error = error.message;
+    duplicateClothingPrompt.groups = [];
+  } finally {
+    duplicateClothingPrompt.loading = false;
+  }
+}
+
+function openDuplicateClothingPrompt() {
+  duplicateClothingPrompt.open = true;
+  duplicateClothingPrompt.error = "";
+  void analyzeDuplicateClothingCards();
+}
+
+async function deleteDuplicateClothingCards() {
+  const cardPaths = Array.from(duplicateClothingPrompt.selected);
+  if (!cardPaths.length || duplicateClothingPrompt.deleting) return;
+  duplicateClothingPrompt.deleting = true;
+  duplicateClothingPrompt.error = "";
+  try {
+    await submitTaskInBackground("bulk_delete_character_cards", { card_paths: cardPaths }, async (task) => {
+      if (task.status === "completed") {
+        duplicateClothingPrompt.selected = new Set();
+        await analyzeDuplicateClothingCards();
+        await loadCardTree();
+      } else if (task.status === "failed") {
+        duplicateClothingPrompt.error = task.error || "清理人物卡失败";
+      }
+      duplicateClothingPrompt.deleting = false;
+    });
+  } catch (error) {
+    duplicateClothingPrompt.error = error.message;
+    duplicateClothingPrompt.deleting = false;
+  }
+}
+
 const cardFolderDisplay = computed(() => {
   const suffix = selectedCardFolder.value ? `/${selectedCardFolder.value}` : "";
   return `UserData/chara${suffix}`;
@@ -3234,6 +3333,9 @@ async function loadCardTree() {
     expandedCardFolders.value = collectExpandableCardFolderPaths(cardTree.value);
     refreshVisibleCardFolders();
     stats.cards = Number(result.total || 0);
+    if (result.timings) {
+      log(`[Cards Tree Timing] ${JSON.stringify(result.timings)}`);
+    }
     await selectCardFolder(selectedCardFolder.value);
     if (cardTagFilter.scope === "library" && cardDependencyFilter.value.startsWith("tag:")) {
       await loadLibraryCardsByTag(cardDependencyFilter.value.slice(4));
@@ -3262,6 +3364,7 @@ async function loadCardTree() {
 
 async function selectCardFolder(relativePath = "") {
   resetCardLibraryScrollPosition("character");
+  const requestId = ++cardListRequestId;
   selectedCardFolder.value = relativePath || "";
   selectedCards.value = new Set();
   selectedCardDetailPath.value = "";
@@ -3269,18 +3372,32 @@ async function selectCardFolder(relativePath = "") {
   selectedCardDependencies.value = [];
   selectedCardProfileError.value = "";
   cardBulkMode.value = false;
+  cards.value = [];
+  cardLibrary.total = null;
+  cardLibrary.nextOffset = 0;
+  cardLibrary.hasMore = false;
+  cardLibrary.loadingMore = false;
   const startedAt = performance.now();
 
   if (!backendReady.value || !paths.gameDir) return;
   if (!cardLibrary.validGameDir && cardLibrary.checked) return;
+
+  // The root node normally contains only female/male directories. When it has
+  // no direct cards, avoid a second request that would reload the full card
+  // metadata index just to return an empty list.
+  if (!selectedCardFolder.value && cardTree.value && Number(cardTree.value.count || 0) === 0) {
+    log("[Cards List Timing] skipped root listing because the root has no direct cards");
+    return;
+  }
 
   cardLibrary.loading = true;
   cardLibrary.error = "";
 
   try {
     const result = await window.desktopApi?.backendRequest?.(
-      `/library/cards?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedCardFolder.value)}`
+      `/library/cards?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedCardFolder.value)}&offset=0&limit=${CHARACTER_CARD_PAGE_SIZE}`
     );
+    if (requestId !== cardListRequestId) return;
     if (!result?.ok) {
       throw new Error(result?.error || "人物卡列表读取失败");
     }
@@ -3295,12 +3412,19 @@ async function selectCardFolder(relativePath = "") {
 
     cardLibrary.validGameDir = true;
     cards.value = mapCharacterCardRows(result.cards);
+    cardLibrary.total = result.total == null ? null : Number(result.total);
+    cardLibrary.nextOffset = cards.value.length;
+    cardLibrary.hasMore = Boolean(result.has_more);
+    if (result.timings) {
+      log(`[Cards List Timing] ${JSON.stringify(result.timings)}`);
+    }
     log(
       `[Startup] selectCardFolder(${selectedCardFolder.value || "/"}) completed in ${formatDurationMs(
         performance.now() - startedAt
       )} (cards=${cards.value.length})`
     );
   } catch (error) {
+    if (requestId !== cardListRequestId) return;
     cardLibrary.error = error.message;
     cards.value = [];
     log(
@@ -3310,8 +3434,50 @@ async function selectCardFolder(relativePath = "") {
     );
     log(`[Cards Error] ${error.message}`);
   } finally {
-    cardLibrary.loading = false;
+    if (requestId === cardListRequestId) cardLibrary.loading = false;
   }
+}
+
+async function loadMoreCharacterCards() {
+  if (
+    cardLibrary.loading
+    || cardLibrary.loadingMore
+    || !cardLibrary.hasMore
+    || !backendReady.value
+    || !paths.gameDir
+    || !cardLibrary.validGameDir
+  ) return;
+
+  const requestId = cardListRequestId;
+  const offset = cardLibrary.nextOffset || cards.value.length;
+  cardLibrary.loadingMore = true;
+  try {
+    const result = await window.desktopApi?.backendRequest?.(
+      `/library/cards?game_dir=${encodeQuery(paths.gameDir)}&path=${encodeQuery(selectedCardFolder.value)}&offset=${offset}&limit=${CHARACTER_CARD_PAGE_SIZE}`
+    );
+    if (requestId !== cardListRequestId) return;
+    if (!result?.ok) throw new Error(result?.error || "更多人物卡读取失败");
+    const nextCards = mapCharacterCardRows(result.cards);
+    cards.value = [...cards.value, ...nextCards];
+    cardLibrary.total = result.total == null ? cardLibrary.total : Number(result.total);
+    cardLibrary.nextOffset = offset + nextCards.length;
+    cardLibrary.hasMore = Boolean(result.has_more);
+    if (result.timings) {
+      log(`[Cards List Timing] ${JSON.stringify(result.timings)}`);
+    }
+  } catch (error) {
+    if (requestId !== cardListRequestId) return;
+    cardLibrary.error = error.message;
+    log(`[Cards Error] ${error.message}`);
+  } finally {
+    if (requestId === cardListRequestId) cardLibrary.loadingMore = false;
+  }
+}
+
+function handleCharacterCardGridScroll(event) {
+  const element = event?.currentTarget;
+  if (!element || element.scrollHeight - element.scrollTop - element.clientHeight > 900) return;
+  void loadMoreCharacterCards();
 }
 
 function rebuildCharacterCardDatabase() {
@@ -4807,6 +4973,9 @@ async function openPackagedMod(guid, zipmodId = 0) {
       return { ok: false, error: `模组数据库中暂时找不到 GUID：${targetGuid}；请重试单个模组同步` };
     }
 
+    if (!modDatabase.checked || !modDatabase.exists) {
+      await checkModDatabase();
+    }
     libraryMode.value = "mods";
     modTab.value = "详情";
     modFilters.author = "";
@@ -4819,7 +4988,7 @@ async function openPackagedMod(guid, zipmodId = 0) {
     modDatabase.checked = true;
     modDatabase.exists = true;
     modDatabase.offset = 1;
-    modDatabase.total = 1;
+    modDatabase.filteredTotal = 1;
     modDatabase.hasMore = false;
     selectMod(target);
     activeView.value = "mods";
@@ -4888,11 +5057,14 @@ async function locateSourceMod(row = selectedItem.value) {
     log(`[Items Error] 未找到来源模组：${row.sourceMod || zipmodId}`);
     return;
   }
+  if (!modDatabase.checked || !modDatabase.exists) {
+    await checkModDatabase();
+  }
   modRows.value = [target];
   modDatabase.checked = true;
   modDatabase.exists = true;
   modDatabase.offset = 1;
-  modDatabase.total = 1;
+  modDatabase.filteredTotal = 1;
   modDatabase.hasMore = false;
   selectMod(target);
 }
@@ -6058,6 +6230,7 @@ async function checkModDatabase() {
     modDatabase.checked = true;
     modDatabase.exists = Boolean(database.exists);
     modDatabase.total = Number(database.zipmod_count || 0);
+    modDatabase.filteredTotal = modDatabase.total;
     stats.zipmodErrors = Number(database.zipmod_error_count ?? stats.zipmodErrors);
     stats.zipmodWarnings = Number(database.zipmod_warning_count ?? stats.zipmodWarnings);
     stats.duplicateZipmods = Number(database.duplicate_guid_count ?? stats.duplicateZipmods);
@@ -6075,6 +6248,7 @@ async function checkModDatabase() {
       selectedModIds.value = new Set();
       selectedModItems.value = [];
       modDatabase.offset = 0;
+      modDatabase.filteredTotal = 0;
       modDatabase.hasMore = false;
     }
 
@@ -6105,6 +6279,8 @@ async function checkModDatabase() {
     selectedItem.value = null;
     selectedModIds.value = new Set();
     selectedModItems.value = [];
+    modDatabase.total = 0;
+    modDatabase.filteredTotal = 0;
     log(`[Mods Error] ${error.message}`);
     return false;
   } finally {
@@ -6132,7 +6308,10 @@ async function checkStartupDatabaseChanges() {
       const totalChanges = Number(data.total_changes || 0);
       taskHint.value = `检测到 ${totalChanges} 个文件变化，正在更新数据库`;
       log(`[Database] detected ${totalChanges} file changes; rebuilding database`);
-      await submitTask("build_mod_database", { mode: "incremental" });
+      await submitTask("build_mod_database", {
+        mode: "incremental",
+        card_changes: data.changes?.cards || null
+      });
       return;
     }
     taskHint.value = "检测到较大变化，请手动重建数据库";
@@ -6180,6 +6359,7 @@ async function loadModRows({ reset = false } = {}) {
       selectedModItems.value = [];
       modDatabase.offset = 0;
       modDatabase.total = 0;
+      modDatabase.filteredTotal = 0;
       modDatabase.hasMore = false;
       log("[Mods] database changes checked");
       return;
@@ -6191,8 +6371,10 @@ async function loadModRows({ reset = false } = {}) {
     if (reset) selectedModItems.value = [];
     if (modBulkMode.value) syncSelectedModIdsWithVisibleRows();
     modDatabase.offset = modRows.value.length;
-    modDatabase.total = Number(data.total || 0);
+    modDatabase.filteredTotal = Number(data.total || 0);
     modDatabase.hasMore = Boolean(data.has_more);
+    // The summary badge uses the database-wide count; this value is only for
+    // the current filtered list's pagination progress.
     stats.zipmods = modDatabase.total;
   } catch (error) {
     modDatabase.error = error.message;
@@ -9469,9 +9651,25 @@ async function permanentlyDeleteTrash(item) {
   }
 }
 
+function openEmptyTrashPrompt() {
+  if (!trashEntries.value.length || trashAction.value) return;
+  emptyTrashPrompt.count = trashEntries.value.length;
+  emptyTrashPrompt.open = true;
+}
+
+function cancelEmptyTrash() {
+  if (trashAction.value) return;
+  emptyTrashPrompt.open = false;
+}
+
+async function confirmEmptyTrash() {
+  if (!emptyTrashPrompt.open || trashAction.value) return;
+  emptyTrashPrompt.open = false;
+  await emptyTrash();
+}
+
 async function emptyTrash() {
   if (!trashEntries.value.length || trashAction.value) return;
-  if (!window.confirm(`确定清空回收站中的 ${trashEntries.value.length} 个项目？此操作无法恢复。`)) return;
   trashAction.value = "empty";
   trashError.value = "";
   trashNotice.value = "";
@@ -9563,6 +9761,13 @@ const appCtx = reactive({
   buildModDatabase,
   importExternalZipmods,
   openOrganizeAllPrompt,
+  duplicateClothingPrompt,
+  backendAssetUrl,
+  openDuplicateClothingPrompt,
+  analyzeDuplicateClothingCards,
+  toggleDuplicateClothingCard,
+  selectSuggestedDuplicateCards,
+  deleteDuplicateClothingCards,
   bulkActionBusy,
   bulkAuthorSuggestions,
   bulkDeletePrompt,
@@ -9616,6 +9821,8 @@ const appCtx = reactive({
   refreshCurrentCardFolder,
   cardFolders,
   cardLibrary,
+  loadMoreCharacterCards,
+  handleCharacterCardGridScroll,
   clothesLibrary,
   clothesFolders,
   clothesCards,
@@ -9669,10 +9876,14 @@ const appCtx = reactive({
   pendingDeleteEntries,
   pendingDeleteAction,
   trashFilter,
+  emptyTrashPrompt,
   loadTrash,
   retryPendingDeletes,
   restoreTrash,
   permanentlyDeleteTrash,
+  openEmptyTrashPrompt,
+  cancelEmptyTrash,
+  confirmEmptyTrash,
   emptyTrash,
   formatTrashDate,
   closeModAuthorFilterSoon,

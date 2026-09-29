@@ -32,6 +32,7 @@ from star_manager.services.card_library import (
 from star_manager.services.mod_database import (
     DEFAULT_DB_PATH,
     DEFAULT_THUMBNAIL_DIR,
+    assess_card_file_changes,
     analyze_duplicate_zipmods,
     bulk_repair_zipmods_unity3d_from_game,
     build_database,
@@ -209,6 +210,7 @@ SUPPORTED_API_ROUTES = {
     "/library/cards/update-profile",
     "/library/cards/tree",
     "/library/cards/changes",
+    "/library/cards/duplicate-clothing",
     "/library/cards/folders/create",
     "/library/cards/folders/rename",
     "/library/clothes/tree",
@@ -354,6 +356,7 @@ def organize_all_zipmods_by_author(game_dir: str, reporter: WorkflowReporter) ->
         raise ValueError("请先选择有效的 HS2 游戏目录。")
 
     mods_root = (game_root / "mods").resolve()
+    author_root = (mods_root / "StandardEditionAuthor").resolve()
     zipmod_paths = sorted(
         (path.resolve() for path in mods_root.rglob("*.zipmod") if path.is_file()),
         key=lambda path: str(path).lower(),
@@ -370,7 +373,7 @@ def organize_all_zipmods_by_author(game_dir: str, reporter: WorkflowReporter) ->
         try:
             manifest = read_manifest(source)
             author_dir = _safe_author_directory(manifest.author)
-            target_dir = (mods_root / author_dir).resolve()
+            target_dir = (author_root / author_dir).resolve()
             if target_dir != mods_root and mods_root not in target_dir.parents:
                 raise ValueError("作者目录超出 mods 范围")
             target = target_dir / source.name
@@ -1243,6 +1246,23 @@ def run_task(task: TaskState, payload: dict) -> None:
             reporter.title("Build mod database")
             reporter.message(f"Building mod database from: {game_dir}")
 
+            known_card_changes = payload.get("card_changes")
+            if (
+                str(mode).lower() != "full"
+                and not isinstance(known_card_changes, dict)
+                and db_path.is_file()
+            ):
+                card_change_conn = sqlite3.connect(db_path)
+                card_change_conn.row_factory = sqlite3.Row
+                try:
+                    init_db(card_change_conn)
+                    known_card_changes = assess_card_file_changes(
+                        card_change_conn,
+                        Path(game_dir),
+                    )
+                finally:
+                    card_change_conn.close()
+
             def report_database_progress(value: int, message: str) -> None:
                 reporter.progress(weighted_mod_database_progress(value), 100)
                 reporter.message(message)
@@ -1270,6 +1290,7 @@ def run_task(task: TaskState, payload: dict) -> None:
                 mode=mode,
                 affected_mod_guids=stats.get("affected_mod_guids"),
                 worker_count=payload.get("worker_count"),
+                known_card_changes=known_card_changes,
             )
             mod_timings = stats.get("timings") if isinstance(stats.get("timings"), dict) else {}
             card_timings = card_stats.get("timings") if isinstance(card_stats.get("timings"), dict) else {}

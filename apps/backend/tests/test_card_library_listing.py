@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from star_manager.services.card_library import (  # noqa: E402
     assess_character_card_folder_changes,
+    build_character_card_tree,
     get_character_card_detail,
     list_character_card_tags,
     list_character_cards,
@@ -17,6 +18,103 @@ from star_manager.services.mod_database_core import init_db, timestamp_to_utc  #
 
 
 class CardLibraryListingTests(unittest.TestCase):
+    def test_character_card_tree_uses_indexed_counts_without_reading_png_markers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game = root / "game"
+            card_root = game / "UserData" / "chara"
+            card = card_root / "female" / "pack" / "card.png"
+            card.parent.mkdir(parents=True)
+            card.write_bytes(b"card")
+            ignored = card_root / "navi" / "ignored.png"
+            ignored.parent.mkdir(parents=True)
+            ignored.write_bytes(b"ignored")
+            (game / "HoneySelect2.exe").write_bytes(b"")
+
+            db_path = root / "cards.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, relative_path, file_name, parse_status,
+                        metadata_file_size, metadata_modified_ns, last_scanned_at
+                    ) VALUES (?, ?, ?, 'ok', ?, ?, '')
+                    """,
+                    (
+                        str(card.resolve()),
+                        "female/pack/card.png",
+                        card.name,
+                        card.stat().st_size,
+                        card.stat().st_mtime_ns,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, relative_path, file_name, parse_status,
+                        metadata_file_size, metadata_modified_ns, last_scanned_at
+                    ) VALUES (?, ?, ?, 'ok', ?, ?, '')
+                    """,
+                    (
+                        str(ignored.resolve()),
+                        "navi/ignored.png",
+                        ignored.name,
+                        ignored.stat().st_size,
+                        ignored.stat().st_mtime_ns,
+                    ),
+                )
+            conn.close()
+
+            with patch(
+                "star_manager.services.card_library.is_ais_card",
+                side_effect=AssertionError("indexed tree counts must not inspect PNG markers"),
+            ):
+                result = build_character_card_tree(str(game), db_path=db_path)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["timings"]["count_source"], "indexed")
+            self.assertEqual(result["timings"]["ais_check_count"], 0)
+
+    def test_character_card_tree_falls_back_when_index_signature_is_stale(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game = root / "game"
+            card_root = game / "UserData" / "chara"
+            card = card_root / "female" / "card.png"
+            card.parent.mkdir(parents=True)
+            card.write_bytes(b"changed")
+            (game / "HoneySelect2.exe").write_bytes(b"")
+
+            db_path = root / "cards.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO character_cards (
+                        file_path, relative_path, file_name, parse_status,
+                        metadata_file_size, metadata_modified_ns, last_scanned_at
+                    ) VALUES (?, ?, ?, 'ok', 1, 1, '')
+                    """,
+                    (str(card.resolve()), "female/card.png", card.name),
+                )
+            conn.close()
+
+            with patch(
+                "star_manager.services.card_library.is_ais_card",
+                return_value=True,
+            ) as marker_check:
+                result = build_character_card_tree(str(game), db_path=db_path)
+
+            self.assertEqual(result["timings"]["count_source"], "png_marker")
+            self.assertGreater(marker_check.call_count, 0)
+            self.assertEqual(result["total"], 1)
+
     def test_assesses_direct_folder_changes_using_file_signatures(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             game = Path(temp_dir) / "game"
@@ -150,6 +248,35 @@ class CardLibraryListingTests(unittest.TestCase):
                 )
 
             self.assertEqual(result["cards"][0]["name"], "卡内姓名")
+
+    def test_character_card_listing_paginates_directory_candidates(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game = root / "game"
+            folder = game / "UserData" / "chara" / "female"
+            folder.mkdir(parents=True)
+            for name in ("a.png", "b.png", "c.png"):
+                (folder / name).write_bytes(b"card")
+
+            def listing_data(path):
+                return {"name": path.stem, "favorite": False, "rating": 0, "tags": []}
+
+            with patch("star_manager.services.card_library.is_hs2_game_dir", return_value=True), patch(
+                "star_manager.services.card_library.read_character_card_listing_data",
+                side_effect=listing_data,
+            ) as read_listing:
+                result = list_character_cards(
+                    str(game),
+                    "female",
+                    db_path=root / "missing.sqlite",
+                    offset=1,
+                    limit=1,
+                )
+
+            self.assertEqual([card["filename"] for card in result["cards"]], ["b.png"])
+            self.assertEqual(result["total"], 3)
+            self.assertTrue(result["has_more"])
+            read_listing.assert_called_once_with(folder / "b.png")
 
     def test_lists_indexed_dependency_counts_for_each_card(self):
         with tempfile.TemporaryDirectory() as temp_dir:

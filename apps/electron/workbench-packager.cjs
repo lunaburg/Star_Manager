@@ -47,6 +47,13 @@ function safeFilePart(value, fallback) {
   return cleaned || fallback;
 }
 
+function safeDirectoryPart(value, fallback) {
+  const cleaned = safeFilePart(value, fallback);
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(cleaned)
+    ? `_${cleaned}`
+    : cleaned;
+}
+
 function parseCsvRows(text) {
   const rows = [];
   let row = [];
@@ -434,6 +441,10 @@ function packageWorkbenchMod({ projectPath, gameDir, project, oldZipmodPaths = [
   const archiveFiles = collectPackageFiles(resolvedProjectPath, project, onProgress);
   const modsPath = path.join(resolvedGameDir, "mods");
   fs.mkdirSync(modsPath, { recursive: true });
+  const packagePath = path.join(modsPath, "Package");
+  fs.mkdirSync(packagePath, { recursive: true });
+  const authorPath = path.join(packagePath, safeDirectoryPart(project.author, "author"));
+  fs.mkdirSync(authorPath, { recursive: true });
 
   const baseName = `[${safeFilePart(project.author, "author")}]_${safeFilePart(project.name, "mod")}`;
   onProgress?.({ stage: "scanning", message: "正在使用模组数据库定位旧版本" });
@@ -447,9 +458,9 @@ function packageWorkbenchMod({ projectPath, gameDir, project, oldZipmodPaths = [
       && fs.existsSync(filePath)
       && fs.statSync(filePath).isFile()
     ));
-  const targetPath = nextAvailableTarget(modsPath, baseName, oldZipmods);
+  const targetPath = nextAvailableTarget(authorPath, baseName, oldZipmods);
   const temporaryPath = path.join(
-    modsPath,
+    authorPath,
     `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`
   );
 

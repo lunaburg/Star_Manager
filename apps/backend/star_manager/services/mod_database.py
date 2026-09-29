@@ -102,6 +102,7 @@ from star_manager.services.mod_database_assets import (
     write_thumbnail_profile,
     zipmod_unity3d_diagnostics,
     refresh_unity3d_provider_index,
+    load_unity3d_provider_index,
     unity3d_provider_lookup_keys,
 )
 from star_manager.services.builtin_database import build_builtin_items_index
@@ -229,12 +230,57 @@ def build_candidates_from_file_stats(
             """
         )
     }
+    # Duplicate GUID files are intentionally kept outside ``zipmods`` but
+    # still participate in filesystem change detection. Reuse their manifest
+    # fields too, otherwise every unchanged duplicate is reread on each run.
+    for row in conn.execute(
+        """
+        SELECT guid, version, author, file_path, file_size, modified_at
+        FROM duplicate_zipmods
+        """
+    ):
+        existing_by_path.setdefault(
+            str(row["file_path"]),
+            {
+                "guid": row["guid"],
+                "name": "",
+                "version": row["version"],
+                "author": row["author"],
+                "file_path": row["file_path"],
+                "relative_path": "",
+                "file_size": row["file_size"],
+                "modified_at": row["modified_at"],
+                "scan_status": "ok",
+                "scan_error": "",
+            },
+        )
 
     def report_discovered(count: int) -> None:
         if progress_callback is not None:
             progress_callback("discover", count, 0)
 
-    zipmod_paths = find_zipmods(game_dir, report_discovered)
+    def discover_zipmods_with_stats() -> list[tuple[Path, os.stat_result]]:
+        paths: list[tuple[Path, os.stat_result]] = []
+        pending = [mods_dir]
+        while pending:
+            directory = pending.pop()
+            try:
+                entries = list(os.scandir(directory))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+                    elif entry.name.casefold().endswith(".zipmod"):
+                        paths.append((Path(entry.path), entry.stat(follow_symlinks=False)))
+                        report_discovered(len(paths))
+                except OSError:
+                    continue
+        return sorted(paths, key=lambda item: item[0].as_posix().casefold())
+
+    zipmod_entries = discover_zipmods_with_stats()
+    zipmod_paths = [path for path, _stat in zipmod_entries]
     total = len(zipmod_paths)
     if progress_callback is not None:
         progress_callback("discover_done", total, total)
@@ -253,9 +299,11 @@ def build_candidates_from_file_stats(
         ):
             progress_callback("manifest", completed_manifest_count, total)
 
-    for index, path in enumerate(zipmod_paths, start=1):
-        resolved_path = path.resolve()
-        stat = path.stat()
+    for index, (path, stat) in enumerate(zipmod_entries, start=1):
+        # ``os.scandir`` already returns absolute paths below the resolved
+        # mods root; avoid an extra filesystem-backed Path.resolve() call for
+        # every archive during incremental checks.
+        resolved_path = Path(os.path.abspath(path))
         modified_at = timestamp_to_utc(stat.st_mtime)
         relative_path = path.relative_to(mods_dir).as_posix()
         existing = existing_by_path.get(str(resolved_path))
@@ -389,9 +437,27 @@ def assess_database_changes(
 
 def assess_zipmod_file_changes(conn: sqlite3.Connection, game_dir: Path) -> dict[str, int]:
     current: dict[str, tuple[int, str]] = {}
-    for path in find_zipmods(game_dir):
-        stat = path.stat()
-        current[str(path.resolve())] = (stat.st_size, timestamp_to_utc(stat.st_mtime))
+    mods_dir = game_dir / "mods"
+    pending = [mods_dir]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = os.scandir(directory)
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+                    elif entry.name.casefold().endswith(".zipmod"):
+                        stat = entry.stat(follow_symlinks=False)
+                        current[os.path.abspath(entry.path)] = (
+                            stat.st_size,
+                            timestamp_to_utc(stat.st_mtime),
+                        )
+                except OSError:
+                    continue
 
     existing = {
         str(row["file_path"]): (int(row["file_size"] or 0), str(row["modified_at"] or ""))
@@ -437,16 +503,27 @@ def assess_card_file_changes(conn: sqlite3.Connection, game_dir: Path) -> dict[s
     root = get_card_root(str(game_dir))
     current: dict[str, str] = {}
     if root.is_dir():
-        for path in root.rglob("*.png"):
-            if not path.is_file():
-                continue
+        pending = [(root, True)]
+        while pending:
+            directory, is_root = pending.pop()
             try:
-                relative = path.resolve().relative_to(root.resolve())
-            except ValueError:
+                entries = os.scandir(directory)
+            except OSError:
                 continue
-            if relative.parts and relative.parts[0].casefold() in IGNORED_ROOT_CARD_DIRS:
-                continue
-            current[str(path.resolve())] = timestamp_to_utc(path.stat().st_mtime)
+            with entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if is_root and entry.name.casefold() in IGNORED_ROOT_CARD_DIRS:
+                                continue
+                            pending.append((entry.path, False))
+                        elif entry.name.casefold().endswith(".png") and entry.is_file(
+                            follow_symlinks=False
+                        ):
+                            stat = entry.stat(follow_symlinks=False)
+                            current[os.path.abspath(entry.path)] = timestamp_to_utc(stat.st_mtime)
+                    except OSError:
+                        continue
 
     existing = {
         str(row["file_path"]): str(row["modified_at"] or "")
@@ -893,12 +970,30 @@ def build_database(
             guid: choose_primary(group, existing_paths)
             for guid, group in grouped_items
         }
-        provider_index, provider_index_changed, changed_resource_keys = refresh_unity3d_provider_index(
-            conn,
-            candidates,
-            utc_now(),
-            force_full=force_full,
+        candidate_paths = {
+            str(Path(os.path.abspath(candidate.path)))
+            for candidate in candidates
+        }
+        provider_archive_paths = {
+            str(row[0])
+            for row in conn.execute("SELECT zipmod_path FROM unity3d_provider_archives")
+        }
+        provider_index_is_unchanged = (
+            not force_full
+            and not changed_paths
+            and provider_archive_paths == candidate_paths
         )
+        if provider_index_is_unchanged:
+            provider_index = load_unity3d_provider_index(conn)
+            provider_index_changed = False
+            changed_resource_keys: set[str] = set()
+        else:
+            provider_index, provider_index_changed, changed_resource_keys = refresh_unity3d_provider_index(
+                conn,
+                candidates,
+                utc_now(),
+                force_full=force_full,
+            )
         provider_affected_guids: set[str] = set()
         if provider_index_changed and changed_resource_keys:
             for row in conn.execute(
@@ -1041,6 +1136,48 @@ def build_database(
             2,
         )
         report(WRITE_START_PROGRESS, "Prepared zipmod items; writing database records")
+
+        no_database_changes = (
+            not force_full
+            and not changed_paths
+            and not provider_index_changed
+            and not invalid
+        )
+        if no_database_changes:
+            with conn:
+                set_database_metadata(conn, "last_built_at", now)
+            stats["primary_zipmods"] = len(primary_by_guid)
+            stats["duplicate_zipmods"] = int(
+                conn.execute("SELECT COUNT(*) FROM duplicate_zipmods").fetchone()[0]
+            )
+            stats["duplicate_guid_count"] = int(
+                conn.execute("SELECT COUNT(DISTINCT guid) FROM duplicate_zipmods").fetchone()[0]
+            )
+            stats["mod_items"] = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM mod_items WHERE parse_status = 'ok'"
+                ).fetchone()[0]
+            )
+            stats["database_write_skipped"] = True
+            phase_timings["database_write_ms"] = 0.0
+            stats["timings"] = {
+                **phase_timings,
+                "mod_database_total_ms": round((perf_counter() - build_started_at) * 1000, 2),
+            }
+            write_thumbnail_profile(
+                {
+                    "event": "build_end",
+                    "run_id": thumbnail_profile_run_id,
+                    "mode": mode,
+                    "game_dir": str(game_dir),
+                    "thumbnail_dir": str(thumbnail_dir),
+                    "started_at": stats_started_at,
+                    "finished_at": utc_now(),
+                    "stats": stats,
+                }
+            )
+            report(100, "Database unchanged; reused existing records")
+            return stats
 
         database_write_started_at = perf_counter()
         with conn:

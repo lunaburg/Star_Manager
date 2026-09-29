@@ -32,6 +32,7 @@
 | 文档 | 解决的问题 |
 | --- | --- |
 | [角色卡解析说明](character_card_parsing.md) | PNG 尾部、MessagePack、UniversalAutoResolver、类别映射和依赖记录 |
+| [人物卡服装依赖重复清理](character_card_duplicate_cleanup.md) | 服装依赖归一化、重复度公式、阈值分析和回收站清理边界 |
 | [服装卡样本解析报告](clothes_card_sample_analysis.md) | AIS_Clothes 信封、Coordinate 部件、UAR 依赖和 KKEx 插件样本分析 |
 | [Studio 场景卡解析说明](scene_card_parsing.md) | StudioNEOV2 场景数据、UAR 地图/物品/图案依赖、本地数据库匹配（含 Studio 物品）、远端补全和详情关联展示 |
 
@@ -46,6 +47,7 @@
 | 解析 Studio 自定义物品模组 | [标准模组结构记录](standard_mod_structure_record.md) → [Hooh ammunition_go.zipmod 结构解析](hooh_ammunition_go_zipmod_analysis.md) |
 | 修改重复 GUID 处理 | [模组数据库设计](mod_database_design.md) → [数据库变动检测](mod_database_change_detection.md) → [模组异常分类](mod_exception_catalog.md) |
 | 修改角色卡依赖解析 | [角色卡解析说明](character_card_parsing.md) → [模组数据库设计](mod_database_design.md) |
+| 修改人物卡重复分析或清理 | [人物卡服装依赖重复清理](character_card_duplicate_cleanup.md) → [角色卡解析说明](character_card_parsing.md) → [回收站](../trash-recycle-bin.md) |
 | 修改角色卡页面关联展示 | [角色卡解析说明](character_card_parsing.md) → [前端 UI 专题索引](../frontend-ui/README.md) |
 | 修改场景卡解析或关联展示 | [Studio 场景卡解析说明](scene_card_parsing.md) → [角色卡库布局](../frontend-ui/character-cards-layout.md) → [前端 UI 专题索引](../frontend-ui/README.md) |
 | 修改原版物品扫描或服装卡原版关联 | [游戏原版资源索引](builtin_resource_index.md) → [服装卡样本解析报告](clothes_card_sample_analysis.md) → [角色卡库布局](../frontend-ui/character-cards-layout.md) |

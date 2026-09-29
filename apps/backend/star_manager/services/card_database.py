@@ -63,6 +63,7 @@ def build_card_database(
     mode: str = "incremental",
     affected_mod_guids: Iterable[str] | None = None,
     worker_count: int | str | None = None,
+    known_card_changes: dict[str, object] | None = None,
 ) -> dict[str, object]:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
@@ -77,15 +78,27 @@ def build_card_database(
     preview_dir = preview_dir.resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
+    force_full = str(mode or "incremental").lower() == "full"
+    affected_mod_guids_list = (
+        list(affected_mod_guids) if affected_mod_guids is not None else None
+    )
+    known_card_unchanged = (
+        not force_full
+        and isinstance(known_card_changes, dict)
+        and all(
+            int(known_card_changes.get(key) or 0) == 0
+            for key in ("added", "removed", "modified")
+        )
+        and not affected_mod_guids_list
+    )
 
     report(5, "Scanning UserData/chara/**/*.png")
     scan_started_at = perf_counter()
-    card_paths = list(iter_card_pngs(root))
+    card_paths = [] if known_card_unchanged else list(iter_card_pngs(root))
     scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
     total = max(len(card_paths), 1)
     now = utc_now()
     seen_paths: set[str] = set()
-    force_full = str(mode or "incremental").lower() == "full"
     stats = {
         "card_files": len(card_paths),
         "cards": 0,
@@ -108,14 +121,31 @@ def build_card_database(
     conn.row_factory = sqlite3.Row
     try:
         init_db(conn)
-        resolver = DependencyResolver.load(conn)
         cached_cards = load_cached_card_records(conn)
-        cached_dependencies = load_cached_card_dependencies_by_card(conn)
         tag_cache_key = str(root.resolve())
         refresh_tag_cache = force_full or get_database_metadata(
             conn, "character_card_tags_cache_root"
         ) != tag_cache_key
-        affected_card_ids = find_affected_card_ids(conn, affected_mod_guids)
+        affected_card_ids = find_affected_card_ids(conn, affected_mod_guids_list)
+        if known_card_unchanged and not refresh_tag_cache and not affected_card_ids:
+            stats["card_files"] = len(cached_cards)
+            stats["cards"] = len(cached_cards)
+            stats["reused_cards"] = len(cached_cards)
+            stats["untouched_cards"] = len(cached_cards)
+            stats["dependencies"] = sum(
+                int(row["dependency_count"] or 0) for row in cached_cards.values()
+            )
+            stats["missing_dependencies"] = sum(
+                int(row["missing_count"] or 0) for row in cached_cards.values()
+            )
+            stats["timings"]["card_database_total_ms"] = round(
+                (perf_counter() - build_started_at) * 1000,
+                2,
+            )
+            report(100, "Character card database unchanged; reused cached records")
+            return stats
+        resolver = DependencyResolver.load(conn)
+        cached_dependencies = load_cached_card_dependencies_by_card(conn)
 
         def prepare(card_path: Path) -> dict:
             cache_key = str(card_path.resolve())

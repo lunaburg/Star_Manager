@@ -317,6 +317,29 @@ error > missing > not_in_mod > in_mod > empty
 - **解决方案**：准备阶段和写入阶段都只在每 100 张卡以及当前阶段最后一张卡时调用进度回调；扫描开始和建库完成仍立即上报。进度百分比与文字消息使用同一批节流事件，保证任务状态与日志内容一致。
 - **适用边界**：该节流只作用于 `build_card_database` 的人物卡阶段，不改变卡片解析、数据库写入或最终统计；少于 100 张的任务仍会在阶段结束时上报一次。
 
+### 增量重建固定开销优化（2026-09-29）
+
+- **问题背景**：在 11,131 个 zipmod、2,574 张人物卡的真实库上，即使没有文件变化，增量模组建库仍约 6.18 秒，完整任务约 7.88 秒。主要固定开销来自 Provider 索引清理、重复 GUID 文件反复读取、原版条目重复 upsert，以及每个 zipmod 路径重复执行 `Path.resolve()`。
+- **根因**：重复 GUID 文件只保存在 `duplicate_zipmods`，候选扫描只从 `zipmods` 复用 manifest；Provider 刷新每次都执行全量路径集合清理；原版索引在缩略图命中后仍继续计算状态并写入 SQLite；`Path.rglob()` 得到的绝对路径又逐个触发文件系统解析。
+- **解决方案**：
+  1. 将 `duplicate_zipmods` 的文件大小、修改时间和 manifest 字段加入候选缓存，未变化的重复文件不再读取 `manifest.xml`。
+  2. 增量模式下比较候选绝对路径集合与 `unity3d_provider_archives`。路径和文件签名均未变化时直接加载现有 Provider 索引，跳过 `NOT IN` 清理和无效写入；全量模式、增删文件或签名变化仍执行原刷新流程。
+  3. 原版条目 source signature 和缩略图缓存命中时直接复用已有行，跳过资源状态计算和 SQLite upsert。
+  4. 模组发现阶段用 `os.scandir()` 递归携带 `DirEntry.stat()`，并对已是绝对路径的普通文件使用无 I/O 的 `os.path.abspath()`，保持文件大小和修改时间判定不变。
+- **进一步解决方案**：
+  5. 当候选集合、Provider 索引、invalid 文件和文件变更集合均为空时，增量建库只读取汇总计数，跳过 11,128 个主 zipmod 的 SQLite 写事务。
+  6. 启动阶段的变动检测结果通过 `card_changes` 快照传入自动增量任务。快照确认人物卡没有新增、删除或修改，且本轮没有受影响模组 GUID 时，人物卡阶段直接复用缓存统计，不再枚举或解析 PNG。手动重建和未提供快照的调用保持原流程。
+- **进一步解决方案**：
+  7. 启动变动检测中的 zipmod 和人物卡遍历也使用 `os.scandir()`、`DirEntry.stat()` 和 `os.path.abspath()`，避免 `Path.rglob()`、逐文件 `Path.resolve()` 以及重复 `stat()` 的固定开销；扫描字段和符号链接边界与增量建库扫描保持一致。
+- **进一步解决方案**：
+  8. 在后端进程内缓存 ChaListData Unity3D 列表包的解析结果，缓存键包含绝对路径、文件大小/修改时间签名和解析器版本；文件变化或进程重启时自动失效，数据库中的缩略图、资源状态和 upsert 规则不变。
+- **进一步解决方案**：
+  9. 手动 `build_mod_database` 任务未携带启动阶段的 `card_changes` 时，由任务桥在建库前读取同一 SQLite 和人物卡目录生成快照；零变化且无受影响模组 GUID 时同样直接复用人物卡缓存。
+- **进一步解决方案**：
+  10. 原版资源索引以游戏路径为缓存边界。成功扫描后写入 `builtin_index_ready`、`builtin_index_game_dir_key` 和包数量元数据；同一路径的增量或全量建库只读取统计并复用现有 `builtin_items`，切换路径时才重新扫描原版列表包。
+- **验证结果**：同一真实游戏目录的首次无变化增量模组阶段约 1.70 秒；原版索引短路后同一后端进程后续运行约 **0.82 秒**，其中原版索引约 4 ms、zipmod 扫描约 0.77 秒。自动或手动增量完整任务后续运行约 **0.85 秒**；冷启动手动任务仍约 1.7 秒。`test_builtin_database.py`、`test_card_database.py`、`test_mod_database_workers.py`、`test_mod_database_assets.py`、`test_bridge_database_timing.py`、全量 176 项 Python 测试和 `npm run build` 均通过。
+- **适用边界**：Provider 短路只在候选路径集合和文件签名都一致时生效；原版条目复用仍以 source signature 和缓存文件存在为前提。`os.scandir()` 当前不跟随目录符号链接，和原有 `Path.rglob()` 在包含特殊符号链接的 mods 目录时可能有差异；遇到此类目录应执行全量建库校验。未提供 `card_changes` 快照、人物卡确有变更，或存在受影响模组 GUID 时仍执行人物卡扫描；这些路径的耗时取决于 PNG 数量和依赖重连规模。
+
 ## 前端行为
 
 前端启动或进入相关页面时会读取数据库状态和变动检测结果。

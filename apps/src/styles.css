@@ -2888,6 +2888,28 @@ small {
   background: linear-gradient(90deg, #fff8d8 0%, #fff2e8 100%);
 }
 
+.action-item--card-cleanup { border-color: rgba(95, 131, 167, .42); background: linear-gradient(90deg, rgba(231, 244, 255, .66), rgba(246, 238, 255, .52)); }
+.duplicate-clothing-drawer { width: min(760px, calc(100vw - 28px)); max-height: min(86vh, 820px); overflow: auto; }
+.duplicate-clothing-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; border: 1px solid rgba(126, 143, 157, .22); border-radius: 10px; background: rgba(255,255,255,.22); }
+.duplicate-clothing-controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.duplicate-clothing-controls input[type="number"] { width: 64px; min-height: 28px; padding: 3px 6px; border: 1px solid rgba(126, 143, 157, .32); border-radius: 7px; background: rgba(255,255,255,.38); }
+.duplicate-clothing-check { margin-left: auto; }
+.duplicate-clothing-stats { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font: 11px var(--mono); }
+.duplicate-clothing-stats span { padding: 5px 8px; border-radius: 999px; background: rgba(223,242,255,.34); }
+.duplicate-clothing-groups { display: grid; gap: 10px; }
+.duplicate-clothing-group { display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(126,143,157,.25); border-radius: 11px; background: rgba(255,255,255,.18); }
+.duplicate-clothing-group > header { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.duplicate-clothing-group > header strong { color: var(--text); font-size: 13px; }
+.duplicate-clothing-card { display: grid; grid-template-columns: auto 42px minmax(0,1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 7px; border-radius: 8px; background: rgba(255,255,255,.22); cursor: pointer; }
+.duplicate-clothing-card:hover { background: rgba(255,255,255,.42); }
+.duplicate-clothing-card .lazy-thumbnail { display: block; width: 42px; height: 56px; overflow: hidden; border-radius: 6px; background: rgba(126,143,157,.12); }
+.duplicate-clothing-card .lazy-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.duplicate-clothing-card .lazy-thumbnail-placeholder { display: grid; place-items: center; width: 100%; height: 100%; color: var(--muted); font-size: 9px; }
+.duplicate-clothing-card span { display: grid; gap: 2px; min-width: 0; }
+.duplicate-clothing-card strong, .duplicate-clothing-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duplicate-clothing-card small { color: var(--muted); font-size: 10px; }
+.duplicate-clothing-card em { padding: 3px 6px; border-radius: 999px; background: rgba(255,226,184,.62); color: #7a5518; font-size: 10px; font-style: normal; font-weight: 800; }
+
 /* 总览右侧列表项采用轻量玻璃层，保留任务状态与整理警示色。 */
 .overview-grid .task-item,
 .overview-grid .action-item {
@@ -6205,6 +6227,17 @@ small {
   padding: 12px;
   overflow: auto;
   min-height: 0;
+}
+
+.character-card-tree-virtual-canvas {
+  position: relative;
+  min-height: 1px;
+}
+
+.character-card-tree-virtual-rows {
+  position: absolute;
+  inset: 0 0 auto;
+  min-width: 100%;
 }
 
 .card-detail-pane {
@@ -13164,6 +13197,13 @@ tbody tr:hover td {
 .task-drawer-backdrop { position: fixed; z-index: 45; inset: 0; background: rgba(34, 48, 57, .24); backdrop-filter: blur(2px); }
 .task-drawer { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; width: min(520px, 94vw); height: 100%; padding: calc(var(--titlebar-height) + 30px) 26px 32px; overflow-x: hidden; overflow-y: auto; border-left: 1px solid rgba(126, 143, 157, .42); background: rgba(244, 250, 255, .82); background: color-mix(in srgb, var(--bg-color) 82%, transparent); box-shadow: -18px 0 42px rgba(53, 77, 91, .16); -webkit-backdrop-filter: blur(20px) saturate(1.08); backdrop-filter: blur(20px) saturate(1.08); animation: task-drawer-in .22s ease-out; }
 @keyframes task-drawer-in { from { transform: translateX(100%); opacity: .72; } }
+.task-drawer.duplicate-clothing-drawer { top: 50%; right: auto; left: 50%; width: min(760px, calc(100vw - 28px)); height: min(86vh, 820px); max-height: min(86vh, 820px); padding: 24px 24px 20px; border: 1px solid rgba(126, 143, 157, .42); border-radius: 18px; box-shadow: 0 24px 70px rgba(35, 57, 70, .24), inset 0 1px 0 rgba(255,255,255,.72); transform: translate(-50%, -50%); animation: duplicate-clothing-modal-in .22s ease-out; }
+@keyframes duplicate-clothing-modal-in { from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(.985); } }
+.task-drawer.duplicate-clothing-drawer .task-drawer-close { top: 12px; right: 12px; }
+@media (max-width: 620px) {
+  .task-drawer.duplicate-clothing-drawer { width: calc(100vw - 16px); height: calc(100vh - 16px); max-height: calc(100vh - 16px); padding: 20px 12px 14px; border-radius: 14px; }
+  .duplicate-clothing-check { width: 100%; margin-left: 0; }
+}
 .task-drawer-close { position: absolute; top: calc(var(--titlebar-height) + 16px); right: 18px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid rgba(126, 143, 157, .36); border-radius: 10px; background: rgba(255, 255, 255, .32); color: #274454; box-shadow: 0 3px 10px rgba(53, 77, 91, .08); font-size: 23px; line-height: 1; }
 .task-drawer-close:hover { border-color: rgba(20, 126, 145, .58); background: rgba(255, 255, 255, .58); }
 .task-drawer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 0; padding-right: 42px; }
@@ -14023,6 +14063,127 @@ tbody tr:hover td {
 
 @keyframes trash-spin { to { transform: rotate(360deg); } }
 @keyframes trash-item-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+.trash-confirm-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(6, 12, 16, .58);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.trash-confirm-modal {
+  width: min(440px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 14px;
+  background: rgba(24, 35, 40, .94);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .08);
+  color: #f4f0e7;
+  animation: trash-confirm-in .18s ease-out;
+}
+
+.trash-confirm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 18px 15px;
+  border-bottom: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(229, 120, 98, .1);
+}
+
+.trash-confirm-kicker {
+  display: block;
+  color: #f1a98d;
+  font: 800 10px/1.2 var(--mono);
+  letter-spacing: .12em;
+}
+
+.trash-confirm-header h2 {
+  margin: 7px 0 0;
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.trash-confirm-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .08);
+  color: #f4f0e7;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.trash-confirm-close:hover,
+.trash-confirm-close:focus-visible {
+  border-color: rgba(255, 198, 180, .72);
+  background: rgba(229, 120, 98, .2);
+}
+
+.trash-confirm-body {
+  padding: 18px;
+  color: rgba(244, 240, 231, .86);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.trash-confirm-body p { margin: 0; }
+.trash-confirm-body strong { color: #ffe2c3; font-size: 16px; }
+.trash-confirm-warning { margin-top: 8px !important; color: rgba(244, 240, 231, .54); font-size: 12px; }
+
+.trash-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(0, 0, 0, .12);
+}
+
+.trash-confirm-footer button {
+  min-width: 78px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .08);
+  color: #f4f0e7;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trash-confirm-cancel:hover,
+.trash-confirm-cancel:focus-visible {
+  border-color: rgba(255, 255, 255, .4);
+  background: rgba(255, 255, 255, .15);
+}
+
+.trash-confirm-submit {
+  border-color: rgba(229, 120, 98, .72) !important;
+  background: rgba(165, 59, 45, .68) !important;
+  color: #fff4ed !important;
+}
+
+.trash-confirm-submit:hover,
+.trash-confirm-submit:focus-visible {
+  border-color: rgba(255, 190, 168, .86) !important;
+  background: rgba(184, 70, 53, .86) !important;
+}
+
+@keyframes trash-confirm-in {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 /* 服装卡与场景卡浏览器控件统一为连续的透明玻璃层。 */
 .scene-card-layout > .panel,

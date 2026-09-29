@@ -26,6 +26,7 @@ from star_manager.services.achievements import (
 from star_manager.services.card_database import card_database_status
 from star_manager.services.card_library import (
     DEFAULT_CARD_PREVIEW_DIR,
+    analyze_duplicate_character_cards,
     assess_character_card_folder_changes,
     build_clothes_card_tree,
     build_character_card_tree,
@@ -673,6 +674,22 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(error)}, status=400)
             return
 
+        if route == "/library/cards/duplicate-clothing":
+            query = parse_qs(parsed_url.query)
+            game_dir = unquote((query.get("game_dir") or [""])[0])
+            try:
+                result = analyze_duplicate_character_cards(
+                    game_dir,
+                    threshold=(query.get("threshold") or ["0.85"])[0],
+                    min_dependency_count=(query.get("min_dependency_count") or ["3"])[0],
+                    min_shared_count=(query.get("min_shared_count") or ["3"])[0],
+                    include_accessories=(query.get("include_accessories") or ["0"])[0] == "1",
+                )
+                self.send_json(result, status=200 if result.get("ok") else 400)
+            except (OSError, sqlite3.Error, ValueError) as error:
+                self.send_json({"ok": False, "error": str(error), "groups": []}, status=400)
+            return
+
         if route == "/library/cards":
             query = parse_qs(parsed_url.query)
             game_dir = unquote((query.get("game_dir") or [""])[0])
@@ -680,12 +697,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             scope = unquote((query.get("scope") or ["directory"])[0])
             tag = unquote((query.get("tag") or [""])[0])
             try:
+                offset = int((query.get("offset") or ["0"])[0])
+            except (TypeError, ValueError):
+                offset = 0
+            limit_raw = (query.get("limit") or [""])[0]
+            try:
+                limit = int(limit_raw) if str(limit_raw).strip() else None
+            except (TypeError, ValueError):
+                limit = None
+            try:
                 self.send_json(
                     list_character_cards(
                         game_dir,
                         relative_path,
                         recursive=scope == "library" and bool(tag.strip()),
                         tag=tag,
+                        offset=offset,
+                        limit=limit,
                     )
                 )
             except ValueError as error:

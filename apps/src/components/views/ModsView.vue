@@ -576,7 +576,7 @@ function modStatusTone(status) {
           </table>
           <div v-if="ctx.libraryMode === 'mods' && ctx.modDatabase.exists" class="table-load-more">
             <span v-if="ctx.modDatabase.loadingMore">继续加载中...</span>
-            <span v-else-if="ctx.modDatabase.hasMore">已加载 {{ ctx.modRows.length.toLocaleString() }} / {{ ctx.modDatabase.total.toLocaleString() }}</span>
+            <span v-else-if="ctx.modDatabase.hasMore">已加载 {{ ctx.modRows.length.toLocaleString() }} / {{ ctx.modDatabase.filteredTotal.toLocaleString() }}</span>
             <span v-else>已加载全部 {{ ctx.modRows.length.toLocaleString() }} 个对象</span>
           </div>
         </div>

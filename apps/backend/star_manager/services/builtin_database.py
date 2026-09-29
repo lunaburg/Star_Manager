@@ -15,13 +15,17 @@ from star_manager.services.mod_database_assets import (
 from star_manager.services.mod_database_core import (
     DEFAULT_DB_PATH,
     ThumbnailResult,
+    get_database_metadata,
     init_db,
+    set_database_metadata,
     utc_now,
 )
 
 
 BUILTIN_LIST_PARSER_VERSION = "1"
 BUILTIN_LIST_ROOT = Path("abdata/list/characustom")
+_BUILTIN_BUNDLE_ITEMS_CACHE: dict[tuple[str, str, str], tuple[BuiltinItem, ...]] = {}
+_BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT = 64
 
 CLOTHES_CATEGORY_BY_SLOT = {
     0: "240",
@@ -252,6 +256,19 @@ def _read_bundle_items(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
     return items
 
 
+def _read_bundle_items_cached(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
+    """Reuse parsed ChaListData rows while the backend process stays alive."""
+    key = (str(bundle_path), _path_signature(bundle_path), BUILTIN_LIST_PARSER_VERSION)
+    cached = _BUILTIN_BUNDLE_ITEMS_CACHE.get(key)
+    if cached is not None:
+        return list(cached)
+    items = _read_bundle_items(game_dir, bundle_path)
+    if len(_BUILTIN_BUNDLE_ITEMS_CACHE) >= _BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT:
+        _BUILTIN_BUNDLE_ITEMS_CACHE.pop(next(iter(_BUILTIN_BUNDLE_ITEMS_CACHE)))
+    _BUILTIN_BUNDLE_ITEMS_CACHE[key] = tuple(items)
+    return items
+
+
 class _BuiltinThumbnailBundleCache:
     def __init__(self) -> None:
         self._bundles: dict[tuple[str, str], UnityThumbnailBundle | ThumbnailResult] = {}
@@ -367,6 +384,35 @@ def build_builtin_items_index(
     game_dir = game_dir.resolve()
     thumbnail_dir = thumbnail_dir.resolve()
     game_dir_key = normalize_game_dir_key(game_dir)
+    force_full = str(mode or "incremental").casefold() == "full"
+    cached_index_ready = (
+        get_database_metadata(conn, "builtin_index_ready") == "1"
+        and get_database_metadata(conn, "builtin_index_game_dir_key") == game_dir_key
+    )
+    if cached_index_ready:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN thumbnail_status IN ('ready', 'ok') THEN 1 ELSE 0 END) AS ready,
+                   SUM(CASE WHEN thumbnail_status NOT IN ('ready', 'ok') THEN 1 ELSE 0 END) AS missing
+            FROM builtin_items
+            WHERE game_dir_key = ?
+            """,
+            (game_dir_key,),
+        ).fetchone()
+        total_items = int(row["total"] or 0)
+        return {
+            "builtin_list_bundles": int(get_database_metadata(conn, "builtin_index_bundle_count") or 0),
+            "builtin_items": total_items,
+            "builtin_reused_items": total_items,
+            "builtin_thumbnail_ready": int(row["ready"] or 0),
+            "builtin_thumbnail_missing": int(row["missing"] or 0),
+            "builtin_parse_errors": 0,
+            "builtin_duplicate_items": 0,
+            "builtin_scan_complete": True,
+            "builtin_scan_skipped": True,
+            "builtin_errors": [],
+        }
     list_root = (game_dir / BUILTIN_LIST_ROOT).resolve()
     list_paths = sorted(
         (path for path in list_root.rglob("*.unity3d") if path.is_file())
@@ -374,7 +420,6 @@ def build_builtin_items_index(
         else [],
         key=lambda path: path.as_posix().casefold(),
     )
-    force_full = str(mode or "incremental").casefold() == "full"
     stats: dict[str, object] = {
         "builtin_list_bundles": len(list_paths),
         "builtin_items": 0,
@@ -389,6 +434,9 @@ def build_builtin_items_index(
     if not list_paths:
         with conn:
             conn.execute("DELETE FROM builtin_items WHERE game_dir_key = ?", (game_dir_key,))
+            set_database_metadata(conn, "builtin_index_ready", "1")
+            set_database_metadata(conn, "builtin_index_game_dir_key", game_dir_key)
+            set_database_metadata(conn, "builtin_index_bundle_count", "0")
         return stats
 
     existing = {
@@ -398,6 +446,7 @@ def build_builtin_items_index(
             (game_dir_key,),
         )
     }
+
     seen: set[tuple[str, str]] = set()
     thumbnail_cache = _BuiltinThumbnailBundleCache()
     total = max(len(list_paths), 1)
@@ -411,7 +460,7 @@ def build_builtin_items_index(
                     f"Reading original resource lists {index}/{total}",
                 )
             try:
-                items = _read_bundle_items(game_dir, bundle_path)
+                items = _read_bundle_items_cached(game_dir, bundle_path)
             except Exception as exc:  # noqa: BLE001 - retain usable bundles.
                 stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
                 stats["builtin_scan_complete"] = False
@@ -440,8 +489,11 @@ def build_builtin_items_index(
                     and cache_path.is_file()
                 )
                 if can_reuse:
-                    thumbnail_result = ThumbnailResult(str(cache_path), "ready", "")
+                    stats["builtin_items"] = int(stats["builtin_items"]) + 1
                     stats["builtin_reused_items"] = int(stats["builtin_reused_items"]) + 1
+                    stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
+                    seen.add(key)
+                    continue
                 else:
                     thumbnail_result = _extract_builtin_thumbnail(
                         game_dir,
@@ -531,6 +583,9 @@ def build_builtin_items_index(
                 "DELETE FROM builtin_items WHERE game_dir_key = ? AND category_no = ? AND item_id = ?",
                 [(game_dir_key, category, item_id) for category, item_id in stale_keys],
             )
+            set_database_metadata(conn, "builtin_index_ready", "1")
+            set_database_metadata(conn, "builtin_index_game_dir_key", game_dir_key)
+            set_database_metadata(conn, "builtin_index_bundle_count", str(len(list_paths)))
     return stats
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import itertools
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import shutil
 import sqlite3
 import threading
 import zipfile
+from time import perf_counter
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -178,6 +180,25 @@ PORTABLE_DEPENDENCY_PROPERTY_TYPES = (
     (re.compile(r"chafilehair\.(?:hairback|hairfront|hairside|hairoption|hairextension)$", re.I), "hair"),
     (re.compile(r"chafilebody\.(?:skinid|detailid|sunburnid|paintlayoutid[12]|nipid|underhairid|pubichairid)$", re.I), "body"),
     (re.compile(r"chafileclothes\.(?:clothestop|clothesbot|clothesbra|clothesshorts|clothesgloves|clothespantyhose|clothessocks|clothesshoes)$", re.I), "clothes"),
+)
+
+# Character-card cleanup intentionally starts with clothing dependencies only.
+# These are the clothing kinds already used by the card and coordinate browsers.
+CLOTHING_DEPENDENCY_CATEGORIES = frozenset(
+    {
+        "140",
+        "141",
+        "144",
+        "147",
+        "240",
+        "241",
+        "242",
+        "243",
+        "244",
+        "245",
+        "246",
+        "247",
+    }
 )
 
 
@@ -1477,6 +1498,286 @@ def delete_character_card(
     }
 
 
+def analyze_duplicate_character_cards(
+    game_dir: str,
+    threshold: float = 0.85,
+    min_dependency_count: int = 3,
+    min_shared_count: int = 3,
+    include_accessories: bool = False,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict:
+    """Find character-card pairs that share most of their clothing dependencies.
+
+    The card database already stores the expensive PNG parsing result, so this
+    endpoint only reads indexed cards and dependency rows. Exact dependency
+    signatures are grouped separately from near-duplicate pairs. The returned
+    delete suggestions are conservative: only non-favourite, lower-rated exact
+    copies are suggested, and all deletion still goes through the recycle bin.
+    """
+    is_valid, root, error = validate_card_root(game_dir)
+    if not is_valid:
+        return {"ok": False, "error": error or "请选择有效的游戏目录", "groups": []}
+
+    try:
+        threshold_value = max(0.0, min(1.0, float(threshold)))
+    except (TypeError, ValueError):
+        threshold_value = 0.85
+    try:
+        minimum_dependencies = max(1, int(min_dependency_count))
+    except (TypeError, ValueError):
+        minimum_dependencies = 3
+    try:
+        minimum_shared = max(1, int(min_shared_count))
+    except (TypeError, ValueError):
+        minimum_shared = 3
+
+    resolved_db_path = Path(db_path).resolve()
+    if not resolved_db_path.is_file():
+        return {
+            "ok": False,
+            "error": "人物卡数据库尚未创建，请先重建数据库。",
+            "groups": [],
+            "needs_database": True,
+        }
+
+    def is_inside_card_root(file_path: str) -> bool:
+        try:
+            Path(file_path).resolve().relative_to(root.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def normalized_number(value: object) -> str:
+        text = str(value or "").strip()
+        if text.isdigit():
+            return str(int(text))
+        return text
+
+    def dependency_token(row: sqlite3.Row) -> tuple[str, str]:
+        mod_guid = str(row["zipmod_guid"] or row["mod_id"] or "").strip().casefold()
+        category = normalized_number(row["category_no"])
+        item_id = normalized_number(row["item_id"])
+        if mod_guid and item_id:
+            token = f"item:{mod_guid}|{category}|{item_id}"
+            label = str(row["item_name"] or row["item_id"] or "未知物品")
+            return token, label
+        slot = normalized_number(row["slot"] or row["local_slot"])
+        token = f"raw:{str(row['mod_id'] or '').strip().casefold()}|{category}|{slot}"
+        label = f"未匹配依赖 {row['mod_id'] or '-'} / {row['slot'] or row['local_slot'] or '-'}"
+        return token, label
+
+    conn = sqlite3.connect(resolved_db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        card_rows = [
+            row
+            for row in conn.execute(
+                """
+                SELECT id, file_path, relative_path, file_name, chara_name,
+                       favorite, rating, modified_at, parse_status,
+                       dependency_count, missing_count, metadata_file_size,
+                       metadata_modified_ns
+                FROM character_cards
+                WHERE parse_status != 'stale'
+                ORDER BY relative_path COLLATE NOCASE
+                """
+            ).fetchall()
+            if is_inside_card_root(str(row["file_path"] or ""))
+            and Path(str(row["file_path"] or "")).is_file()
+        ]
+        if not card_rows:
+            return {
+                "ok": True,
+                "groups": [],
+                "stats": {
+                    "cards_scanned": 0,
+                    "eligible_cards": 0,
+                    "matched_groups": 0,
+                    "matched_pairs": 0,
+                },
+                "threshold": threshold_value,
+                "min_dependency_count": minimum_dependencies,
+                "min_shared_count": minimum_shared,
+            }
+
+        card_by_id = {int(row["id"]): row for row in card_rows}
+        card_ids = tuple(card_by_id)
+        placeholders = ",".join("?" for _ in card_ids)
+        dependency_rows = conn.execute(
+            f"""
+            SELECT ccd.card_id, ccd.mod_id, ccd.category_no, ccd.slot,
+                   ccd.local_slot, ccd.mod_item_id,
+                   mi.item_id, mi.name AS item_name, mi.kind,
+                   mi.zipmod_guid
+            FROM character_card_dependencies ccd
+            LEFT JOIN mod_items mi ON mi.id = ccd.mod_item_id
+            WHERE ccd.card_id IN ({placeholders})
+            ORDER BY ccd.id
+            """,
+            card_ids,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    card_dependencies: dict[int, dict[str, str]] = {card_id: {} for card_id in card_by_id}
+    for row in dependency_rows:
+        category = normalized_number(row["category_no"])
+        is_clothing = category in CLOTHING_DEPENDENCY_CATEGORIES
+        if include_accessories and category.startswith("35"):
+            is_clothing = True
+        if not is_clothing:
+            continue
+        token, label = dependency_token(row)
+        if token:
+            card_dependencies.setdefault(int(row["card_id"]), {}).setdefault(token, label)
+
+    def card_payload(card_id: int) -> dict[str, object]:
+        row = card_by_id[card_id]
+        relative_path = normalize_relative_path(str(row["relative_path"] or ""))
+        file_path = Path(str(row["file_path"] or ""))
+        try:
+            stat = file_path.stat()
+            version = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+        except OSError:
+            version = ""
+        image_url = (
+            "/library/cards/image?"
+            + f"game_dir={quote(str(Path(game_dir).resolve()))}&path={quote(relative_path)}"
+            + (f"&v={quote(version)}" if version else "")
+        )
+        cover_url = image_url + "&original=1"
+        return {
+            "id": relative_path,
+            "relative_path": relative_path,
+            "file_name": str(row["file_name"] or file_path.name),
+            "name": str(row["chara_name"] or "").strip() or file_path.stem,
+            "thumbnail_url": image_url,
+            "cover_url": cover_url,
+            "favorite": bool(row["favorite"]),
+            "rating": int(row["rating"] or 0),
+            "missing_count": int(row["missing_count"] or 0),
+            "parse_status": str(row["parse_status"] or ""),
+            "modified_at": str(row["modified_at"] or ""),
+            "dependency_count": len(card_dependencies.get(card_id, {})),
+        }
+
+    eligible_ids = [
+        card_id
+        for card_id, dependencies in card_dependencies.items()
+        if len(dependencies) >= minimum_dependencies
+    ]
+    token_to_cards: dict[str, list[int]] = {}
+    for card_id in eligible_ids:
+        for token in card_dependencies[card_id]:
+            token_to_cards.setdefault(token, []).append(card_id)
+
+    shared_counts: dict[tuple[int, int], int] = {}
+    for card_ids_for_token in token_to_cards.values():
+        if len(card_ids_for_token) < 2:
+            continue
+        for left, right in itertools.combinations(sorted(set(card_ids_for_token)), 2):
+            key = (left, right)
+            shared_counts[key] = shared_counts.get(key, 0) + 1
+
+    def keep_score(card_id: int) -> tuple[int, int, int, int, str]:
+        row = card_by_id[card_id]
+        return (
+            int(bool(row["favorite"])),
+            int(row["rating"] or 0),
+            -int(row["missing_count"] or 0),
+            int(row["metadata_modified_ns"] or 0),
+            str(row["relative_path"] or "").casefold(),
+        )
+
+    exact_groups: dict[tuple[str, ...], list[int]] = {}
+    for card_id in eligible_ids:
+        signature = tuple(sorted(card_dependencies[card_id]))
+        exact_groups.setdefault(signature, []).append(card_id)
+
+    groups: list[dict[str, object]] = []
+    exact_pair_keys: set[tuple[int, int]] = set()
+    for signature, grouped_ids in exact_groups.items():
+        if len(grouped_ids) < 2 or len(signature) < minimum_shared:
+            continue
+        ordered = sorted(grouped_ids, key=keep_score, reverse=True)
+        suggested_delete = [
+            card_payload(card_id)["id"]
+            for card_id in ordered[1:]
+            if not bool(card_by_id[card_id]["favorite"])
+        ]
+        for left, right in itertools.combinations(sorted(grouped_ids), 2):
+            exact_pair_keys.add((left, right))
+        groups.append(
+            {
+                "id": f"exact:{hashlib.sha1('|'.join(signature).encode('utf-8')).hexdigest()[:12]}",
+                "type": "exact",
+                "score": 1.0,
+                "jaccard": 1.0,
+                "coverage": 1.0,
+                "shared_count": len(signature),
+                "dependency_count": len(signature),
+                "cards": [card_payload(card_id) for card_id in ordered],
+                "suggested_delete": suggested_delete,
+            }
+        )
+
+    near_pair_count = 0
+    for (left, right), shared_count in sorted(shared_counts.items()):
+        if (left, right) in exact_pair_keys or shared_count < minimum_shared:
+            continue
+        left_count = len(card_dependencies[left])
+        right_count = len(card_dependencies[right])
+        union_count = left_count + right_count - shared_count
+        jaccard = shared_count / union_count if union_count else 0.0
+        coverage = shared_count / min(left_count, right_count) if min(left_count, right_count) else 0.0
+        score = 0.7 * jaccard + 0.3 * coverage
+        if score < threshold_value:
+            continue
+        left_payload = card_payload(left)
+        right_payload = card_payload(right)
+        groups.append(
+            {
+                "id": f"near:{left}:{right}",
+                "type": "near",
+                "score": round(score, 4),
+                "jaccard": round(jaccard, 4),
+                "coverage": round(coverage, 4),
+                "shared_count": shared_count,
+                "dependency_count": max(left_count, right_count),
+                "shared_dependencies": sorted(
+                    set(card_dependencies[left]).intersection(card_dependencies[right])
+                ),
+                "cards": [left_payload, right_payload],
+                "suggested_delete": [],
+            }
+        )
+        near_pair_count += 1
+
+    groups.sort(key=lambda group: (-float(group["score"]), str(group["id"])))
+    return {
+        "ok": True,
+        "threshold": threshold_value,
+        "min_dependency_count": minimum_dependencies,
+        "min_shared_count": minimum_shared,
+        "include_accessories": bool(include_accessories),
+        "groups": groups,
+        "stats": {
+            "cards_scanned": len(card_rows),
+            "eligible_cards": len(eligible_ids),
+            "matched_groups": len(groups),
+            "exact_groups": sum(1 for group in groups if group["type"] == "exact"),
+            "near_pairs": near_pair_count,
+            "matched_pairs": sum(
+                len(group["cards"]) * (len(group["cards"]) - 1) // 2
+                if group["type"] == "exact"
+                else 1
+                for group in groups
+            ),
+        },
+    }
+
+
 def list_character_cards(
     game_dir: str,
     relative_path: str = "",
@@ -1484,16 +1785,21 @@ def list_character_cards(
     *,
     recursive: bool = False,
     tag: str = "",
+    offset: int = 0,
+    limit: int | None = None,
 ) -> dict:
+    started_at = perf_counter()
     is_valid, root, error = validate_card_root(game_dir)
     if not is_valid:
         return invalid_payload(error)
 
     folder = root if recursive else resolve_card_directory(root, relative_path)
+    offset = max(0, int(offset or 0))
+    if limit is not None:
+        limit = max(1, min(int(limit), 240))
     normalized_tag = str(tag or "").strip().casefold()
     cards = []
-    indexed_cards = indexed_card_metadata(db_path)
-    metadata_updates: list[tuple[str, str, int, int, int, int, str]] = []
+    enumerate_started_at = perf_counter()
     if recursive:
         card_files = sorted(
             (
@@ -1507,11 +1813,27 @@ def list_character_cards(
             key=lambda item: normalize_relative(item, root).casefold(),
         )
     else:
-        card_files = sorted(folder.iterdir(), key=lambda item: item.name.lower())
+        card_files = sorted(
+            (
+                file_path
+                for file_path in folder.iterdir()
+                if file_path.is_file() and file_path.suffix.lower() == ".png"
+            ),
+            key=lambda item: item.name.lower(),
+        )
+    enumerate_duration_ms = round((perf_counter() - enumerate_started_at) * 1000, 2)
 
-    for file_path in card_files:
-        if not file_path.is_file() or file_path.suffix.lower() != ".png":
-            continue
+    card_files_for_page = card_files
+    if limit is not None and not recursive:
+        card_files_for_page = card_files[offset : offset + limit]
+    index_started_at = perf_counter()
+    indexed_cards = indexed_card_metadata(db_path, card_files_for_page)
+    index_duration_ms = round((perf_counter() - index_started_at) * 1000, 2)
+    metadata_updates: list[tuple[str, str, int, int, int, int, str]] = []
+
+    listing_reads = 0
+    card_loop_started_at = perf_counter()
+    for file_path in card_files_for_page:
         resolved_file_path = str(file_path.resolve())
         indexed_card = indexed_cards.get(resolved_file_path.casefold())
         stat = file_path.stat()
@@ -1530,6 +1852,7 @@ def list_character_cards(
                 "tags": list(indexed_card.get("tags") or []),
             }
         else:
+            listing_reads += 1
             listing_data = read_character_card_listing_data(file_path)
             if listing_data is None:
                 continue
@@ -1588,6 +1911,7 @@ def list_character_cards(
         )
 
     update_indexed_card_listing_metadata(db_path, metadata_updates)
+    card_loop_duration_ms = round((perf_counter() - card_loop_started_at) * 1000, 2)
 
     return {
         "ok": True,
@@ -1595,9 +1919,27 @@ def list_character_cards(
         "root": str(root),
         "relative_path": normalize_relative(folder, root),
         "cards": cards,
-        "total": len(cards),
+        "total": len(cards) if limit is None or recursive else len(card_files),
+        "offset": offset,
+        "limit": limit,
+        "has_more": (
+            False
+            if recursive or limit is None
+            else offset + len(card_files_for_page) < len(card_files)
+        ),
         "recursive": recursive,
         "tag": str(tag or "").strip(),
+        "timings": {
+            "index_load_ms": index_duration_ms,
+            "enumerate_ms": enumerate_duration_ms,
+            "card_loop_ms": card_loop_duration_ms,
+            "total_ms": round((perf_counter() - started_at) * 1000, 2),
+            "card_file_count": len(card_files),
+            "page_file_count": len(card_files_for_page),
+            "indexed_card_count": len(indexed_cards),
+            "listing_reads": listing_reads,
+            "metadata_updates": len(metadata_updates),
+        },
     }
 
 
@@ -1746,6 +2088,7 @@ def list_character_card_tags(game_dir: str, db_path: Path = DEFAULT_DB_PATH) -> 
 
 def indexed_card_metadata(
     db_path: Path = DEFAULT_DB_PATH,
+    file_paths: list[Path] | None = None,
 ) -> dict[str, dict[str, object]]:
     resolved_db_path = db_path.resolve()
     if not resolved_db_path.is_file():
@@ -1755,15 +2098,29 @@ def indexed_card_metadata(
     conn.row_factory = sqlite3.Row
     try:
         init_db(conn)
-        rows = conn.execute(
-            """
+        select_sql = """
             SELECT file_path, chara_name, tags_json, favorite, rating,
                    metadata_file_size, metadata_modified_ns, parse_status,
                    dependency_count, missing_count
             FROM character_cards
             WHERE parse_status != 'stale'
-            """
-        ).fetchall()
+        """
+        if file_paths is None:
+            rows = conn.execute(select_sql).fetchall()
+        else:
+            resolved_paths = [str(Path(path).resolve()) for path in file_paths]
+            rows = []
+            for offset in range(0, len(resolved_paths), 500):
+                chunk = resolved_paths[offset : offset + 500]
+                if not chunk:
+                    continue
+                placeholders = ",".join("?" for _ in chunk)
+                rows.extend(
+                    conn.execute(
+                        f"{select_sql} AND file_path IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                )
     except sqlite3.Error:
         return {}
     finally:
@@ -2842,45 +3199,168 @@ def dependency_item_payload(row: sqlite3.Row, category: str) -> dict:
     }
 
 
-def build_character_card_tree(game_dir: str) -> dict:
+def load_indexed_character_card_counts(
+    root: Path,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> tuple[dict[str, int], int] | None:
+    resolved_db_path = Path(db_path).resolve()
+    if not resolved_db_path.is_file():
+        return None
+
+    root_key = str(root.resolve()).casefold().rstrip("\\/")
+    counts: dict[str, int] = {}
+    total = 0
+    try:
+        conn = sqlite3.connect(resolved_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                """
+                SELECT file_path, relative_path, parse_status,
+                       metadata_file_size, metadata_modified_ns
+                FROM character_cards
+                WHERE parse_status NOT IN ('stale', 'not_ais')
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+    for row in rows:
+        file_path = str(row["file_path"] or "").strip()
+        file_key = file_path.casefold().replace("/", "\\").rstrip("\\")
+        if not file_key.startswith(root_key.replace("/", "\\") + "\\"):
+            continue
+        try:
+            stat = Path(file_path).stat()
+        except OSError:
+            return None
+        if (
+            int(row["metadata_file_size"] or 0) != int(stat.st_size)
+            or int(row["metadata_modified_ns"] or 0) != int(stat.st_mtime_ns)
+        ):
+            return None
+        relative_path = normalize_relative_path(str(row["relative_path"] or ""))
+        if not relative_path:
+            continue
+        relative_parts = Path(relative_path).parts
+        if relative_parts and relative_parts[0].casefold() in IGNORED_ROOT_CARD_DIRS:
+            continue
+        directory = relative_path.rsplit("/", 1)[0] if "/" in relative_path else ""
+        counts[directory] = counts.get(directory, 0) + 1
+        total += 1
+    return counts, total
+
+
+def build_character_card_tree(game_dir: str, db_path: Path = DEFAULT_DB_PATH) -> dict:
+    started_at = perf_counter()
     is_valid, root, error = validate_card_root(game_dir)
     if not is_valid:
         return invalid_payload(error)
 
     resolved_root = root.resolve()
-    node = build_tree_node(root, resolved_root)
+    index_started_at = perf_counter()
+    indexed_counts_result = load_indexed_character_card_counts(resolved_root, db_path=db_path)
+    index_duration_ms = round((perf_counter() - index_started_at) * 1000, 2)
+    indexed_counts = indexed_counts_result[0] if indexed_counts_result is not None else None
+    indexed_total = indexed_counts_result[1] if indexed_counts_result is not None else 0
+    scan_started_at = perf_counter()
+    tree_stats = {
+        "directory_count": 0,
+        "png_candidate_count": 0,
+        "ais_check_count": 0,
+    }
+    node = build_tree_node(root, resolved_root, tree_stats, indexed_counts)
+    if indexed_counts is not None and tree_stats.get("png_candidate_count", 0) != indexed_total:
+        tree_stats = {
+            "directory_count": 0,
+            "png_candidate_count": 0,
+            "ais_check_count": 0,
+        }
+        indexed_counts = None
+        scan_started_at = perf_counter()
+        node = build_tree_node(root, resolved_root, tree_stats, indexed_counts)
+        scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
+    scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
+    count_started_at = perf_counter()
+    total = count_tree_cards(node)
+    count_duration_ms = round((perf_counter() - count_started_at) * 1000, 2)
     return {
         "ok": True,
         "is_valid_game_dir": True,
         "root": str(root),
         "tree": node,
-        "total": count_tree_cards(node),
+        "total": total,
+        "timings": {
+            "scan_ms": scan_duration_ms,
+            "index_load_ms": index_duration_ms,
+            "count_ms": count_duration_ms,
+            "total_ms": round((perf_counter() - started_at) * 1000, 2),
+            **tree_stats,
+            "count_source": "indexed" if indexed_counts is not None else "png_marker",
+            "indexed_card_count": indexed_total,
+        },
     }
 
 
-def build_tree_node(folder: Path, root: Path) -> dict:
-    entries = sorted(folder.iterdir(), key=lambda item: item.name.lower())
+def build_tree_node(
+    folder: Path,
+    root: Path,
+    tree_stats: dict[str, int] | None = None,
+    indexed_counts: dict[str, int] | None = None,
+) -> dict:
+    if tree_stats is not None:
+        tree_stats["directory_count"] = tree_stats.get("directory_count", 0) + 1
+    try:
+        with os.scandir(folder) as iterator:
+            entries = sorted(list(iterator), key=lambda item: item.name.lower())
+    except OSError:
+        entries = []
     children = [
-        build_tree_node(child, root)
+        build_tree_node(Path(child.path), root, tree_stats, indexed_counts)
         for child in entries
-        if child.is_dir() and not is_ignored_root_card_dir(child, root)
+        if child.is_dir(follow_symlinks=False)
+        and not is_ignored_root_card_dir(Path(child.path), root)
     ]
     relative_path = normalize_relative(folder, root)
     return {
         "id": relative_path or ".",
         "name": "人物卡" if folder.resolve() == root.resolve() else folder.name,
         "relative_path": relative_path,
-        "count": count_direct_cards(entries),
+        "count": count_direct_cards(entries, tree_stats, relative_path, indexed_counts),
         "children": children,
         "has_children": bool(children),
     }
 
 
-def count_direct_cards(entries: list[Path]) -> int:
+def count_direct_cards(
+    entries: list[Path],
+    tree_stats: dict[str, int] | None = None,
+    relative_path: str = "",
+    indexed_counts: dict[str, int] | None = None,
+) -> int:
     count = 0
     for file_path in entries:
-        if file_path.is_file() and file_path.suffix.lower() == ".png" and is_ais_card(str(file_path)):
+        file_name = getattr(file_path, "name", "")
+        is_file = (
+            file_path.is_file()
+            if isinstance(file_path, Path)
+            else file_path.is_file(follow_symlinks=False)
+        )
+        if not file_name.lower().endswith(".png") or not is_file:
+            continue
+        if tree_stats is not None:
+            tree_stats["png_candidate_count"] = tree_stats.get("png_candidate_count", 0) + 1
+        if indexed_counts is not None:
+            continue
+        if tree_stats is not None:
+            tree_stats["ais_check_count"] = tree_stats.get("ais_check_count", 0) + 1
+        if is_ais_card(str(getattr(file_path, "path", file_path))):
             count += 1
+    if indexed_counts is not None:
+        return int(indexed_counts.get(relative_path, 0))
     return count
 
 

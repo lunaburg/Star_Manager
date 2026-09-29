@@ -26,6 +26,7 @@ PROFILE_FIELDS = {
 AIS_CARD_CACHE_PATH = runtime_root() / "ais_card_cache.json"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 AIS_CARD_CACHE_VERSION = 2
+CARD_MARKER_PROBE_BYTES = 256
 _AIS_CARD_CACHE: dict[str, dict[str, Any]] | None = None
 _AIS_CARD_CACHE_DIRTY = False
 
@@ -99,6 +100,32 @@ def read_card_marker(card_data):
     return reader.read_string()
 
 
+def read_card_marker_from_file(file_path):
+    """Read only the small marker prefix after PNG IEND.
+
+    Directory scans only need to distinguish AIS cards from ordinary PNGs.
+    Avoid materializing the complete MessagePack payload, which can be large
+    when a card contains embedded textures or plugin metadata.
+    """
+    with open(file_path, "rb") as file:
+        if file.read(len(PNG_SIGNATURE)) != PNG_SIGNATURE:
+            return None
+
+        while True:
+            chunk_length_raw = file.read(4)
+            if len(chunk_length_raw) < 4:
+                return None
+            chunk_type = file.read(4)
+            if len(chunk_type) < 4:
+                return None
+
+            chunk_length = int.from_bytes(chunk_length_raw, "big", signed=False)
+            if chunk_type == b"IEND":
+                probe = file.read(chunk_length + 4 + CARD_MARKER_PROBE_BYTES)
+                return read_card_marker(probe)
+            file.seek(chunk_length + 4, 1)
+
+
 def is_ais_card(file_path):
     path = Path(file_path)
     try:
@@ -118,7 +145,7 @@ def is_ais_card(file_path):
         return bool(cached.get("is_ais"))
 
     try:
-        marker = read_card_marker(extract_png_extra_data(file_path))
+        marker = read_card_marker_from_file(file_path)
     except Exception:
         is_ais = False
     else:

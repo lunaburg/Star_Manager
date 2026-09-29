@@ -3,6 +3,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch
 import LazyThumbnail from "../LazyThumbnail.vue";
 import LoadingAnimation from "../LoadingAnimation.vue";
 import VirtualCharacterCardGrid from "../VirtualCharacterCardGrid.vue";
+import VirtualCharacterCardTree from "../VirtualCharacterCardTree.vue";
 import VirtualClothesCardGrid from "../VirtualClothesCardGrid.vue";
 import characterCardEmptyAnimation from "../../assets/character-card-empty-loading.json";
 import characterCardLoadingAnimation from "../../assets/character-card-loading.json";
@@ -28,6 +29,7 @@ function registerActiveCardGrid() {
 
 function handleCharacterCardGridScroll(event) {
   ctx.captureCardLibraryScrollPosition("character", event?.currentTarget);
+  ctx.handleCharacterCardGridScroll(event);
 }
 
 function handleClothesCardGridScroll(event) {
@@ -69,6 +71,7 @@ watch(() => [
   ctx.sceneCards?.length,
   ctx.visibleSceneCards?.length,
   ctx.cardLibrary?.loading,
+  ctx.cardLibrary?.loadingMore,
   ctx.clothesLibrary?.loading,
   ctx.clothesLibrary?.loadingMore,
   ctx.sceneLibrary?.loading,
@@ -703,34 +706,13 @@ const cardModeMeta = computed(() => {
               </div>
               <div v-if="ctx.characterSideMode === 'tree'" class="tree">
                 <div v-if="ctx.cardLibrary.checked && !ctx.cardLibrary.validGameDir" class="tree-state">请选择有效的游戏目录</div>
-                <template v-else>
-                  <div
-                    v-for="folder in ctx.cardFolders"
-                    :key="folder.id"
-                    class="tree-row"
-                    :class="{ active: ctx.selectedCardFolder === folder.relativePath }"
-                    :style="{ paddingLeft: `${10 + folder.depth * 18}px` }"
-                    role="button"
-                    tabindex="0"
-                    :aria-expanded="folder.hasChildren ? folder.expanded : undefined"
-                    @click="ctx.handleCardFolderClick(folder)"
-                    @keydown.enter.prevent="ctx.handleCardFolderClick(folder)"
-                    @keydown.space.prevent="ctx.handleCardFolderClick(folder)"
-                  >
-                    <button
-                      type="button"
-                      class="tree-toggle"
-                      :class="{ placeholder: !folder.hasChildren }"
-                      :disabled="!folder.hasChildren"
-                      :aria-label="folder.hasChildren ? `${folder.expanded ? '收起' : '展开'} ${folder.name}` : undefined"
-                      @click.stop="ctx.toggleCardFolder(folder)"
-                    >
-                      {{ folder.hasChildren ? (folder.expanded ? "-" : "+") : "-" }}
-                    </button>
-                    <span class="tree-name">{{ folder.name }}</span>
-                    <span class="badge warn">{{ folder.count }}</span>
-                  </div>
-                </template>
+                <VirtualCharacterCardTree
+                  v-else
+                  :rows="ctx.cardFolders"
+                  :selected-path="ctx.selectedCardFolder"
+                  @folder-click="ctx.handleCardFolderClick"
+                  @toggle-folder="ctx.toggleCardFolder"
+                />
               </div>
               <div v-else class="card-detail-pane">
                 <div v-if="!ctx.selectedCardDetail" class="detail-empty">

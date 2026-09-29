@@ -12,7 +12,7 @@ defineProps({
       </div>
       <div class="trash-hero-actions">
         <button type="button" class="ghost-button" :disabled="ctx.trashLoading" @click="ctx.loadTrash">刷新</button>
-        <button v-if="ctx.filteredTrashEntries.length" type="button" class="danger-action" :disabled="Boolean(ctx.trashAction)" @click="ctx.emptyTrash">
+        <button v-if="ctx.filteredTrashEntries.length" type="button" class="danger-action" :disabled="Boolean(ctx.trashAction)" @click="ctx.openEmptyTrashPrompt">
           清空回收站
         </button>
       </div>
@@ -63,5 +63,27 @@ defineProps({
         </div>
       </article>
     </div>
+
+    <Teleport to="body">
+      <div v-if="ctx.emptyTrashPrompt.open" class="trash-confirm-backdrop" @click.self="ctx.cancelEmptyTrash">
+        <section class="trash-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="trash-confirm-title">
+          <header class="trash-confirm-header">
+            <div>
+              <span class="trash-confirm-kicker">回收站清理</span>
+              <h2 id="trash-confirm-title">确认清空回收站？</h2>
+            </div>
+            <button type="button" class="trash-confirm-close" aria-label="关闭" @click="ctx.cancelEmptyTrash">×</button>
+          </header>
+          <div class="trash-confirm-body">
+            <p>将永久删除回收站中的 <strong>{{ ctx.emptyTrashPrompt.count }}</strong> 个项目。</p>
+            <p class="trash-confirm-warning">此操作无法恢复，请确认仍要继续。</p>
+          </div>
+          <footer class="trash-confirm-footer">
+            <button type="button" class="trash-confirm-cancel" @click="ctx.cancelEmptyTrash">取消</button>
+            <button type="button" class="trash-confirm-submit" @click="ctx.confirmEmptyTrash">永久删除</button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

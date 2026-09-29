@@ -37,7 +37,9 @@ class OrganizeZipmodsByAuthorTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["moved_count"], 2)
-            targets = sorted((game_dir / "mods" / "Author_One").glob("*.zipmod"))
+            targets = sorted(
+                (game_dir / "mods" / "StandardEditionAuthor" / "Author_One").glob("*.zipmod")
+            )
             self.assertEqual([path.name for path in targets], ["same.zipmod", "same_1.zipmod"])
             self.assertEqual(result["removed_empty_dir_count"], 2)
             self.assertFalse((game_dir / "mods" / "one").exists())

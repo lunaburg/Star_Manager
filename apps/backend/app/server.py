@@ -172,6 +172,7 @@ def start_parent_watchdog(server: ThreadingHTTPServer) -> None:
             if not is_process_alive(parent_pid):
                 print(f"Parent process {parent_pid} exited; stopping backend", flush=True)
                 server.shutdown()
+                server.server_close()
                 return
 
     threading.Thread(target=watch_parent, name="parent-watchdog", daemon=True).start()
@@ -1099,7 +1100,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         if route.startswith("/mods/items/") and route.endswith("/model-preview"):
-            item_id = self.parse_route_int(route, "/mods/items/", "/model-preview")
+            item_id = self.parse_route_item_id(route, "/mods/items/", "/model-preview")
             if item_id is None:
                 self.send_json({"ok": False, "error": f"Invalid route: {route}"}, status=400)
                 return
@@ -1245,6 +1246,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         raw = route[len(prefix) : len(route) - len(suffix)]
         try:
             return int(raw.strip("/"))
+        except ValueError:
+            return None
+
+    def parse_route_item_id(self, route: str, prefix: str, suffix: str) -> int | str | None:
+        if not route.startswith(prefix) or not route.endswith(suffix):
+            return None
+        raw = route[len(prefix) : len(route) - len(suffix)].strip("/")
+        if raw.casefold().startswith("builtin:"):
+            try:
+                return f"builtin:{int(raw.split(':', 1)[1])}"
+            except (IndexError, TypeError, ValueError):
+                return None
+        try:
+            return int(raw)
         except ValueError:
             return None
 

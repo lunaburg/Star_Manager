@@ -523,6 +523,13 @@ def _read_main_asset(item: object) -> tuple[bytes, str]:
     reference = normalize_abdata_path(str(item["main_manifest"] or ""), str(item["main_ab"] or ""))
     if not reference.lower().endswith(".unity3d"):
         raise ValueError("该物品没有可用的 MainAB Unity3D 资源")
+    if str(item["source_type"] or "") == "builtin":
+        game_dir = Path(str(item["game_dir"] or "")).resolve()
+        external = resolve_game_abdata_path(game_dir, reference).resolve()
+        abdata_root = (game_dir / "abdata").resolve()
+        if abdata_root not in external.parents or not external.is_file():
+            raise FileNotFoundError(f"找不到模型资源：{reference}")
+        return external.read_bytes(), str(external)
     zipmod_path = Path(str(item["file_path"])).resolve()
     member_name = normalize_zip_path(reference)
     with zipfile.ZipFile(zipmod_path) as archive:
@@ -812,22 +819,42 @@ def _write_preview_model(
     return len(meshes)
 
 
-def prepare_item_model_preview(mod_item_id: int, db_path: Path = DEFAULT_DB_PATH) -> dict:
+def _item_identifier(value: int | str) -> tuple[str, int]:
+    raw = str(value or "").strip()
+    if raw.casefold().startswith("builtin:"):
+        return "builtin", int(raw.split(":", 1)[1])
+    return "mod", int(raw)
+
+
+def _load_item_for_preview(item_identifier: int | str, conn: sqlite3.Connection) -> sqlite3.Row | None:
+    source_type, numeric_id = _item_identifier(item_identifier)
+    if source_type == "builtin":
+        return conn.execute(
+            """SELECT builtin_items.*, '' AS file_path, '' AS relative_path,
+                      updated_at AS modified_at, 'builtin' AS source_type
+               FROM builtin_items WHERE builtin_items.id = ?""",
+            (numeric_id,),
+        ).fetchone()
+    return conn.execute(
+        """SELECT mod_items.*, zipmods.file_path, zipmods.relative_path,
+                  zipmods.modified_at, 'mod' AS source_type
+           FROM mod_items INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
+           WHERE mod_items.id = ?""",
+        (numeric_id,),
+    ).fetchone()
+
+
+def prepare_item_model_preview(mod_item_id: int | str, db_path: Path = DEFAULT_DB_PATH) -> dict:
     try:
         with sqlite3.connect(db_path.resolve()) as conn:
             conn.row_factory = sqlite3.Row
             init_db(conn)
-            item = conn.execute(
-                """SELECT mod_items.*, zipmods.file_path, zipmods.relative_path, zipmods.modified_at
-                   FROM mod_items INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
-                   WHERE mod_items.id = ?""",
-                (int(mod_item_id),),
-            ).fetchone()
+            item = _load_item_for_preview(mod_item_id, conn)
         if item is None:
             return {"ok": False, "error": "物品不存在"}
         asset_data, source = _read_main_asset(item)
         cache_key = hashlib.sha1(
-            f"main-data-v17-png-no-optimize:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
+            f"main-data-v18-png-no-optimize:{mod_item_id}:{item['modified_at']}:{item['main_ab']}:{item['main_data']}".encode("utf-8")
         ).hexdigest()
         output = DEFAULT_MODEL_PREVIEW_DIR / cache_key[:2] / f"{cache_key}.glb"
         half_output = output.with_name(f"{cache_key}-half.glb")

@@ -14,7 +14,7 @@
 | --- | --- |
 | [模组数据库设计](mod_database_design.md) | SQLite 表、字段、关系、扫描流程、状态和查询边界 |
 | [模组数据库建库性能基准](mod_database_build_benchmark.md) | 现有数据库 100 个 zipmod 的建库耗时、ZIP 读取/解压与 Unity3D 缩略图阶段拆分和优化建议 |
-| [游戏原版资源索引](builtin_resource_index.md) | `characustom/*.unity3d` 中的 ChaListData、原版物品表、缩略图和服装卡匹配 |
+| [游戏原版资源索引](builtin_resource_index.md) | `characustom/*.unity3d` 中的 ChaListData、MapInfo H 点地图、原版物品表、缩略图和服装卡匹配 |
 | [标准模组结构记录](standard_mod_structure_record.md) | `manifest.xml`、角色/Studio CSV（递归子目录、作者工具和日语原生表头兼容）、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
 | [Hooh ammunition_go.zipmod 结构解析](hooh_ammunition_go_zipmod_analysis.md) | 一个标准 Studio 自定义物品模组样本的目录、ItemCategory/ItemList、AssetBundle 对象和当前扫描边界 |
 | [Studio 女性姿势转换](pose_zipmod_conversion.md) | Studio `.dat` 姿势到 `Kind=501` zipmod 的 CSV、Animator/AnimationClip、骨骼映射和验证边界 |
@@ -50,7 +50,7 @@
 | 修改人物卡重复分析或清理 | [人物卡服装依赖重复清理](character_card_duplicate_cleanup.md) → [角色卡解析说明](character_card_parsing.md) → [回收站](../trash-recycle-bin.md) |
 | 修改角色卡页面关联展示 | [角色卡解析说明](character_card_parsing.md) → [前端 UI 专题索引](../frontend-ui/README.md) |
 | 修改场景卡解析或关联展示 | [Studio 场景卡解析说明](scene_card_parsing.md) → [角色卡库布局](../frontend-ui/character-cards-layout.md) → [前端 UI 专题索引](../frontend-ui/README.md) |
-| 修改原版物品扫描或服装卡原版关联 | [游戏原版资源索引](builtin_resource_index.md) → [服装卡样本解析报告](clothes_card_sample_analysis.md) → [角色卡库布局](../frontend-ui/character-cards-layout.md) |
+| 修改原版物品扫描、H 点地图或服装卡原版关联 | [游戏原版资源索引](builtin_resource_index.md) → [服装卡样本解析报告](clothes_card_sample_analysis.md) → [角色卡库布局](../frontend-ui/character-cards-layout.md) |
 | 修改缩略图或 Unity3D 修复 | [标准模组结构记录](standard_mod_structure_record.md) → [模组异常分类](mod_exception_catalog.md) → [Unity3D 解密与修复](../unity3d-decryption-notes.md)（含未知加密方式按 GUID→作者查询未加密参考模组、57 字节包裹、内嵌资源流、`wenchenyinger` profile、B002 三张流式纹理内嵌和 `.resS` 移除） |
 | 诊断 Sims 4 FBX 灰黑块或黑三角 | [FBX 灰黑块修复记录](../sims4-fbx-gray-black-artifact-repair.md) → [Unity3D 解密与修复](../unity3d-decryption-notes.md) |
 | 修改 API 或批量任务 | [前后端接口](../backend-interface.md) → 本目录对应数据文档 |

@@ -19,6 +19,8 @@ from star_manager.services.mod_database_queries import (  # noqa: E402
     list_workbench_template_items,
     list_zipmods,
     MAP_SCENE_FILTER_KIND,
+    MAP_GAME_FILTER_KIND,
+    MAP_STUDIO_FILTER_KIND,
     resolve_thumbnail_cache_path,
     thumbnail_url_for_cache_path,
 )
@@ -448,10 +450,11 @@ class ItemPaginationTests(unittest.TestCase):
 
 
 class ZipmodExportTests(unittest.TestCase):
-    def test_map_filter_matches_all_map_kind_variants(self):
+    def test_map_filters_separate_game_and_studio_and_include_dual_maps(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             db_path = root / "mod_database.sqlite"
+            game_dir = root / "game"
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
@@ -477,12 +480,25 @@ class ZipmodExportTests(unittest.TestCase):
                             """,
                             (zipmod_id, "sample.map", f"map-{index}", kind, f"Map {index}", now, now),
                         )
+                    conn.execute(
+                        """
+                        INSERT INTO builtin_items (
+                            game_dir_key, game_dir, category_no, item_id, name,
+                            created_at, updated_at
+                        ) VALUES (?, ?, '__game_map_scene__', '4', 'Builtin Map', ?, ?)
+                        """,
+                        (str(game_dir.resolve()).casefold(), str(game_dir), now, now),
+                    )
             finally:
                 conn.close()
 
-            result = list_mod_items(db_path=db_path, kind=MAP_SCENE_FILTER_KIND)
+            result = list_mod_items(db_path=db_path, kind=MAP_SCENE_FILTER_KIND, source="all", game_dir=game_dir)
+            game_result = list_mod_items(db_path=db_path, kind=MAP_GAME_FILTER_KIND, source="all", game_dir=game_dir)
+            studio_result = list_mod_items(db_path=db_path, kind=MAP_STUDIO_FILTER_KIND, source="all", game_dir=game_dir)
 
-        self.assertEqual([row["name"] for row in result["rows"]], ["Map 1", "Map 2", "Map 3"])
+        self.assertEqual({row["name"] for row in result["rows"]}, {"Builtin Map", "Map 1", "Map 2", "Map 3"})
+        self.assertEqual({row["name"] for row in game_result["rows"]}, {"Builtin Map", "Map 2", "Map 3"})
+        self.assertEqual({row["name"] for row in studio_result["rows"]}, {"Map 1", "Map 3"})
 
     def test_item_usage_filter_recovers_dependency_with_cleared_item_foreign_key(self):
         with TemporaryDirectory() as temp_dir:

@@ -301,6 +301,13 @@ def init_db(conn: sqlite3.Connection) -> None:
             game_dir TEXT NOT NULL,
             category_no TEXT NOT NULL,
             item_id TEXT NOT NULL,
+            item_domain TEXT NOT NULL DEFAULT 'builtin',
+            map_no TEXT NOT NULL DEFAULT '',
+            map_state TEXT NOT NULL DEFAULT '',
+            is_outdoors INTEGER NOT NULL DEFAULT 0,
+            h_point_count INTEGER NOT NULL DEFAULT 0,
+            h_point_list_status TEXT NOT NULL DEFAULT '',
+            mapinfo_source TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL DEFAULT '',
             name_en TEXT NOT NULL DEFAULT '',
             name_zh_cn TEXT NOT NULL DEFAULT '',
@@ -438,6 +445,13 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "mod_items", "unity3d_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_source", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "mod_items", "unity3d_error", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "builtin_items", "item_domain", "TEXT NOT NULL DEFAULT 'builtin'")
+    ensure_column(conn, "builtin_items", "map_no", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "builtin_items", "map_state", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "builtin_items", "is_outdoors", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "builtin_items", "h_point_count", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "builtin_items", "h_point_list_status", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "builtin_items", "mapinfo_source", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "character_cards", "tags_json", "TEXT NOT NULL DEFAULT '[]'")
     ensure_column(conn, "character_cards", "favorite", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "character_cards", "rating", "INTEGER NOT NULL DEFAULT 0")

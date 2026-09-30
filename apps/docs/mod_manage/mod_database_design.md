@@ -8,7 +8,7 @@
 
 - `zipmods`：通过读取 zipmod 内的 `manifest.xml` 构建，记录模组级信息。
 - `mod_items`：通过读取 zipmod 或解包目录中的 CSV 构建，记录物品级信息；也承载可识别的非物品资源登记，例如 kPlug 地图场景和 Studio 自定义物品。
-- `builtin_items`：通过扫描当前游戏目录 `abdata/list/characustom/*.unity3d` 中的 `ChaListData` 构建，记录原版服装、配饰等可与 Coordinate 匹配的物品及其缩略图/资源状态。
+- `builtin_items`：通过扫描当前游戏目录 `abdata/list/characustom/*.unity3d` 中的 `ChaListData` 和 `abdata/map/list/mapinfo/*.unity3d` 构建，记录原版服装、配饰以及具有有效 H 点位的地图及其缩略图/资源状态。
 
 真实数据来源仍然是文件系统、zipmod、`manifest.xml` 和 CSV。数据库只保存扫描后的索引、解析状态和必要的定位信息，方便前端列表、搜索、筛选和详情展示。
 
@@ -183,7 +183,7 @@ Studio 自定义物品额外扫描 `abdata/studio/info/**/ItemGroup_*.csv`、`It
 - 仅有 `mapinfo` 信息包时写入 `kind = __game_map_scene__`，即“地图 / 游戏本体”。
 - 两类特征同时存在时只写入一条 `kind = __game_studio_map_scene__`，即“地图 / 本体 + 工作室”。
 
-地图条目的 `MainAB` 保存场景或地图信息 `.unity3d` 路径，缩略图状态为 `ready`（前端使用地图占位图）。
+地图条目的 `MainAB` 保存场景或地图信息 `.unity3d` 路径。没有声明 `ThumbAB` 时，缩略图状态为 `ready`，前端使用地图默认图；声明了 `ThumbAB` 时会尝试提取真实缩略图，资源缺失或读取失败则保留 `missing`/`error` 状态，前端仍显示地图默认图并保留异常提示。
 
 CSV 通常结构：
 
@@ -203,9 +203,11 @@ ID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex
 
 ### builtin_items 原版资源索引
 
-原版索引按选定游戏目录建立独立 `game_dir_key`，从 `abdata/list/characustom/*.unity3d` 读取 `ChaListData` 的类别、local item ID、名称、主资源和缩略图引用。缩略图写入同一运行时缩略图目录；原版行在物品查询中以 `source_type = builtin`、作者/来源 `游戏本体` 返回，不拥有 zipmod GUID 或 `zipmod_id`。
+原版索引按选定游戏目录建立独立 `game_dir_key`，从 `abdata/list/characustom/*.unity3d` 读取 `ChaListData` 的类别、local item ID、名称、主资源和缩略图引用；同时读取 MapInfo 的地图编号和场景引用，并精确检查场景包中的 `HPointList`/`HPoint` MonoScript。带有效 H 点位的地图使用 `category_no = __game_map_scene__`、`item_domain = map`，地图编号存入 `map_no`/`item_id`。缩略图写入同一运行时缩略图目录；原版行在物品查询中以 `source_type = builtin`、作者/来源 `游戏本体` 返回，不拥有 zipmod GUID 或 `zipmod_id`。
 
 人物卡和服装卡的 Coordinate 依赖会按 `CategoryNo + ID` 查询该表；`id = 0` 空槽位及当前游戏目录没有索引记录的 ID 不显示为原版依赖。原版条目不会参与 zipmod 使用状态筛选或远程模组补全。
+
+地图条目额外保存 `map_state`、`is_outdoors`、`h_point_count`、`h_point_list_status` 和 `mapinfo_source`。MapInfo 重复地图编号按索引包加载顺序覆盖；没有有效 `HPointList` 与 `HPoint` 的场景不会入库。地图可在物品浏览的地图筛选中和模组地图混合显示，详情只读但支持场景模型预览。
 
 ### 建议字段
 
@@ -217,7 +219,13 @@ zipmod_author       模组作者，辅助索引
 csv_path            记录当前物品信息保存在模组文件夹的哪个csv中
 item_id             CSV 的 ID 字段 
 kind                CSV 元信息第一行的列表类别值，只记录白名单类别
-item_domain         mod / studio；Studio 物品使用 studio
+item_domain         mod / studio / map；Studio 物品使用 studio，原版地图使用 map
+map_no              原版 MapInfo 的地图编号，普通物品为空
+map_state           原版 MapInfo 的 State 值
+is_outdoors         原版 MapInfo 的户外标记
+h_point_count       场景中精确识别到的 HPoint 组件数量
+h_point_list_status HPointList 识别状态及列表数量
+mapinfo_source      原版地图对应的 MapInfo 索引包
 studio_group_id     Studio ItemList.BigCategory，普通物品为空
 studio_group_name   Studio ItemGroup 映射得到的名称，普通物品为空
 studio_category_id  Studio ItemList.MidCategory，普通物品为空
@@ -575,6 +583,7 @@ apps/backend/star_manager/
 - 从 `manifest.xml` 建立 zipmod 主索引，并把重复 GUID 放入 `duplicate_zipmods`。
 - 从 CSV 实际数据行建立 `mod_items`，记录解析、缩略图和 MainAB Unity3D 状态。
 - 从游戏原版 `ChaListData` 建立按游戏目录隔离的 `builtin_items`，并将原版资源合并到物品浏览和 Coordinate 依赖匹配。
+- 从游戏原版 MapInfo 和场景包建立带有效 `HPointList`/`HPoint` 的 `__game_map_scene__` 地图记录，提取可用缩略图并支持只读场景模型预览。
 - 统计 zipmod 物品数、Unity3D 汇总、缩略图问题和角色卡依赖使用关系。
 - 支持 GUID、名称、作者、物品名称、Kind、状态和使用关系查询。
 - 物品浏览支持 `mod`、`builtin` 和 `all` 来源；当前前端以 96 条分页请求配合 `include_total`/`has_more` 增量加载。

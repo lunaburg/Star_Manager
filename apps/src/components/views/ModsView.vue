@@ -554,7 +554,8 @@ function modStatusTone(status) {
                 v-for="row in ctx.modRows"
                 :key="row.id"
                 :class="{ 'selected-row': ctx.selectedMod?.id === row.id, 'bulk-selected-row': ctx.selectedModIds.has(Number(row.id)) }"
-                @click="ctx.selectMod(row)"
+                @click="ctx.handleModRowClick(row)"
+                @contextmenu.prevent="ctx.openModContextMenu(row, $event)"
               >
                 <td v-if="ctx.modBulkMode" class="select-column">
                   <input
@@ -673,7 +674,7 @@ function modStatusTone(status) {
           <template v-else-if="ctx.libraryMode === 'items'">
             <div class="drawer-hero item-drawer-hero mod-detail-hero">
               <span class="drawer-thumb" :aria-label="ctx.selectedItem.name + ' thumbnail'">
-                <img v-if="ctx.selectedItem.thumbnailUrl && (ctx.isStudioItem(ctx.selectedItem) || ctx.selectedItem.status === 'ready')" :src="ctx.selectedItem.thumbnailUrl" :alt="ctx.selectedItem.name + ' preview'">
+                <img v-if="ctx.selectedItem.thumbnailUrl && (ctx.isStudioItem(ctx.selectedItem) || ctx.selectedItem.status === 'ready' || ctx.isMapSceneItem(ctx.selectedItem))" :src="ctx.selectedItem.thumbnailUrl" :alt="ctx.selectedItem.name + ' preview'">
               </span>
               <div class="drawer-hero-content">
                 <h3>{{ ctx.selectedItem.name }}</h3>
@@ -693,7 +694,21 @@ function modStatusTone(status) {
               <button :class="{ active: ctx.itemTab === '工具' }" type="button" @click="ctx.itemTab = '工具'">工具</button>
             </div>
             <div v-if="ctx.selectedItem.isBuiltin" class="drawer-tab-panel active">
-              <div class="drawer-section mod-detail-section builtin-item-detail">
+              <div v-if="ctx.isMapSceneItem(ctx.selectedItem)" class="drawer-section mod-detail-section builtin-item-detail">
+                <span class="drawer-section-title">原版地图场景</span>
+                <div class="kv mod-kv"><span>地图编号</span><strong>{{ ctx.selectedItem.raw.map_no || ctx.selectedItem.raw.item_id || '-' }}</strong></div>
+                <div class="kv mod-kv"><span>H 点位</span><strong>{{ ctx.selectedItem.raw.h_point_count || 0 }} 个</strong></div>
+                <div class="kv mod-kv"><span>HPointList</span><strong>{{ ctx.selectedItem.raw.h_point_list_status || '未知' }}</strong></div>
+                <div class="kv mod-kv"><span>场景资源</span><strong class="mono" :title="ctx.selectedItem.raw.main_ab || '-'">{{ ctx.itemUnity3dFileName(ctx.selectedItem) }}</strong></div>
+                <div class="kv mod-kv"><span>地图索引</span><strong class="mono" :title="ctx.selectedItem.raw.mapinfo_source || '-'">{{ ctx.selectedItem.raw.mapinfo_source || '-' }}</strong></div>
+                <div class="kv mod-kv"><span>户外地图</span><strong>{{ Number(ctx.selectedItem.raw.is_outdoors) ? '是' : '否' }}</strong></div>
+                <ModelPreview
+                  ref="modelPreview"
+                  :item-id="ctx.selectedItem.id"
+                  @ready-change="modelPreviewReady = $event"
+                />
+              </div>
+              <div v-else class="drawer-section mod-detail-section builtin-item-detail">
                 <span class="drawer-section-title">游戏本体物品</span>
                 <div class="kv mod-kv"><span>来源</span><strong>游戏本体</strong></div>
                 <div class="kv mod-kv"><span>物品 ID</span><strong>{{ ctx.selectedItem.raw.item_id || ctx.selectedItem.dbId || '-' }}</strong></div>
@@ -857,7 +872,7 @@ function modStatusTone(status) {
                 <div v-else class="related-item-list">
                   <button v-for="item in ctx.selectedModItems" :key="item.id" type="button" class="related-item" @click="ctx.openModItemInItemBrowser(item)">
                     <span class="related-thumb" :class="ctx.badgeClass(item.status)">
-                      <LazyThumbnail v-if="item.thumbnailUrl && (ctx.isStudioItem(item) || item.status === 'ready')" :src="item.thumbnailUrl" :alt="item.name + ' preview'" />
+                      <LazyThumbnail v-if="item.thumbnailUrl && (ctx.isStudioItem(item) || item.status === 'ready' || ctx.isMapSceneItem(item))" :src="item.thumbnailUrl" :alt="item.name + ' preview'" />
                       <span v-else>{{ item.status === "ready" ? (ctx.isMapSceneItem(item) ? "MAP" : "PNG") : "MISS" }}</span>
                     </span>
                     <div class="related-item-main">
@@ -964,6 +979,33 @@ function modStatusTone(status) {
   </section>
   <Teleport to="body">
     <div
+      v-if="ctx.modContextMenu?.open"
+      class="item-context-backdrop"
+      @mousedown.self="ctx.closeModContextMenu"
+      @contextmenu.prevent
+    >
+      <div
+        class="item-context-menu mod-context-menu"
+        :style="{ left: `${ctx.modContextMenu.x}px`, top: `${ctx.modContextMenu.y}px` }"
+        role="menu"
+        aria-label="模组快捷工具"
+        @mousedown.stop
+      >
+        <div class="item-context-heading">模组快捷工具</div>
+        <div class="item-context-name" :title="ctx.modContextMenu.mod?.name">{{ ctx.modContextMenu.mod?.name }}</div>
+        <button type="button" class="item-context-action" role="menuitem" @click="ctx.openModContextFolder">定位模组文件</button>
+        <button type="button" class="item-context-action" role="menuitem" @click="ctx.openModContextManifest">修改 Manifest</button>
+        <button
+          type="button"
+          class="item-context-action danger-context-action"
+          role="menuitem"
+          @click="ctx.openModContextDelete"
+        >
+          删除模组
+        </button>
+      </div>
+    </div>
+    <div
       v-if="ctx.itemContextMenu?.open"
       class="item-context-backdrop"
       @mousedown.self="ctx.closeItemContextMenu"
@@ -973,10 +1015,11 @@ function modStatusTone(status) {
         <div class="item-context-heading">物品操作</div>
         <div class="item-context-name" :title="ctx.itemContextMenu.item?.name">{{ ctx.itemContextMenu.item?.name }}</div>
         <button
+          v-if="ctx.itemGameApplySpec(ctx.itemContextMenu.item).supported"
           type="button"
           class="item-context-action primary-context-action"
           role="menuitem"
-          :disabled="ctx.itemGameApply?.busy || !ctx.itemGameApplySpec(ctx.itemContextMenu.item).supported"
+          :disabled="ctx.itemGameApply?.busy"
           @click="ctx.requestItemGameApply"
         >
           {{ ctx.itemGameApplyLabel(ctx.itemContextMenu.item) }}
@@ -985,6 +1028,16 @@ function modStatusTone(status) {
           {{ ctx.itemGameApplySpec(ctx.itemContextMenu.item).reason }}
         </div>
         <button v-if="!ctx.itemContextMenu.item?.isBuiltin" type="button" class="item-context-action" role="menuitem" @click="ctx.locateSourceMod(ctx.itemContextMenu.item); ctx.closeItemContextMenu()">定位来源模组</button>
+        <button
+          v-if="!ctx.itemContextMenu.item?.isBuiltin"
+          type="button"
+          class="item-context-action danger-context-action"
+          role="menuitem"
+          :disabled="ctx.deletingItemId === ctx.itemContextMenu.item?.id"
+          @click="ctx.requestDeleteItemFromContextMenu"
+        >
+          删除物品
+        </button>
       </div>
     </div>
     <div

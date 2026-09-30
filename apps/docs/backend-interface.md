@@ -142,8 +142,9 @@ Read and file routes:
   - Returns editable `manifest.xml` fields for one zipmod.
 - `GET /mods/items?offset=&limit=&zipmod_id=&search=&kind=&author=&status=&usage=&source=&game_dir=&include_total=`
   - Returns paged item rows. The existing default `source=mod` returns only `mod_items`; `source=builtin` returns `builtin_items` for the supplied selected `game_dir`; `source=all` merges both sources with stable source metadata. `status` may be `ready`, `error`, `thumb`, or empty. `error` covers items with parse errors, missing required `MainAB` Unity3D files, or missing original-game resources; missing `TexAB` alone does not create item error status. `usage` may be `used`, `unused`, or empty, based on character-card dependencies; builtin rows are excluded from usage-filtered results because their card association is resolved on demand rather than stored as `mod_item_id`.
+  - Map `kind` filters: `__map_game_filter__` matches `__game_map_scene__` and `__game_studio_map_scene__`; `__map_studio_filter__` matches `__map_scene__` and `__game_studio_map_scene__`. The existing `__map_filter__` continues to match all three variants for compatibility. Each filter respects `source`, so builtin maps appear only with `source=builtin` or `source=all` and a selected `game_dir`.
   - `include_total` defaults to `1`; when set to `0`, the response omits the full count (`total: null`) and fetches one extra row to report `has_more`, which is the preferred mode for incremental scrolling after the first page.
-  - Builtin rows include `source_type: "builtin"`, `source_label: "游戏本体"`, `game_dir`, `category_no`, `source_path`, original resource references, and the cached thumbnail URL. They never expose a zipmod GUID or zipmod ID.
+  - Builtin rows include `source_type: "builtin"`, `source_label: "游戏本体"`, `game_dir`, `category_no`, `source_path`, original resource references, and the cached thumbnail URL. They never expose a zipmod GUID or zipmod ID. H-point maps use `category_no: "__game_map_scene__"`, `item_domain: "map"`, and additionally return `map_no`, `map_state`, `is_outdoors`, `h_point_count`, `h_point_list_status`, and `mapinfo_source`.
   - Item display status is derived in the renderer: `error` for parse errors or `unity3d_status` `missing/error`; `thumb` for parsed items whose main Unity3D resource is usable but whose `thumbnail_status` is not `ready` / `ok`; `ready` when both the item and thumbnail are usable.
   - Item `unity3d_status` checks the current zipmod first, then game `abdata`, then the indexed contents of other zipmods. Missing `TexAB` is tolerated. A resource outside the current zipmod uses `not_in_mod`; `unity3d_source` is `game_abdata` or `other_zipmod`. Public `abdata/chara/00`–`60` resources are treated as shared. `ThumbAB` only affects `unity3d_status` when it points to the same `.unity3d` as `MainAB` and thumbnail parsing proves that file is not a usable Unity resource; a thumbnail-only `ThumbAB` problem remains a thumbnail issue.
 - `GET /mods/items/filters?game_dir=`
@@ -154,6 +155,8 @@ Read and file routes:
   - Serves one item's thumbnail and lazily rebuilds the runtime cache from its source zipmod when the indexed cache path is empty or unavailable. Failed extraction updates the item's thumbnail status and returns an error.
 - `GET /mods/models/:file.glb`
   - Serves a generated GLB from the runtime model-preview cache. Model files are generated on demand and are disposable runtime data.
+- `POST /mods/items/:id/model-preview`
+  - Generates a disposable GLB for a mod item ID or a builtin map ID in the form `builtin:<database_id>`. Builtin map previews read the indexed game's `main_ab` directly and do not modify the game directory.
 - `GET /mods/mannequin/body.fbx`
   - Serves the bundled mannequin FBX used as the clothing preview reference model.
 - `GET /library/cards/tree?game_dir=`

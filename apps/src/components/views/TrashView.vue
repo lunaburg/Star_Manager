@@ -59,7 +59,7 @@ defineProps({
         </div>
         <div class="trash-item-actions">
           <button type="button" class="restore-button" :disabled="Boolean(ctx.trashAction)" @click.stop="ctx.restoreTrash(item)">恢复</button>
-          <button type="button" class="trash-delete-button" :disabled="Boolean(ctx.trashAction)" @click.stop="ctx.permanentlyDeleteTrash(item)">永久删除</button>
+          <button type="button" class="trash-delete-button" :disabled="Boolean(ctx.trashAction)" @click.stop="ctx.openPermanentTrashPrompt(item)">永久删除</button>
         </div>
       </article>
     </div>
@@ -81,6 +81,25 @@ defineProps({
           <footer class="trash-confirm-footer">
             <button type="button" class="trash-confirm-cancel" @click="ctx.cancelEmptyTrash">取消</button>
             <button type="button" class="trash-confirm-submit" @click="ctx.confirmEmptyTrash">永久删除</button>
+          </footer>
+        </section>
+      </div>
+      <div v-if="ctx.permanentTrashPrompt.open" class="trash-confirm-backdrop" @click.self="ctx.cancelPermanentTrash">
+        <section class="trash-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="permanent-trash-confirm-title">
+          <header class="trash-confirm-header">
+            <div>
+              <span class="trash-confirm-kicker">回收站清理</span>
+              <h2 id="permanent-trash-confirm-title">确认永久删除？</h2>
+            </div>
+            <button type="button" class="trash-confirm-close" aria-label="关闭" @click="ctx.cancelPermanentTrash">×</button>
+          </header>
+          <div class="trash-confirm-body">
+            <p>将永久删除 <strong>{{ ctx.permanentTrashPrompt.item?.name || ctx.permanentTrashPrompt.item?.file_name }}</strong>。</p>
+            <p class="trash-confirm-warning">此操作无法恢复，请确认仍要继续。</p>
+          </div>
+          <footer class="trash-confirm-footer">
+            <button type="button" class="trash-confirm-cancel" @click="ctx.cancelPermanentTrash">取消</button>
+            <button type="button" class="trash-confirm-submit" @click="ctx.confirmPermanentTrash">永久删除</button>
           </footer>
         </section>
       </div>

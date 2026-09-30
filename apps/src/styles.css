@@ -637,18 +637,30 @@ small {
 
 .topbar-kind-groups {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(130px, .56fr) minmax(130px, .56fr) minmax(130px, .56fr);
+  /* One track per visible category keeps spacing uniform across group boundaries. */
+  grid-template-columns: repeat(14, minmax(52px, 1fr));
   gap: 8px;
   min-width: 0;
   width: 100%;
+  overflow-x: auto;
 }
 
 .topbar-kind-group {
   min-width: 0;
-  padding: 5px 7px 6px;
+  padding: 5px 0 6px;
   border: 0;
   border-radius: 10px;
   background: transparent;
+}
+
+.topbar-kind-group-female,
+.topbar-kind-group-male {
+  grid-column: span 4;
+}
+
+.topbar-kind-group-common,
+.topbar-kind-group-map {
+  grid-column: span 2;
 }
 
 .topbar-kind-group-male {
@@ -671,6 +683,11 @@ small {
   --topbar-kind-tint: #f5f1ed;
 }
 
+.topbar-kind-group-map {
+  --topbar-kind-accent: #4f7d63;
+  --topbar-kind-tint: #e9f5eb;
+}
+
 .topbar-kind-group-studio {
   --topbar-kind-accent: #407f7d;
   --topbar-kind-tint: #e5f4f1;
@@ -681,8 +698,8 @@ small {
   height: 25px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 6px;
+  justify-content: flex-start;
+  padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -697,14 +714,18 @@ small {
 .topbar-kind-category-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 3px;
+  gap: 8px;
   padding-top: 5px;
 }
 
 .topbar-kind-group-common .topbar-kind-category-row,
+.topbar-kind-group-map .topbar-kind-category-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .topbar-kind-group-neutral .topbar-kind-category-row,
 .topbar-kind-group-studio .topbar-kind-category-row {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .topbar-kind-category,
@@ -8432,6 +8453,17 @@ small {
   background: #bc4279;
 }
 
+.item-context-action.danger-context-action {
+  border-color: #c9747b;
+  color: #9f2424;
+}
+
+.item-context-action.danger-context-action:hover:not(:disabled),
+.item-context-action.danger-context-action:focus-visible:not(:disabled) {
+  border-color: #9f2424;
+  background: #fff1f1;
+}
+
 .item-context-boundary {
   padding: 6px 8px;
   border-left: 3px solid #d58b39;
@@ -13558,12 +13590,23 @@ tbody tr:hover td {
   border-bottom-color: transparent;
 }
 
-.mod-management-layout > .mod-page .table-wrap > table > thead > tr > th {
+.mod-management-layout > .mod-page .table-wrap > table > thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--glass-background-fallback);
   background: var(--glass-background);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28);
+}
+
+.mod-management-layout > .mod-page .table-wrap > table > thead > tr > th {
+  position: static;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .mod-management-layout > .mod-page .compact-item-grid .compact-item-card {

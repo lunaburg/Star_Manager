@@ -553,6 +553,7 @@ const pendingDeleteEntries = ref([]);
 const pendingDeleteAction = ref(false);
 const trashFilter = ref("all");
 const emptyTrashPrompt = reactive({ open: false, count: 0 });
+const permanentTrashPrompt = reactive({ open: false, item: null });
 const filteredTrashEntries = computed(() => {
   if (trashFilter.value === "all") return trashEntries.value;
   return trashEntries.value.filter((item) => item.kind === trashFilter.value);
@@ -811,7 +812,9 @@ const DUAL_MAP_SCENE_KIND = "__game_studio_map_scene__";
 const STUDIO_ITEM_KIND = "__studio_item__";
 const MAP_SCENE_KIND_CODES = new Set([MAP_SCENE_KIND, GAME_MAP_SCENE_KIND, DUAL_MAP_SCENE_KIND]);
 const MAP_SCENE_FILTER_KIND = "__map_filter__";
-const MAP_SCENE_FILTER_KINDS = [MAP_SCENE_FILTER_KIND];
+const MAP_GAME_FILTER_KIND = "__map_game_filter__";
+const MAP_STUDIO_FILTER_KIND = "__map_studio_filter__";
+const MAP_SCENE_FILTER_KINDS = [MAP_GAME_FILTER_KIND, MAP_STUDIO_FILTER_KIND];
 const GAME_CLOTHING_CATEGORY_NOS = new Set([
   "140", "141", "144", "147",
   "240", "241", "242", "243", "244", "245", "246", "247"
@@ -962,6 +965,8 @@ const PERSONALITY_LABELS = [
 const personalityOptions = PERSONALITY_LABELS.map((label, value) => ({ label, value }));
 const ITEM_KIND_LABELS = {
   [MAP_SCENE_FILTER_KIND]: "地图",
+  [MAP_GAME_FILTER_KIND]: "地图 / 本体",
+  [MAP_STUDIO_FILTER_KIND]: "地图 / 工作室",
   [MAP_SCENE_KIND]: "地图 / 工作室",
   [GAME_MAP_SCENE_KIND]: "地图 / 本体",
   [DUAL_MAP_SCENE_KIND]: "地图 / 本体 + 工作室",
@@ -1066,8 +1071,16 @@ const TOPBAR_KIND_GROUPS = [
     label: "其它",
     tone: "neutral",
     categories: [
-      { key: "map", label: "地图", kinds: [MAP_SCENE_FILTER_KIND] },
       { key: "pattern", label: "图案", kinds: ["348"] }
+    ]
+  },
+  {
+    key: "map",
+    label: "地图",
+    tone: "map",
+    categories: [
+      { key: "builtin", label: "本体", kinds: [MAP_GAME_FILTER_KIND] },
+      { key: "studio", label: "工作室", kinds: [MAP_STUDIO_FILTER_KIND] }
     ]
   },
   {
@@ -1142,6 +1155,7 @@ const itemRows = ref([]);
 const modRows = ref([]);
 const selectedItem = ref(null);
 const itemContextMenu = reactive({ open: false, x: 0, y: 0, item: null });
+const modContextMenu = reactive({ open: false, x: 0, y: 0, mod: null });
 const itemAccessoryPrompt = reactive({ open: false, item: null, slotNo: 0, busy: false, error: "" });
 const itemGameApply = reactive({ busy: false, itemId: null, commandId: "", status: "", error: "" });
 const itemGameNotice = reactive({ type: "", message: "" });
@@ -1898,7 +1912,7 @@ const activeTopbarKindCategory = computed(() => (
 const activeTopbarKindChildren = computed(() => (
   activeTopbarKindCategory.value?.kinds.map((kind) => ({
     value: kind,
-    label: kind === MAP_SCENE_FILTER_KIND ? "地图" : String(ITEM_KIND_LABELS[kind] || kind).split("/").pop()
+    label: String(ITEM_KIND_LABELS[kind] || kind).split("/").pop()
   })) || []
 ));
 
@@ -1915,7 +1929,7 @@ function openTopbarKindCategory(group, category) {
   itemKindGroup.value = group.key;
   itemKindCategory.value = category.key;
   if (category.kinds.length === 1) {
-    // 地图、图案本身就是末级类别，不需要再打开一个空的二级页面。
+    // 末级类别直接应用筛选，不打开只有一个选项的二级页面。
     itemKindLevel.value = "categories";
     selectTopbarKindChild(category.kinds[0]);
     return;
@@ -4432,15 +4446,53 @@ function closeItemContextMenu() {
   itemContextMenu.item = null;
 }
 
+function closeModContextMenu() {
+  modContextMenu.open = false;
+  modContextMenu.mod = null;
+}
+
+function openModContextMenu(mod, event) {
+  if (!mod?.id || !event) return;
+  selectMod(mod);
+  closeItemContextMenu();
+  const menuWidth = 286;
+  const menuHeight = 220;
+  modContextMenu.mod = mod;
+  modContextMenu.x = Math.max(8, Math.min(Number(event.clientX) || 8, window.innerWidth - menuWidth - 8));
+  modContextMenu.y = Math.max(8, Math.min(Number(event.clientY) || 8, window.innerHeight - menuHeight - 8));
+  modContextMenu.open = true;
+}
+
+function openModContextFolder() {
+  closeModContextMenu();
+  openSelectedModInFolder();
+}
+
+function openModContextManifest() {
+  closeModContextMenu();
+  openManifestEditor();
+}
+
+function openModContextDelete() {
+  closeModContextMenu();
+  deleteSelectedMod();
+}
+
 function openItemContextMenu(item, event) {
   if (!item?.id || !event) return;
   selectItem(item);
   const menuWidth = 286;
-  const menuHeight = 210;
+  const menuHeight = 252;
   itemContextMenu.item = item;
   itemContextMenu.x = Math.max(8, Math.min(Number(event.clientX) || 8, window.innerWidth - menuWidth - 8));
   itemContextMenu.y = Math.max(8, Math.min(Number(event.clientY) || 8, window.innerHeight - menuHeight - 8));
   itemContextMenu.open = true;
+}
+
+function requestDeleteItemFromContextMenu() {
+  const item = itemContextMenu.item;
+  closeItemContextMenu();
+  deleteSelectedItem(item);
 }
 
 function requestItemGameApply() {
@@ -4853,6 +4905,14 @@ function toggleModSelection(row) {
     next.add(id);
   }
   selectedModIds.value = next;
+}
+
+function handleModRowClick(row) {
+  if (!row?.id) return;
+  if (modBulkMode.value && !selectedModIds.value.has(Number(row.id))) {
+    toggleModSelection(row);
+  }
+  selectMod(row);
 }
 
 function toggleAllVisibleMods() {
@@ -9632,7 +9692,6 @@ async function restoreTrash(item) {
 
 async function permanentlyDeleteTrash(item) {
   if (!item?.id || trashAction.value) return;
-  if (!window.confirm(`永久删除“${item.name || item.file_name}”？此操作无法恢复。`)) return;
   trashAction.value = `${item.kind}:${item.id}`;
   trashError.value = "";
   trashNotice.value = "";
@@ -9649,6 +9708,26 @@ async function permanentlyDeleteTrash(item) {
   } finally {
     trashAction.value = "";
   }
+}
+
+function openPermanentTrashPrompt(item) {
+  if (!item?.id || trashAction.value) return;
+  permanentTrashPrompt.item = item;
+  permanentTrashPrompt.open = true;
+}
+
+function cancelPermanentTrash() {
+  if (trashAction.value) return;
+  permanentTrashPrompt.open = false;
+  permanentTrashPrompt.item = null;
+}
+
+async function confirmPermanentTrash() {
+  if (!permanentTrashPrompt.open || !permanentTrashPrompt.item || trashAction.value) return;
+  const item = permanentTrashPrompt.item;
+  permanentTrashPrompt.open = false;
+  permanentTrashPrompt.item = null;
+  await permanentlyDeleteTrash(item);
 }
 
 function openEmptyTrashPrompt() {
@@ -9877,10 +9956,14 @@ const appCtx = reactive({
   pendingDeleteAction,
   trashFilter,
   emptyTrashPrompt,
+  permanentTrashPrompt,
   loadTrash,
   retryPendingDeletes,
   restoreTrash,
   permanentlyDeleteTrash,
+  openPermanentTrashPrompt,
+  cancelPermanentTrash,
+  confirmPermanentTrash,
   openEmptyTrashPrompt,
   cancelEmptyTrash,
   confirmEmptyTrash,
@@ -10077,6 +10160,7 @@ const appCtx = reactive({
   selectedCount,
   selectedItem,
   itemContextMenu,
+  modContextMenu,
   itemAccessoryPrompt,
   itemFacePrompt,
   itemBodyPrompt,
@@ -10105,6 +10189,12 @@ const appCtx = reactive({
   refreshCurrentGameState,
   openItemContextMenu,
   closeItemContextMenu,
+  openModContextMenu,
+  closeModContextMenu,
+  openModContextFolder,
+  openModContextManifest,
+  openModContextDelete,
+  requestDeleteItemFromContextMenu,
   requestItemGameApply,
   closeItemAccessoryPrompt,
   confirmItemAccessoryApply,
@@ -10133,6 +10223,7 @@ const appCtx = reactive({
   consumeWorkbenchTemplateSelection,
   selectBulkAuthorSuggestion,
   selectMod,
+  handleModRowClick,
   applyFirstCardTagFilterSuggestion,
   clearCardTagFilter,
   closeCardTagFilter,
@@ -11006,13 +11097,17 @@ watch(backendStatus, (status, previousStatus) => {
 
         <div v-if="deleteModPrompt.open" class="prompt-backdrop" @click.self="deleteModPrompt.open = false">
           <div class="prompt-panel duplicate-delete-confirm-panel">
+            <span class="risk-kicker">文件将进入回收站</span>
             <strong>删除模组</strong>
-            <p class="subtext">该操作会删除 zipmod 文件。</p>
+            <p class="subtext">将把 zipmod 文件移入 runtime/trash/mods，并移除相关数据库记录。</p>
             <div class="prompt-note duplicate-delete-keep">
               <span>模组</span>
               <strong>{{ deleteModPrompt.name }}</strong>
             </div>
-            <p class="duplicate-delete-warning">删除后不可由应用自动恢复，请确认后继续。</p>
+            <div class="prompt-note">
+              <span>可逆性</span>
+              <strong>可在回收站恢复或永久删除</strong>
+            </div>
             <div v-if="deleteModPrompt.notice" class="prompt-notice" role="status">{{ deleteModPrompt.notice }}</div>
             <div v-if="deleteModPrompt.error" class="prompt-error">{{ deleteModPrompt.error }}</div>
             <div class="prompt-actions">

@@ -22,10 +22,13 @@ from star_manager.services.mod_database_core import (
 )
 
 
-BUILTIN_LIST_PARSER_VERSION = "1"
+BUILTIN_LIST_PARSER_VERSION = "2"
 BUILTIN_LIST_ROOT = Path("abdata/list/characustom")
+BUILTIN_MAPINFO_ROOT = Path("abdata/map/list/mapinfo")
+BUILTIN_MAP_KIND = "__game_map_scene__"
 _BUILTIN_BUNDLE_ITEMS_CACHE: dict[tuple[str, str, str], tuple[BuiltinItem, ...]] = {}
 _BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT = 64
+_BUILTIN_SCENE_HPOINT_CACHE: dict[tuple[str, str], tuple[int, int, str, str]] = {}
 
 CLOTHES_CATEGORY_BY_SLOT = {
     0: "240",
@@ -67,6 +70,13 @@ class BuiltinItem:
     main_data: str
     thumb_ab: str
     thumb_tex: str
+    item_domain: str = "builtin"
+    map_no: str = ""
+    map_state: str = ""
+    is_outdoors: int = 0
+    h_point_count: int = 0
+    h_point_list_status: str = ""
+    mapinfo_source: str = ""
 
 
 def normalize_game_dir_key(game_dir: Path | str) -> str:
@@ -269,6 +279,151 @@ def _read_bundle_items_cached(game_dir: Path, bundle_path: Path) -> list[Builtin
     return items
 
 
+def _scene_hpoint_info(scene_path: Path) -> tuple[int, int, str, str]:
+    """Return H point counts, status, and the scene preview root.
+
+    Unity scene MonoBehaviours keep their actual script class in a MonoScript
+    object.  Looking up that class avoids accepting unrelated components whose
+    serialized fields happen to contain a similarly named value.
+    """
+    key = (str(scene_path), _path_signature(scene_path))
+    cached = _BUILTIN_SCENE_HPOINT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    if UnityPy is None or not scene_path.is_file():
+        result = (0, 0, "missing", "")
+        _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+        return result
+    try:
+        environment = UnityPy.load(str(scene_path))
+    except Exception:  # noqa: BLE001 - one scene must not abort the index.
+        result = (0, 0, "error", "")
+        _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+        return result
+    try:
+        scripts: dict[int, str] = {}
+        for obj in getattr(environment, "objects", []):
+            if _text(getattr(getattr(obj, "type", None), "name", "")) != "MonoScript":
+                continue
+            try:
+                value = obj.read()
+                class_name = _text(getattr(value, "m_ClassName", ""))
+                if class_name:
+                    scripts[int(getattr(obj, "path_id", 0) or 0)] = class_name
+            except Exception:  # noqa: BLE001 - skip malformed script records.
+                continue
+        hpoint_lists = 0
+        hpoints = 0
+        for obj in getattr(environment, "objects", []):
+            if _text(getattr(getattr(obj, "type", None), "name", "")) != "MonoBehaviour":
+                continue
+            try:
+                tree = obj.read_typetree()
+                script = tree.get("m_Script") if isinstance(tree, dict) else None
+                script_id = int(script.get("m_PathID", 0)) if isinstance(script, dict) else 0
+                class_name = scripts.get(script_id, "")
+                if class_name == "HPointList":
+                    hpoint_lists += 1
+                elif class_name == "HPoint":
+                    hpoints += 1
+            except Exception:  # noqa: BLE001 - malformed components are ignored.
+                continue
+        preview_root = ""
+        for obj in getattr(environment, "objects", []):
+            if _text(getattr(getattr(obj, "type", None), "name", "")) != "GameObject":
+                continue
+            try:
+                if _text(getattr(obj.read(), "m_Name", "")) == "Map":
+                    preview_root = "Map"
+                    break
+            except Exception:  # noqa: BLE001 - preview root is optional metadata.
+                continue
+        result = (
+            hpoint_lists,
+            hpoints,
+            "valid" if hpoint_lists > 0 and hpoints > 0 else "invalid",
+            preview_root,
+        )
+    finally:
+        del environment
+    _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+    return result
+
+
+def _read_mapinfo_items(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
+    """Read MapInfo records and keep only scenes with usable H points."""
+    if UnityPy is None:
+        raise RuntimeError("UnityPy is not available")
+    environment = UnityPy.load(str(bundle_path))
+    try:
+        rows: list[dict] = []
+        source_asset = "MapInfo"
+        for obj in getattr(environment, "objects", []):
+            if _text(getattr(getattr(obj, "type", None), "name", "")) != "MonoBehaviour":
+                continue
+            try:
+                tree = obj.read_typetree()
+            except Exception:  # noqa: BLE001 - skip unrelated or damaged components.
+                continue
+            params = tree.get("param") if isinstance(tree, dict) else None
+            if not isinstance(params, list):
+                continue
+            source_asset = _text(tree.get("m_Name")) or source_asset
+            rows.extend(row for row in params if isinstance(row, dict))
+            break
+        items: list[BuiltinItem] = []
+        for row in rows:
+            map_no = normalize_item_id(row.get("No"))
+            scene_reference = _meaningful_reference(row.get("AssetBundleName"))
+            asset_name = _display_text(row.get("AssetName"))
+            if not map_no or not scene_reference:
+                continue
+            scene_path = _resolve_game_reference(game_dir, scene_reference)
+            hpoint_list_count, hpoint_count, hpoint_status, preview_root = (
+                _scene_hpoint_info(scene_path) if scene_path else (0, 0, "missing", "")
+            )
+            if hpoint_status != "valid":
+                continue
+            names = row.get("MapNames") if isinstance(row.get("MapNames"), list) else []
+            name = next((_display_text(value) for value in (names[1:] + names[:1]) if _display_text(value)), "")
+            name = name or asset_name or f"原版地图 {map_no}"
+            try:
+                source_path = bundle_path.relative_to(game_dir).as_posix()
+            except ValueError:
+                source_path = bundle_path.as_posix()
+            thumb_ab = _meaningful_reference(row.get("ThumbnailBundle_S") or row.get("ThumbnailBundle_L"))
+            thumb_tex = _meaningful_reference(row.get("ThumbnailAsset_S") or row.get("ThumbnailAsset_L"))
+            items.append(
+                BuiltinItem(
+                    game_dir_key=normalize_game_dir_key(game_dir),
+                    game_dir=str(game_dir),
+                    category_no=BUILTIN_MAP_KIND,
+                    item_id=map_no,
+                    name=name,
+                    name_en=_display_text(names[1]) if len(names) > 1 else "",
+                    name_zh_cn="",
+                    name_zh_tw=_display_text(names[0]) if names else "",
+                    source_path=source_path,
+                    source_asset=source_asset,
+                    main_manifest="abdata",
+                    main_ab=scene_reference,
+                    main_data=preview_root or asset_name,
+                    thumb_ab=thumb_ab,
+                    thumb_tex=thumb_tex,
+                    item_domain="map",
+                    map_no=map_no,
+                    map_state=_text(row.get("State")),
+                    is_outdoors=int(row.get("isOutdoors") or 0),
+                    h_point_count=hpoint_count,
+                    h_point_list_status=f"valid:{hpoint_list_count}",
+                    mapinfo_source=source_path,
+                )
+            )
+        return items
+    finally:
+        del environment
+
+
 class _BuiltinThumbnailBundleCache:
     def __init__(self) -> None:
         self._bundles: dict[tuple[str, str], UnityThumbnailBundle | ThumbnailResult] = {}
@@ -351,6 +506,13 @@ def _builtin_source_signature(game_dir: Path, item: BuiltinItem, bundle_path: Pa
             item.main_data,
             item.thumb_ab,
             item.thumb_tex,
+            item.item_domain,
+            item.map_no,
+            item.map_state,
+            str(item.is_outdoors),
+            str(item.h_point_count),
+            item.h_point_list_status,
+            item.mapinfo_source,
             item.name,
         )
     )
@@ -378,7 +540,7 @@ def build_builtin_items_index(
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
 ) -> dict[str, object]:
-    """Scan the game's ChaListData bundles and refresh builtin_items."""
+    """Scan original ChaListData and H-point map bundles into builtin_items."""
 
     init_db(conn)
     game_dir = game_dir.resolve()
@@ -388,6 +550,8 @@ def build_builtin_items_index(
     cached_index_ready = (
         get_database_metadata(conn, "builtin_index_ready") == "1"
         and get_database_metadata(conn, "builtin_index_game_dir_key") == game_dir_key
+        and get_database_metadata(conn, "builtin_index_parser_version") == BUILTIN_LIST_PARSER_VERSION
+        and get_database_metadata(conn, "builtin_map_index_ready") == "1"
     )
     if cached_index_ready:
         row = conn.execute(
@@ -403,7 +567,14 @@ def build_builtin_items_index(
         total_items = int(row["total"] or 0)
         return {
             "builtin_list_bundles": int(get_database_metadata(conn, "builtin_index_bundle_count") or 0),
+            "builtin_mapinfo_bundles": int(get_database_metadata(conn, "builtin_mapinfo_bundle_count") or 0),
             "builtin_items": total_items,
+            "builtin_maps": int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM builtin_items WHERE game_dir_key = ? AND category_no = ?",
+                    (game_dir_key, BUILTIN_MAP_KIND),
+                ).fetchone()[0]
+            ),
             "builtin_reused_items": total_items,
             "builtin_thumbnail_ready": int(row["ready"] or 0),
             "builtin_thumbnail_missing": int(row["missing"] or 0),
@@ -414,15 +585,24 @@ def build_builtin_items_index(
             "builtin_errors": [],
         }
     list_root = (game_dir / BUILTIN_LIST_ROOT).resolve()
+    mapinfo_root = (game_dir / BUILTIN_MAPINFO_ROOT).resolve()
     list_paths = sorted(
         (path for path in list_root.rglob("*.unity3d") if path.is_file())
         if list_root.is_dir()
         else [],
         key=lambda path: path.as_posix().casefold(),
     )
+    mapinfo_paths = sorted(
+        (path for path in mapinfo_root.rglob("*.unity3d") if path.is_file())
+        if mapinfo_root.is_dir()
+        else [],
+        key=lambda path: path.as_posix().casefold(),
+    )
     stats: dict[str, object] = {
         "builtin_list_bundles": len(list_paths),
+        "builtin_mapinfo_bundles": len(mapinfo_paths),
         "builtin_items": 0,
+        "builtin_maps": 0,
         "builtin_reused_items": 0,
         "builtin_thumbnail_ready": 0,
         "builtin_thumbnail_missing": 0,
@@ -431,12 +611,14 @@ def build_builtin_items_index(
         "builtin_scan_complete": True,
         "builtin_errors": [],
     }
-    if not list_paths:
+    if not list_paths and not mapinfo_paths:
         with conn:
             conn.execute("DELETE FROM builtin_items WHERE game_dir_key = ?", (game_dir_key,))
             set_database_metadata(conn, "builtin_index_ready", "1")
             set_database_metadata(conn, "builtin_index_game_dir_key", game_dir_key)
             set_database_metadata(conn, "builtin_index_bundle_count", "0")
+            set_database_metadata(conn, "builtin_index_parser_version", BUILTIN_LIST_PARSER_VERSION)
+            set_database_metadata(conn, "builtin_map_index_ready", "1")
         return stats
 
     existing = {
@@ -511,15 +693,24 @@ def build_builtin_items_index(
                 conn.execute(
                     """
                     INSERT INTO builtin_items (
-                        game_dir_key, game_dir, category_no, item_id, name,
+                        game_dir_key, game_dir, category_no, item_id, item_domain,
+                        map_no, map_state, is_outdoors, h_point_count,
+                        h_point_list_status, mapinfo_source, name,
                         name_en, name_zh_cn, name_zh_tw, source_path, source_asset,
                         main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
                         thumbnail_cache_path, thumbnail_status, thumbnail_error,
                         resource_status, resource_error, source_signature,
                         parser_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(game_dir_key, category_no, item_id) DO UPDATE SET
                         game_dir = excluded.game_dir,
+                        item_domain = excluded.item_domain,
+                        map_no = excluded.map_no,
+                        map_state = excluded.map_state,
+                        is_outdoors = excluded.is_outdoors,
+                        h_point_count = excluded.h_point_count,
+                        h_point_list_status = excluded.h_point_list_status,
+                        mapinfo_source = excluded.mapinfo_source,
                         name = excluded.name,
                         name_en = excluded.name_en,
                         name_zh_cn = excluded.name_zh_cn,
@@ -545,6 +736,13 @@ def build_builtin_items_index(
                         item.game_dir,
                         item.category_no,
                         item.item_id,
+                        item.item_domain,
+                        item.map_no,
+                        item.map_state,
+                        item.is_outdoors,
+                        item.h_point_count,
+                        item.h_point_list_status,
+                        item.mapinfo_source,
                         item.name,
                         item.name_en,
                         item.name_zh_cn,
@@ -569,6 +767,116 @@ def build_builtin_items_index(
                 )
                 stats["builtin_items"] = int(stats["builtin_items"]) + 1
 
+        # MapInfo bundles contain one record per selectable map.  Later bundles
+        # override earlier records with the same No, matching the game's
+        # information-table loading order (30 -> 34 -> 50).
+        map_items: dict[tuple[str, str], tuple[BuiltinItem, Path]] = {}
+        for index, bundle_path in enumerate(mapinfo_paths, start=1):
+            if progress_callback is not None:
+                progress_callback(
+                    4 + round(index / max(len(mapinfo_paths), 1), 1),
+                    f"Reading original map index {index}/{len(mapinfo_paths)}",
+                )
+            try:
+                items = _read_mapinfo_items(game_dir, bundle_path)
+            except Exception as exc:  # noqa: BLE001 - retain other resource lists.
+                stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
+                stats["builtin_scan_complete"] = False
+                errors = stats["builtin_errors"]
+                if isinstance(errors, list) and len(errors) < 20:
+                    errors.append(f"{bundle_path.name}: {exc}")
+                continue
+            for item in items:
+                key = (item.category_no, item.item_id)
+                if key in map_items:
+                    stats["builtin_duplicate_items"] = int(stats["builtin_duplicate_items"]) + 1
+                map_items[key] = (item, bundle_path)
+
+        for key in sorted(map_items):
+            item, bundle_path = map_items[key]
+            seen.add(key)
+            source_signature = _builtin_source_signature(game_dir, item, bundle_path)
+            previous = existing.get(key)
+            previous_cache = str(previous["thumbnail_cache_path"] or "") if previous else ""
+            previous_status = str(previous["thumbnail_status"] or "") if previous else ""
+            previous_signature = str(previous["source_signature"] or "") if previous else ""
+            cache_path = Path(previous_cache) if previous_cache else _thumbnail_cache_path(thumbnail_dir, item)
+            can_reuse = (
+                not force_full
+                and previous_signature == source_signature
+                and previous_status in {"ready", "ok"}
+                and cache_path.is_file()
+            )
+            if can_reuse:
+                stats["builtin_items"] = int(stats["builtin_items"]) + 1
+                stats["builtin_maps"] = int(stats["builtin_maps"]) + 1
+                stats["builtin_reused_items"] = int(stats["builtin_reused_items"]) + 1
+                stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
+                continue
+            thumbnail_result = _extract_builtin_thumbnail(game_dir, item, cache_path, thumbnail_cache)
+            if thumbnail_result.status == "ready":
+                stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
+                thumbnail_cache_path = str(cache_path)
+            else:
+                stats["builtin_thumbnail_missing"] = int(stats["builtin_thumbnail_missing"]) + 1
+                thumbnail_cache_path = ""
+            resource_status, resource_error = _resource_status(game_dir, item)
+            conn.execute(
+                """
+                INSERT INTO builtin_items (
+                    game_dir_key, game_dir, category_no, item_id, item_domain,
+                    map_no, map_state, is_outdoors, h_point_count,
+                    h_point_list_status, mapinfo_source, name,
+                    name_en, name_zh_cn, name_zh_tw, source_path, source_asset,
+                    main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
+                    thumbnail_cache_path, thumbnail_status, thumbnail_error,
+                    resource_status, resource_error, source_signature,
+                    parser_version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_dir_key, category_no, item_id) DO UPDATE SET
+                    game_dir = excluded.game_dir,
+                    item_domain = excluded.item_domain,
+                    map_no = excluded.map_no,
+                    map_state = excluded.map_state,
+                    is_outdoors = excluded.is_outdoors,
+                    h_point_count = excluded.h_point_count,
+                    h_point_list_status = excluded.h_point_list_status,
+                    mapinfo_source = excluded.mapinfo_source,
+                    name = excluded.name,
+                    name_en = excluded.name_en,
+                    name_zh_cn = excluded.name_zh_cn,
+                    name_zh_tw = excluded.name_zh_tw,
+                    source_path = excluded.source_path,
+                    source_asset = excluded.source_asset,
+                    main_manifest = excluded.main_manifest,
+                    main_ab = excluded.main_ab,
+                    main_data = excluded.main_data,
+                    thumb_ab = excluded.thumb_ab,
+                    thumb_tex = excluded.thumb_tex,
+                    thumbnail_cache_path = excluded.thumbnail_cache_path,
+                    thumbnail_status = excluded.thumbnail_status,
+                    thumbnail_error = excluded.thumbnail_error,
+                    resource_status = excluded.resource_status,
+                    resource_error = excluded.resource_error,
+                    source_signature = excluded.source_signature,
+                    parser_version = excluded.parser_version,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    item.game_dir_key, item.game_dir, item.category_no, item.item_id,
+                    item.item_domain, item.map_no, item.map_state, item.is_outdoors,
+                    item.h_point_count, item.h_point_list_status, item.mapinfo_source,
+                    item.name, item.name_en, item.name_zh_cn, item.name_zh_tw,
+                    item.source_path, item.source_asset, item.main_manifest, item.main_ab,
+                    item.main_data, item.thumb_ab, item.thumb_tex, thumbnail_cache_path,
+                    thumbnail_result.status, thumbnail_result.error, resource_status,
+                    resource_error, source_signature, BUILTIN_LIST_PARSER_VERSION,
+                    str(previous["created_at"] or now) if previous else now, now,
+                ),
+            )
+            stats["builtin_items"] = int(stats["builtin_items"]) + 1
+            stats["builtin_maps"] = int(stats["builtin_maps"]) + 1
+
         if bool(stats["builtin_scan_complete"]):
             current_rows = conn.execute(
                 "SELECT category_no, item_id FROM builtin_items WHERE game_dir_key = ?",
@@ -586,6 +894,9 @@ def build_builtin_items_index(
             set_database_metadata(conn, "builtin_index_ready", "1")
             set_database_metadata(conn, "builtin_index_game_dir_key", game_dir_key)
             set_database_metadata(conn, "builtin_index_bundle_count", str(len(list_paths)))
+            set_database_metadata(conn, "builtin_map_index_ready", "1")
+            set_database_metadata(conn, "builtin_mapinfo_bundle_count", str(len(mapinfo_paths)))
+            set_database_metadata(conn, "builtin_index_parser_version", BUILTIN_LIST_PARSER_VERSION)
     return stats
 
 
@@ -600,6 +911,7 @@ def _builtin_item_payload(row: sqlite3.Row) -> dict[str, object]:
         "game_dir": row["game_dir"],
         "item_id": row["item_id"],
         "kind": row["category_no"],
+        "item_domain": row["item_domain"],
         "category_no": row["category_no"],
         "name": row["name"],
         "thumbnail_status": thumbnail_status,
@@ -609,6 +921,12 @@ def _builtin_item_payload(row: sqlite3.Row) -> dict[str, object]:
         "main_ab": row["main_ab"],
         "main_data": row["main_data"],
         "source_path": row["source_path"],
+        "map_no": row["map_no"],
+        "map_state": row["map_state"],
+        "is_outdoors": row["is_outdoors"],
+        "h_point_count": row["h_point_count"],
+        "h_point_list_status": row["h_point_list_status"],
+        "mapinfo_source": row["mapinfo_source"],
     }
 
 

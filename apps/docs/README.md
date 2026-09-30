@@ -42,7 +42,7 @@
 | 前后端怎么通信 | [前后端接口](backend-interface.md) | Electron preload、HTTP 路由、任务协议、请求字段和单项/批量边界 |
 | 前端页面怎么组织 | [前端 UI 专题索引](frontend-ui/README.md) | 页面索引、应用外壳、实现基线和视觉假设 |
 | 应用缓存和运行时文件在哪里 | [缓存与运行时文件登记](runtime-cache-registry.md) | 后端缓存、SQLite 索引、前端缓存、回收站、临时与派生运行时文件、清理边界和开发缓存 |
-| 删除的卡片和模组在哪里 | [回收站](trash-recycle-bin.md) | runtime/trash 目录结构、恢复、永久删除、测试残留隔离和索引恢复行为 |
+| 删除的卡片和模组在哪里 | [回收站](trash-recycle-bin.md) | runtime/trash 目录结构、恢复、单条/批量永久删除自定义确认、测试残留隔离和索引恢复行为 |
 | 如何运行、构建和打包 | [Windows 打包指南](packaging-windows.md) | 开发命令、PyInstaller、electron-builder、产物检查和运行时后端选择 |
 | Electron 启动与后端退出 | [Electron 进程生命周期](electron-process-lifecycle.md) | 单实例锁、Windows 后端进程树清理、退出等待和异常退出边界 |
 | Electron 启动与后端退出 | [Electron 进程生命周期](electron-process-lifecycle.md) | 单实例锁、Windows 后端进程树清理、退出等待和异常退出边界 |
@@ -59,7 +59,7 @@
 | 总览 | [总览页布局](frontend-ui/overview-layout.md) | 四个一级容器移除外部边框；资源摘要、实用工具（含将 zipmod 整理到 `mods/StandardEditionAuthor/<作者>/`）、最近任务、本地成就 |
 | 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、服装卡、场景卡子界面，其中三类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；三类卡片依赖统一支持物品级匹配、模组级降级、模组未安装可补全/不可补全，以及“模组存在，物品缺失”特殊状态；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
 | 收藏视觉 | [人物卡收藏视觉状态](frontend-ui/character-card-favorite-effects.md) | 收藏主题、铭牌、边框、名字溢出和设置持久化 |
-| 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、多选操作栏与批量按钮玻璃化、增强表头磨砂层、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装和安全维护 |
+| 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、多选操作栏与批量按钮玻璃化、增强表头磨砂层及列边界亮线处理、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装、对不支持换装 Kind 隐藏换装入口和安全维护 |
 | 插件管理 | [插件管理布局](frontend-ui/plugins-layout.md) | BepInEx DLL 扫描、元数据、依赖、缓存、诊断和 `.dl_` 启停 |
 | 工作台 | [工作台](frontend-ui/workbench-layout.md) | 模组工程、CSV 物品、Unity3D 模板选择、MainData 预处理、资源写入，以及将打包 zipmod 输出到 `mods/Package/<作者>/`；另记保留的 Sims 4 Package → FBX 能力 |
 | 运行日志 | [运行日志布局](frontend-ui/runtime-log-layout.md) | 隐藏全局顶部栏；本地日志数组、任务轮询消息、Electron 首屏里程碑，以及 `did-finish-load`/`ready-to-show`/`renderer-ready` 的首屏显示门槛诊断 |

@@ -96,6 +96,18 @@ CategoryNo + Coordinate ID
 - 原版列表存在记录不等于模型资源和缩略图一定完整，详情中仍需区分资源状态和缩略图状态。
 - 原版物品可在模组管理的物品浏览中与模组物品混合浏览，也可通过来源筛选单独查看；点击原版记录不会跳转到 zipmod 物品浏览器，也不会触发模组工具。
 
+### 原版 H 场景地图索引（2026-09-29）
+
+- 背景：物品浏览数据库原先只收录本体服装和配饰，用户无法在管理器里按地图缩略图浏览游戏原版 H 场景地图。
+- 数据来源：递归读取 `abdata/map/list/mapinfo/*.unity3d` 的 `MapInfo.param`，保存地图 `No`、名称、`AssetBundleName`/`AssetName`、状态、户外标记、`ThumbnailBundle_S`/`ThumbnailAsset_S` 和 MapInfo 来源包。
+- H 点位判定：扫描对应场景 Unity3D 的 `MonoScript` 类名，再将 MonoBehaviour 的 `m_Script` 路径与 `HPointList`、`HPoint` 类精确匹配。只有至少存在一个 `HPointList` 和一个 `HPoint` 的场景才入库；单纯字段名称相似不算有效。`h_point_count` 保存场景中 HPoint 组件数量，`h_point_list_status` 保存识别状态和列表数量。
+- 存储和显示：地图仍按当前 `game_dir_key` 存入 `builtin_items`，使用 `category_no = __game_map_scene__`、`item_domain = map` 和地图 No 作为 `item_id`。缩略图走原有 `ThumbAB`/`ThumbTex` 运行时缓存管线；物品浏览“地图”筛选同时匹配本体和模组地图。地图详情展示编号、H 点数量、HPointList 状态、场景包、索引包和户外标记，并可用现有 UnityPy 预览器查看场景网格。
+- 重复编号：MapInfo 包按路径排序处理（本体常见顺序为 `30`、`34`、`50`），同一地图 No 后出现的记录覆盖前项，以贴近游戏后加载索引覆盖的行为。该数据库按场景是否有 H 点筛选，不复刻 Map Selector 插件隐藏地图编号的 UI 规则。
+- 缓存失效：原版扫描器版本升为 `2`，并在完成地图索引后写入 `builtin_map_index_ready`。旧数据库缺少该标记或版本号不匹配时会重新扫描；增量构建只复用签名相同且缩略图缓存仍存在的记录。
+- 实际资源检查：用户游戏目录的 `30.unity3d`、`34.unity3d` 和 `50.unity3d` 分别解析出 19、10、7 条带 HPointList/HPoint 的 MapInfo 记录；处理重复 No 后共 27 张唯一地图。场景资源检查得到 39 个引用包，`frontofbath`、`frontoftoilet`、`lobby_movie`、`vipentrance_movie` 四个包没有 HPointList，因此对应地图不会入库。
+- 验证：对上述三份真实 MapInfo 包调用扫描解析器并逐包检查场景，确认筛选数和 27 个唯一地图；前端生产构建及 Python 语法编译通过。
+- 适用边界：结果依赖所选 HS2 目录中的 MapInfo、场景包和 UnityPy 可读性；损坏、缺失或无法读取场景脚本时该地图会被跳过。缩略图缺失不会删除地图记录，会显示地图占位图并标记缩略图异常。场景模型预览只生成运行时 GLB 缓存，不修改游戏资源；数据库索引不代表 Map Selector 插件在运行时一定开放该地图。
+
 ### UAR 模组服装与原版服装重复记录（2026-08-22）
 
 - 背景：人物卡关联页出现两个“上衣”，其中一条是 UAR 识别出的模组上衣，另一条来自 Coordinate 的原版索引匹配；人物模型实际只穿着一件上衣。

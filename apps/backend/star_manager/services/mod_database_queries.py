@@ -18,11 +18,26 @@ from star_manager.services.mod_database_core import (
 )
 
 MAP_SCENE_FILTER_KIND = "__map_filter__"
+MAP_GAME_FILTER_KIND = "__map_game_filter__"
+MAP_STUDIO_FILTER_KIND = "__map_studio_filter__"
 MAP_SCENE_KINDS = (
     "__map_scene__",
     "__game_map_scene__",
     "__game_studio_map_scene__",
 )
+MAP_GAME_KINDS = (
+    "__game_map_scene__",
+    "__game_studio_map_scene__",
+)
+MAP_STUDIO_KINDS = (
+    "__map_scene__",
+    "__game_studio_map_scene__",
+)
+MAP_FILTER_KINDS = {
+    MAP_SCENE_FILTER_KIND: MAP_SCENE_KINDS,
+    MAP_GAME_FILTER_KIND: MAP_GAME_KINDS,
+    MAP_STUDIO_FILTER_KIND: MAP_STUDIO_KINDS,
+}
 BUILTIN_SOURCE_LABEL = "游戏本体"
 # Keep the builtin browser aligned with the renderer's ITEM_KIND_LABELS table.
 # Unknown game category numbers are indexed for card/resource matching, but do
@@ -42,6 +57,7 @@ BUILTIN_VISIBLE_KINDS = (
     "351", "352", "353", "354", "355", "356", "357", "358",
     "359", "360", "361", "362", "363",
     "500", "501",
+    "__game_map_scene__",
 )
 
 _CURRENT_THUMBNAIL_CACHE_LOCK = threading.Lock()
@@ -729,6 +745,14 @@ def list_mod_item_filters(
             )
             if row["kind"]
         ]
+        map_scope = "game_dir_key = ? AND category_no = ?" if game_dir_key else "category_no = ?"
+        map_scope_params = (game_dir_key, "__game_map_scene__") if game_dir_key else ("__game_map_scene__",)
+        if conn.execute(
+            f"SELECT 1 FROM builtin_items WHERE {map_scope} LIMIT 1",
+            map_scope_params,
+        ).fetchone():
+            kinds.append("__game_map_scene__")
+            kinds = sorted(set(kinds), key=lambda value: (0, int(value)) if value.isdigit() else (1, value.casefold()))
         return {"ok": True, "authors": authors, "kinds": kinds}
     finally:
         conn.close()
@@ -1385,10 +1409,11 @@ def list_mod_items(
                 search_pattern = f"%{escape_like(search)}%"
                 query_params.extend([search_pattern, search_pattern, search_pattern])
             if kind:
-                if kind == MAP_SCENE_FILTER_KIND:
-                    placeholders = ", ".join("?" for _ in MAP_SCENE_KINDS)
+                map_kinds = MAP_FILTER_KINDS.get(kind)
+                if map_kinds:
+                    placeholders = ", ".join("?" for _ in map_kinds)
                     clauses.append(f"TRIM(mod_items.kind) IN ({placeholders})")
-                    query_params.extend(MAP_SCENE_KINDS)
+                    query_params.extend(map_kinds)
                 else:
                     clauses.append("TRIM(mod_items.kind) = ?")
                     query_params.append(kind)
@@ -1468,7 +1493,9 @@ def list_mod_items(
                        zipmods.name AS source_mod, zipmods.file_name AS source_file_name,
                        '' AS game_dir, '' AS source_path, '' AS source_asset,
                        '' AS main_manifest, '' AS thumb_ab, mod_items.thumbnail_error,
-                       '' AS resource_status, '' AS resource_error
+                       '' AS resource_status, '' AS resource_error,
+                       '' AS map_no, '' AS map_state, 0 AS is_outdoors,
+                       0 AS h_point_count, '' AS h_point_list_status, '' AS mapinfo_source
                 FROM mod_items
                 INNER JOIN zipmods ON zipmods.id = mod_items.zipmod_id
                 WHERE {where_clause}
@@ -1502,8 +1529,11 @@ def list_mod_items(
                 search_pattern = f"%{escape_like(search)}%"
                 query_params.extend([search_pattern] * 4)
             if kind:
-                if kind == MAP_SCENE_FILTER_KIND:
-                    clauses.append("1 = 0")
+                map_kinds = MAP_FILTER_KINDS.get(kind)
+                if map_kinds:
+                    placeholders = ", ".join("?" for _ in map_kinds)
+                    clauses.append(f"TRIM(builtin_items.category_no) IN ({placeholders})")
+                    query_params.extend(map_kinds)
                 else:
                     clauses.append("TRIM(builtin_items.category_no) = ?")
                     query_params.append(kind)
@@ -1542,13 +1572,16 @@ def list_mod_items(
                        ? AS author, '' AS zipmod_guid, builtin_items.item_id,
                        builtin_items.source_path AS csv_path,
                        builtin_items.main_ab, builtin_items.main_data, builtin_items.thumb_tex,
-                       'builtin' AS item_domain, '' AS studio_group_id, '' AS studio_group_name,
+                       builtin_items.item_domain, '' AS studio_group_id, '' AS studio_group_name,
                        '' AS studio_category_id, '' AS studio_category_name,
                        ? AS source_mod, '' AS source_file_name,
                        builtin_items.game_dir, builtin_items.source_path, builtin_items.source_asset,
                        builtin_items.main_manifest, builtin_items.thumb_ab,
                        builtin_items.thumbnail_error, builtin_items.resource_status,
-                       builtin_items.resource_error
+                       builtin_items.resource_error,
+                       builtin_items.map_no, builtin_items.map_state, builtin_items.is_outdoors,
+                       builtin_items.h_point_count, builtin_items.h_point_list_status,
+                       builtin_items.mapinfo_source
                 FROM builtin_items
                 WHERE {where_clause}
                 """,
@@ -1622,6 +1655,12 @@ def list_mod_items(
                         "studio_group_name": row["studio_group_name"],
                         "studio_category_id": row["studio_category_id"],
                         "studio_category_name": row["studio_category_name"],
+                        "map_no": row["map_no"],
+                        "map_state": row["map_state"],
+                        "is_outdoors": row["is_outdoors"],
+                        "h_point_count": row["h_point_count"],
+                        "h_point_list_status": row["h_point_list_status"],
+                        "mapinfo_source": row["mapinfo_source"],
                     }
                 )
                 continue

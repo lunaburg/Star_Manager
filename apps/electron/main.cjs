@@ -35,6 +35,7 @@ if (disableGpu) {
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 let backendPort = process.env.STAR_MANAGER_BACKEND_PORT || "8765";
 let backendProcess = null;
+let backendStartedByApp = false;
 let backendStopRequested = false;
 let backendShutdownPromise = null;
 let appShutdownStarted = false;
@@ -554,6 +555,7 @@ async function startPythonBackend() {
     stdio: "inherit",
     windowsHide: true
   });
+  backendStartedByApp = true;
   logStartupStep("spawn backend process", spawnStart, `(pid=${backendProcess.pid || "unknown"}, port=${backendPort})`);
 
   backendProcess.on("error", (error) => {
@@ -627,12 +629,18 @@ async function reuseCompatibleBackend() {
   return false;
 }
 
-async function fetchBackendOnce(route) {
+async function fetchBackendOnce(route, { timeoutMs = 0 } = {}) {
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const response = await fetch(`http://127.0.0.1:${backendPort}${route}`);
+    const response = await fetch(`http://127.0.0.1:${backendPort}${route}`, {
+      signal: controller?.signal
+    });
     return { ok: true, payload: await response.json() };
   } catch (error) {
     return { ok: false, error };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -680,8 +688,49 @@ async function stopProcessOnPort(port) {
   );
 }
 
+async function stopOwnedBackendPort(port) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const health = await fetchBackendOnce("/health", { timeoutMs: 500 });
+    const actualRuntimeDir = String(health.payload?.runtime_dir || "");
+    const expectedRuntimeDir = path.resolve(runtimeDir());
+    const reportedRuntimeDir = actualRuntimeDir ? path.resolve(actualRuntimeDir) : "";
+    const normalizeForComparison = (value) => (
+      process.platform === "win32" ? value.toLowerCase() : value
+    );
+    const belongsToThisApp = health.ok
+      && health.payload?.service === "Star_Manager"
+      && reportedRuntimeDir
+      && normalizeForComparison(reportedRuntimeDir) === normalizeForComparison(expectedRuntimeDir);
+
+    if (health.ok && !belongsToThisApp) {
+      if (await isPortInUse(port)) {
+        console.log(`[backend] port ${port} is occupied by a different service; leaving it running`);
+      }
+      return true;
+    }
+
+    await stopProcessOnPort(port);
+    if (await waitForPortToClose(port)) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return false;
+}
+
 function findProcessIdsOnPort(port) {
   if (process.platform === "win32") {
+    const parseNetstat = (output) => output
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/))
+      .filter((parts) => (
+        parts.length >= 5
+        && parts[0].toUpperCase() === "TCP"
+        && parts[1].endsWith(`:${Number(port)}`)
+        && parts[3].toUpperCase() === "LISTENING"
+      ))
+      .map((parts) => parts[4])
+      .filter(Boolean);
     return execFileText("powershell.exe", [
       "-NoProfile",
       "-Command",
@@ -689,7 +738,13 @@ function findProcessIdsOnPort(port) {
         `$items = Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue`,
         "$items | Select-Object -ExpandProperty OwningProcess -Unique"
       ].join("; ")
-    ]).then((output) => output.split(/\s+/).filter(Boolean));
+    ]).then(
+      (output) => {
+        const pids = output.split(/\s+/).filter(Boolean);
+        return pids.length ? pids : execFileText("netstat.exe", ["-ano", "-p", "tcp"]).then(parseNetstat, () => []);
+      },
+      () => execFileText("netstat.exe", ["-ano", "-p", "tcp"]).then(parseNetstat, () => [])
+    );
   }
 
   return execFileText("lsof", ["-ti", `tcp:${port}`]).then(
@@ -700,7 +755,7 @@ function findProcessIdsOnPort(port) {
 
 function killProcess(pid) {
   if (process.platform === "win32") {
-    return execFileText("taskkill.exe", ["/PID", pid, "/F"]).catch((error) => {
+    return execFileText("taskkill.exe", ["/PID", pid, "/T", "/F"]).catch((error) => {
       console.warn(`[backend] failed to stop process ${pid}: ${error.message}`);
     });
   }
@@ -716,17 +771,26 @@ async function shutdownBackend(reason = "app shutdown") {
   }
 
   const child = backendProcess;
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
+  const shouldCleanBackendPort = backendStartedByApp;
+  if ((!child || child.exitCode !== null || child.signalCode !== null) && !shouldCleanBackendPort) {
     backendProcess = null;
     return;
   }
 
   backendStopRequested = true;
   console.log(`[backend] stopping because ${reason}`);
-  backendShutdownPromise = terminateProcessTree(child, {
-    platform: process.platform,
-    execFileImpl: execFile
-  })
+  backendShutdownPromise = (child
+    ? terminateProcessTree(child, {
+        platform: process.platform,
+        execFileImpl: execFile
+      })
+    : Promise.resolve())
+    .then(async () => {
+      if (!shouldCleanBackendPort) return;
+      if (!(await stopOwnedBackendPort(backendPort))) {
+        console.warn(`[backend] owned service on port ${backendPort} is still running after process-tree shutdown`);
+      }
+    })
     .catch((error) => {
       console.warn(`[backend] failed to stop process tree: ${error.message}`);
     })
@@ -734,6 +798,7 @@ async function shutdownBackend(reason = "app shutdown") {
       if (backendProcess === child) {
         backendProcess = null;
       }
+      backendStartedByApp = false;
     });
   return backendShutdownPromise;
 }

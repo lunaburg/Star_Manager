@@ -27,9 +27,10 @@
 ![页面截图 1 (22)](apps/docs/assets/page-screenshots/1%20%2822%29.png)
 ![页面截图 1 (23)](apps/docs/assets/page-screenshots/1%20%2823%29.png)
 ![页面截图 1 (24)](apps/docs/assets/page-screenshots/1%20%2824%29.png)
+![页面截图 1 (27)](apps/docs/assets/page-screenshots/1%20%2827%29.png)
 ![页面截图 1 (25)](apps/docs/assets/page-screenshots/1%20%2825%29.png)
 ![页面截图 1 (26)](apps/docs/assets/page-screenshots/1%20%2826%29.png)
-![页面截图 1 (27)](apps/docs/assets/page-screenshots/1%20%2827%29.png)
+
 ![页面截图 1 (1)](apps/docs/assets/page-screenshots/1%20%281%29.png)
 ![页面截图 1 (2)](apps/docs/assets/page-screenshots/1%20%282%29.png)
 ![页面截图 1 (3)](apps/docs/assets/page-screenshots/1%20%283%29.png)

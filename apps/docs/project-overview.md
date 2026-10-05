@@ -81,7 +81,7 @@ The renderer is a Vue app with a persistent shell. It has eight main navigation 
 - Workbench: standalone mod-making workspace with local project/manifest files, CSV-backed items, Unity3D database-template selection, MainData preprocessing, resource write-back, and a modal Sims 4 Package → FBX tool in the project-level toolbar.
 - Logs: task and runtime message review.
 - Trash: recoverable character-card and zipmod entries, with restore and permanent-delete actions.
-- Settings: manager startup behavior, local achievement preferences, persistent default export locations, and Blender executable integration for Workbench FBX imports.
+- Settings: manager startup behavior, the bundled default MP4 wallpaper and custom wallpaper selection, local achievement preferences, persistent default export locations, and Blender executable integration for Workbench FBX imports.
 
 The Start page reads and writes the game's UTF-16 `UserData/setup.xml` through Electron IPC. Saving creates a `.bak` copy, atomically replaces the XML, and synchronizes the Unity display values in the Windows registry. Launching checks for IPA/BepInEx conflicts and uses `IPA.exe --launch` when IPA is present.
 
@@ -270,6 +270,7 @@ npm run check:python
 npm run python:dev
 npm run dev
 npm run build
+npm run stage:plugins
 npm run build:card-plugin
 npm run electron
 npm run build:backend

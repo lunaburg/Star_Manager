@@ -7,6 +7,7 @@ import { getAchievementIcon } from "./achievementIcons";
 import characterCardTypeIcon from "./assets/card-type-character.svg";
 import clothesCardTypeIcon from "./assets/card-type-clothes.svg";
 import sceneCardTypeIcon from "./assets/card-type-scene.svg";
+import remoteCardTypeIcon from "./assets/card-type-remote.svg";
 import itemKindBottom from "./assets/item-kind-bottom.png";
 import itemKindGloves from "./assets/item-kind-gloves.png";
 import itemKindPanties from "./assets/item-kind-panties.png";
@@ -19,6 +20,7 @@ import mapSceneDefaultThumbnail from "./assets/item-kind-map-default.png";
 import studioItemDefaultThumbnail from "./assets/item-kind-studio-default.png";
 import brandLogo from "../build-resources/brand-logo.png";
 import wallpaperDefault from "./assets/wallpaper-default.jpg";
+import wallpaperDefaultVideo from "./assets/wallpaper-default.mp4";
 
 const views = [
   { id: "start", icon: "ST", label: "开始游戏" },
@@ -317,10 +319,15 @@ const managerSettings = reactive({
   wallpaperPath: String(startupWallpaper.wallpaperPath || "").trim(),
   wallpaperType: ["image", "video"].includes(String(startupWallpaper.wallpaperType || ""))
     ? String(startupWallpaper.wallpaperType)
-    : ""
+    : "",
+  wallpaperAudioEnabled: startupWallpaper.wallpaperAudioEnabled === true
 });
 const wallpaperReady = ref(!startupWallpaper.wallpaperPath);
 const wallpaperLoadFailed = ref(false);
+const wallpaperRetryCount = ref(0);
+const wallpaperVideoRef = ref(null);
+const WALLPAPER_RETRY_LIMIT = 2;
+let wallpaperRetryTimer = 0;
 const databaseWorkerOptions = computed(() => Array.from(
   { length: Math.max(1, Number(managerSettings.databaseWorkerLimit) || 1) },
   (_value, index) => index + 1
@@ -341,11 +348,15 @@ function wallpaperUrl(value) {
 }
 
 const wallpaperSource = computed(() => {
-  if (!managerSettings.wallpaperPath || wallpaperLoadFailed.value) return wallpaperDefault;
+  if (wallpaperLoadFailed.value) return wallpaperDefault;
+  if (!managerSettings.wallpaperPath) return wallpaperDefaultVideo;
   return wallpaperUrl(managerSettings.wallpaperPath);
 });
-const wallpaperIsVideo = computed(() => managerSettings.wallpaperType === "video"
-  || /\.mp4$/i.test(managerSettings.wallpaperPath || ""));
+const wallpaperIsVideo = computed(() => !wallpaperLoadFailed.value && (
+  managerSettings.wallpaperType === "video"
+  || !managerSettings.wallpaperPath
+  || /\.mp4$/i.test(managerSettings.wallpaperPath || "")
+));
 
 function notifyRendererReady() {
   if (rendererReadyNotified) return;
@@ -353,13 +364,57 @@ function notifyRendererReady() {
   window.desktopApi?.notifyRendererReady?.();
 }
 
-function handleWallpaperReady() {
-  wallpaperReady.value = true;
+function resetWallpaperRetryState() {
+  if (wallpaperRetryTimer) {
+    window.clearTimeout(wallpaperRetryTimer);
+    wallpaperRetryTimer = 0;
+  }
+  wallpaperRetryCount.value = 0;
 }
 
-function handleWallpaperError() {
+function handleWallpaperReady() {
+  wallpaperReady.value = true;
+  syncWallpaperAudio();
+  resetWallpaperRetryState();
+}
+
+function syncWallpaperAudio() {
+  const media = wallpaperVideoRef.value;
+  if (!media || !wallpaperIsVideo.value) return;
+  media.muted = !managerSettings.wallpaperAudioEnabled;
+  const playPromise = media.play?.();
+  playPromise?.catch?.(() => {});
+}
+
+function handleWallpaperError(event) {
+  const media = event?.target;
+  const mediaError = media?.error;
+  const errorDetails = [
+    mediaError?.code ? `code=${mediaError.code}` : "code=unknown",
+    media?.networkState ? `networkState=${media.networkState}` : "",
+    media?.readyState != null ? `readyState=${media.readyState}` : "",
+    mediaError?.message ? mediaError.message : ""
+  ].filter(Boolean).join(", ");
+
+  if (wallpaperIsVideo.value && media && wallpaperRetryCount.value < WALLPAPER_RETRY_LIMIT) {
+    wallpaperRetryCount.value += 1;
+    wallpaperReady.value = false;
+    const retryNumber = wallpaperRetryCount.value;
+    if (wallpaperRetryTimer) window.clearTimeout(wallpaperRetryTimer);
+    wallpaperRetryTimer = window.setTimeout(() => {
+      wallpaperRetryTimer = 0;
+      if (!media.isConnected || !wallpaperIsVideo.value || wallpaperLoadFailed.value) return;
+      media.load();
+      media.muted = !managerSettings.wallpaperAudioEnabled;
+      const playPromise = media.play?.();
+      playPromise?.catch?.(() => {});
+    }, 250 * retryNumber);
+    log(`[Wallpaper Retry] 第 ${retryNumber} 次重试动态壁纸（${errorDetails}）`);
+    return;
+  }
+
   if (managerSettings.wallpaperPath && !wallpaperLoadFailed.value) {
-    log(`[Wallpaper Error] 无法加载壁纸：${managerSettings.wallpaperPath}`);
+    log(`[Wallpaper Error] 无法加载壁纸：${managerSettings.wallpaperPath}（${errorDetails}）`);
   }
   wallpaperLoadFailed.value = true;
   wallpaperReady.value = true;
@@ -689,6 +744,8 @@ const cardCoverCrop = reactive({
 const favoritingCardPath = ref("");
 const cardFavoriteNotice = reactive({ type: "", message: "" });
 const ratingCardPath = ref("");
+const cardRatingPulse = reactive({ active: false, path: "", rating: 0 });
+let cardRatingPulseTimer = 0;
 const cardRatingNotice = reactive({ type: "", message: "" });
 const cardTagNotice = reactive({ type: "", message: "" });
 const cardTagPrompt = reactive({
@@ -1161,6 +1218,7 @@ const itemGameApply = reactive({ busy: false, itemId: null, commandId: "", statu
 const itemGameNotice = reactive({ type: "", message: "" });
 const itemFacePrompt = reactive({ open: false, item: null, facePartNo: 0, busy: false, error: "" });
 const itemBodyPrompt = reactive({ open: false, item: null, bodyPartNo: 0, busy: false, error: "" });
+const itemMapPrompt = reactive({ open: false, item: null, busy: false, error: "" });
 const assemblyMode = ref(false);
 const assemblyUiActive = computed(() => assemblyMode.value && isItemLibraryView.value);
 watch([isItemLibraryView, assemblyMode], () => {
@@ -1418,6 +1476,7 @@ const manifestEditor = reactive({
   loading: false,
   busy: false,
   error: "",
+  authorSuggestionsOpen: false,
   fields: {
     guid: "",
     name: "",
@@ -1836,6 +1895,14 @@ const filteredZipmodAuthorOptions = computed(() => {
 });
 const bulkAuthorSuggestions = computed(() => {
   const query = String(bulkAuthorPrompt.value || "").trim().toLowerCase();
+  const options = zipmodAuthors.value;
+  const matched = query
+    ? options.filter((author) => String(author || "").toLowerCase().includes(query))
+    : options;
+  return matched.slice(0, 40);
+});
+const manifestAuthorSuggestions = computed(() => {
+  const query = String(manifestEditor.fields.author || "").trim().toLowerCase();
   const options = zipmodAuthors.value;
   const matched = query
     ? options.filter((author) => String(author || "").toLowerCase().includes(query))
@@ -3494,7 +3561,7 @@ function handleCharacterCardGridScroll(event) {
   void loadMoreCharacterCards();
 }
 
-function rebuildCharacterCardDatabase() {
+function rebuildCharacterCardDatabase(cardChanges = null) {
   isBusy.value = true;
   activeAction.value = "build_card_database";
   taskName.value = "扫描人物卡";
@@ -3512,7 +3579,7 @@ function rebuildCharacterCardDatabase() {
 
     submitTaskInBackground(
       "build_card_database",
-      { mode: "incremental" },
+      { mode: "incremental", card_changes: cardChanges || undefined },
       async (task) => {
         if (task.status === "completed") {
           settle(resolve, task);
@@ -3554,7 +3621,7 @@ async function refreshCurrentCardFolder() {
       log(
         `[Cards] 当前目录检测到人物卡变动：新增 ${changes.added || 0}，删除 ${changes.removed || 0}，修改 ${changes.modified || 0}`
       );
-      await rebuildCharacterCardDatabase();
+      await rebuildCharacterCardDatabase(changes);
       await loadCardTree();
     } else {
       await selectCardFolder(currentFolder);
@@ -3613,7 +3680,7 @@ function itemFallbackThumbnailUrl(kind, itemDomain = "") {
 }
 
 function setCardBrowserMode(mode) {
-  const nextMode = ["character", "clothes", "scene"].includes(String(mode))
+  const nextMode = ["character", "remote", "clothes", "scene"].includes(String(mode))
     ? String(mode)
     : "character";
   cardBrowserMode.value = nextMode;
@@ -3847,6 +3914,35 @@ function selectItem(row) {
 
 function itemGameApplySpec(item) {
   const raw = item?.raw || {};
+  if (isMapSceneItem(item)) {
+    const mainAB = String(raw.main_ab || "").trim();
+    const mainData = String(raw.main_data || "").trim();
+    const mapNoText = String(raw.map_no || "").trim();
+    const itemIdText = String(raw.item_id || "").trim();
+    const kplugParts = itemIdText.split(":");
+    const fallbackMapNo = kplugParts.length >= 3
+      ? (Number.isSafeInteger(Number.parseInt(kplugParts[kplugParts.length - 1], 10))
+        ? Number.parseInt(kplugParts[kplugParts.length - 1], 10)
+        : Number.parseInt(kplugParts[1], 10))
+      : Number.NaN;
+    const mapNo = Number.isSafeInteger(Number.parseInt(mapNoText, 10))
+      ? Number.parseInt(mapNoText, 10)
+      : fallbackMapNo;
+    if (!mainAB && !Number.isSafeInteger(mapNo)) {
+      return { supported: false, reason: "当前地图缺少可用的场景资源或地图编号。" };
+    }
+    return {
+      supported: true,
+      type: "map",
+      isBuiltin: Boolean(item?.isBuiltin || raw.source_type === "builtin"),
+      mapNo: Number.isSafeInteger(mapNo) ? mapNo : null,
+      mainAB,
+      mainData,
+      manifest: String(raw.main_manifest || "abdata").trim() || "abdata",
+      guid: String(raw.zipmod_guid || "").trim(),
+      itemId: itemIdText
+    };
+  }
   const isBuiltin = Boolean(item?.isBuiltin || raw.source_type === "builtin");
   const categoryText = String(item?.kindCode || raw.kind || "").trim();
   const categoryNo = Number.parseInt(categoryText, 10);
@@ -3891,6 +3987,7 @@ function gameHairSlotOption(categoryNo) {
 
 function itemGameApplyLabel(item) {
   const spec = itemGameApplySpec(item);
+  if (spec.type === "map") return "替换 H 场景地图";
   if (spec.type === "accessory") return "应用到角色配饰槽…";
   if (spec.type === "hair") {
     const hairSlotLabel = gameHairSlotOption(spec.categoryNo)?.label;
@@ -3907,6 +4004,16 @@ function itemGameApplyLabel(item) {
     return clothingSlotLabel ? `应用到${clothingSlotLabel}栏位` : "应用到对应服饰栏位";
   }
   return "让当前角色穿上";
+}
+
+function itemGameApplyVisible(item) {
+  const spec = itemGameApplySpec(item);
+  if (!spec.supported) return false;
+  if (spec.type !== "map") return true;
+  // Studio-only map registrations cannot be passed to BaseMap.Change. A
+  // dual game+studio registration still has a valid game map entry and keeps
+  // the replacement action available.
+  return spec.isBuiltin || String(item?.raw?.kind || "").trim() === DUAL_MAP_SCENE_KIND;
 }
 
 function normalizeCurrentGameItems(items, partType) {
@@ -4420,6 +4527,9 @@ function formatGameItemProbeError(payload) {
     invalid_probe_response: "游戏物品探针响应无效",
     not_in_editor: "当前不在角色制作器中",
     invalid_category: "当前物品类别不支持换装",
+    invalid_map: "地图编号无效",
+    invalid_target: "当前操作目标不支持地图替换",
+    not_in_hscene: "当前不在 H 场景中",
     item_not_found: "游戏当前列表中找不到该物品",
     ambiguous_mapping: "该物品的运行时映射不唯一，已拒绝自动选择",
     invalid_accessory_slot: "配饰槽位无效",
@@ -4502,6 +4612,12 @@ function requestItemGameApply() {
   if (!spec.supported) {
     itemGameNotice.type = "error";
     itemGameNotice.message = spec.reason;
+    return;
+  }
+  if (spec.type === "map") {
+    itemMapPrompt.item = item;
+    itemMapPrompt.error = "";
+    itemMapPrompt.open = true;
     return;
   }
   if (spec.type === "accessory") {
@@ -4618,6 +4734,7 @@ async function applyItemToGame(item, { accessorySlotNo = null, hairSlotNo = null
     itemGameApply.error = spec.reason;
     return false;
   }
+  if (spec.type === "map") return applyMapToGame(item, spec);
   if (spec.type === "accessory" && (!Number.isInteger(accessorySlotNo) || accessorySlotNo < 0 || accessorySlotNo > 19)) {
     itemGameNotice.type = "error";
     itemGameNotice.message = "请选择 0–19 范围内的角色配饰槽位。";
@@ -4741,6 +4858,90 @@ async function applyItemToGame(item, { accessorySlotNo = null, hairSlotNo = null
     itemGameNotice.type = "error";
     itemGameNotice.message = itemGameApply.error;
     log(`[Game Error] ${itemGameApply.error}`);
+    return false;
+  } finally {
+    itemGameApply.busy = false;
+    itemGameApply.itemId = null;
+  }
+}
+
+function closeItemMapPrompt() {
+  if (itemMapPrompt.busy) return;
+  itemMapPrompt.open = false;
+  itemMapPrompt.item = null;
+  itemMapPrompt.error = "";
+}
+
+async function confirmItemMapApply() {
+  const item = itemMapPrompt.item;
+  if (!item || itemMapPrompt.busy || itemGameApply.busy) return;
+  itemMapPrompt.busy = true;
+  itemMapPrompt.error = "";
+  try {
+    const applied = await applyMapToGame(item, itemGameApplySpec(item));
+    if (applied) {
+      itemMapPrompt.busy = false;
+      closeItemMapPrompt();
+    }
+    else itemMapPrompt.error = itemGameApply.error || "H 场景地图替换失败";
+  } finally {
+    itemMapPrompt.busy = false;
+  }
+}
+
+async function applyMapToGame(item, spec) {
+  if (!item?.id || itemGameApply.busy || !spec?.supported || spec.type !== "map") return false;
+  itemGameNotice.type = "";
+  itemGameNotice.message = "";
+  const request = window.desktopApi?.backendRequest;
+  if (typeof request !== "function") {
+    itemGameApply.error = "资源通信接口尚未加载，请重启应用后再试。";
+    return false;
+  }
+  const body = {
+    type: "map",
+    target: "hscene",
+    mapNo: spec.mapNo,
+    mainAB: spec.mainAB,
+    mainData: spec.mainData,
+    manifest: spec.manifest,
+    guid: spec.guid,
+    itemId: spec.itemId
+  };
+  itemGameApply.busy = true;
+  itemGameApply.itemId = item.id;
+  itemGameApply.commandId = "";
+  itemGameApply.status = "submitting";
+  itemGameApply.error = "";
+  try {
+    const submitted = await request("/game-item-probe/apply", { method: "POST", body });
+    if (!submitted?.ok) throw new Error(formatGameItemProbeError(submitted));
+    const accepted = submitted.data || {};
+    const commandId = String(accepted.commandId || "").trim();
+    if (!accepted.accepted || !commandId) throw new Error(formatGameItemProbeError(accepted));
+    itemGameApply.commandId = commandId;
+    itemGameApply.status = String(accepted.status || "queued");
+    const deadline = Date.now() + CARD_LOAD_HSCENE_MAX_WAIT_MS;
+    let firstPoll = true;
+    while (Date.now() < deadline) {
+      await sleep(firstPoll ? 80 : CARD_LOAD_POLL_INTERVAL_MS);
+      firstPoll = false;
+      const polled = await request(`/game-item-probe/command?id=${encodeURIComponent(commandId)}`);
+      if (!polled?.ok) throw new Error(formatGameItemProbeError(polled));
+      const command = polled.data || {};
+      itemGameApply.status = String(command.status || "");
+      if (command.status === "succeeded") {
+        itemGameNotice.type = "";
+        itemGameNotice.message = "";
+        return true;
+      }
+      if (["failed", "expired"].includes(command.status)) {
+        throw new Error(formatGameItemProbeError(command));
+      }
+    }
+    throw new Error("H 场景地图替换命令超过 120 秒未完成，请确认游戏仍处于 H 场景。 ");
+  } catch (error) {
+    itemGameApply.error = error.message || "H 场景地图替换失败";
     return false;
   } finally {
     itemGameApply.busy = false;
@@ -5217,7 +5418,11 @@ function unity3dIssueSolution(issue) {
   if (issue.type === "duplicate_zipmod") return "分析同 GUID 的 zipmod 并保留推荐项。";
   if (issue.status === "error") return "重新安装来源模组，或替换该 unity3d 文件后重建数据库。";
   if (["in_game", "not_in_mod"].includes(issue.status)) {
-    if (issue.source === "other_zipmod") return "当前 zipmod 不含该文件，但其它 zipmod 已提供，无需补入。";
+    if (issue.source === "other_zipmod") {
+      if (issue.transfer_mode === "copy") return "其它 zipmod 的物品仍需要该文件，将其复制到当前 zipmod，并保留提供方文件。";
+      if (issue.transfer_mode === "move") return "提供方没有其它物品需要该文件，将其剪切移动到当前 zipmod。";
+      return "当前 zipmod 不含该文件，但其它 zipmod 已提供。";
+    }
     return "将该文件复制进 zipmod 包内对应 abdata 路径，使模组包自包含；CSV 引用路径保持不变。";
   }
   if (issue.status === "missing") return "\u91cd\u65b0\u5b89\u88c5\u6765\u6e90\u6a21\u7ec4\uff0c\u6216\u624b\u52a8\u627e\u56de\u8be5 unity3d \u6587\u4ef6\u540e\u91cd\u5efa\u6570\u636e\u5e93\u3002";
@@ -5445,6 +5650,18 @@ function openBulkExportPrompt() {
 function selectBulkAuthorSuggestion(author) {
   bulkAuthorPrompt.value = author;
   bulkAuthorPrompt.error = "";
+}
+
+function selectManifestAuthorSuggestion(author) {
+  manifestEditor.fields.author = author;
+  manifestEditor.error = "";
+  manifestEditor.authorSuggestionsOpen = false;
+}
+
+function closeManifestAuthorSuggestionsSoon() {
+  window.setTimeout(() => {
+    manifestEditor.authorSuggestionsOpen = false;
+  }, 120);
 }
 
 async function selectBulkExportDir() {
@@ -6181,6 +6398,7 @@ function applyUpdatedZipmodRow(row) {
 async function openManifestEditor() {
   if (!selectedMod.value || manifestEditor.loading) return;
   manifestEditor.open = true;
+  manifestEditor.authorSuggestionsOpen = false;
   manifestEditor.zipmodId = selectedMod.value.id;
   manifestEditor.loading = true;
   manifestEditor.busy = false;
@@ -6191,6 +6409,7 @@ async function openManifestEditor() {
     version: selectedMod.value.version === "-" ? "" : selectedMod.value.version || "",
     author: selectedMod.value.author === UNKNOWN_AUTHOR_LABEL ? "" : selectedMod.value.author || ""
   };
+  loadZipmodAuthors();
 
   try {
     const result = await window.desktopApi?.backendRequest?.(
@@ -6217,6 +6436,7 @@ async function openManifestEditor() {
 
 async function submitManifestEditor() {
   if (!manifestEditor.zipmodId || manifestEditor.busy) return;
+  manifestEditor.authorSuggestionsOpen = false;
   const fields = {
     guid: String(manifestEditor.fields.guid || "").trim(),
     name: String(manifestEditor.fields.name || "").trim(),
@@ -6718,9 +6938,15 @@ async function ensureGamePlugins(gameDir = paths.gameDir) {
     gamePluginSetup.status = "已就绪";
     gamePluginSetup.installedCount = Number(result.installed_count || 0);
     const installed = gamePluginSetup.installedCount;
-    log(installed > 0
-      ? `[Plugins] 已自动安装 ${installed} 个 Star Manager 插件到 ${result.destination_dir}`
-      : "[Plugins] Star Manager 三个插件均已存在（保留现有启用/禁用状态）");
+    const updated = Number(result.updated_count || 0);
+    if (installed > 0 || updated > 0) {
+      const changes = [];
+      if (installed > 0) changes.push(`安装 ${installed} 个`);
+      if (updated > 0) changes.push(`更新 ${updated} 个`);
+      log(`[Plugins] 已${changes.join("、")} Star Manager 插件到 ${result.destination_dir}（保留现有启用/禁用状态）`);
+    } else {
+      log("[Plugins] Star Manager 三个插件版本均一致（保留现有启用/禁用状态）");
+    }
     return result;
   } catch (error) {
     gamePluginSetup.status = "安装失败";
@@ -6904,6 +7130,7 @@ async function saveAppSettings(options = {}) {
         databaseWorkerCount: managerSettings.databaseWorkerCount,
         wallpaperPath: managerSettings.wallpaperPath,
         wallpaperType: managerSettings.wallpaperType,
+        wallpaperAudioEnabled: managerSettings.wallpaperAudioEnabled,
         clearSb3UtilityExecutablePath: options.clearSb3UtilityExecutablePath === true
       });
       if (!result?.ok) {
@@ -6952,9 +7179,11 @@ async function loadAppSettingsInternal({ loadBackendData = true } = {}) {
       : managerSettings.databaseWorkerLimit;
     const previousWallpaperPath = managerSettings.wallpaperPath;
     const previousWallpaperType = managerSettings.wallpaperType;
+    resetWallpaperRetryState();
     wallpaperLoadFailed.value = false;
     managerSettings.wallpaperPath = result.settings?.wallpaperPath || "";
     managerSettings.wallpaperType = result.settings?.wallpaperType || "";
+    managerSettings.wallpaperAudioEnabled = result.settings?.wallpaperAudioEnabled === true;
     if (
       previousWallpaperPath !== managerSettings.wallpaperPath
       || previousWallpaperType !== managerSettings.wallpaperType
@@ -7029,6 +7258,7 @@ async function selectWallpaper() {
   const nextPath = String(selected.path || "").trim();
   const nextType = selected.type || (/\.mp4$/i.test(nextPath) ? "video" : "image");
   const wallpaperChanged = managerSettings.wallpaperPath !== nextPath || managerSettings.wallpaperType !== nextType;
+  resetWallpaperRetryState();
   wallpaperLoadFailed.value = false;
   wallpaperReady.value = !wallpaperChanged;
   managerSettings.wallpaperPath = nextPath;
@@ -7039,6 +7269,7 @@ async function selectWallpaper() {
 }
 
 async function clearWallpaper() {
+  resetWallpaperRetryState();
   managerSettings.wallpaperPath = "";
   managerSettings.wallpaperType = "";
   wallpaperReady.value = true;
@@ -7064,6 +7295,10 @@ async function updateDatabaseWorkerCount(value) {
     : limit;
   await updateManagerSetting("databaseWorkerCount", normalized);
 }
+
+watch(() => managerSettings.wallpaperAudioEnabled, () => {
+  syncWallpaperAudio();
+});
 
 async function updatePortablePackageCompress(value) {
   portablePackageCompress.value = Boolean(value);
@@ -8268,6 +8503,7 @@ async function setSelectedCardRating(rating) {
     });
     if (!result?.ok) throw new Error(result?.error || "人物卡评分保存失败");
     card.rating = Math.min(5, Math.max(0, Number(result.rating) || 0));
+    triggerCardRatingPulse(card.absolutePath, card.rating);
     card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
     cardRatingNotice.type = result.warning ? "warning" : "success";
     cardRatingNotice.message = result.warning || `已评为 ${card.rating} 星，评分已写入人物卡`;
@@ -8280,6 +8516,26 @@ async function setSelectedCardRating(rating) {
   } finally {
     ratingCardPath.value = "";
   }
+}
+
+function clearCardRatingPulse() {
+  if (cardRatingPulseTimer) {
+    window.clearTimeout(cardRatingPulseTimer);
+    cardRatingPulseTimer = 0;
+  }
+  cardRatingPulse.active = false;
+  cardRatingPulse.path = "";
+  cardRatingPulse.rating = 0;
+}
+
+function triggerCardRatingPulse(path, rating) {
+  clearCardRatingPulse();
+  cardRatingPulse.path = path;
+  cardRatingPulse.rating = rating;
+  window.requestAnimationFrame(() => {
+    if (cardRatingPulse.path === path) cardRatingPulse.active = true;
+  });
+  cardRatingPulseTimer = window.setTimeout(() => clearCardRatingPulse(), 680);
 }
 
 function uniqueCardTags(values) {
@@ -9800,6 +10056,7 @@ onBeforeUnmount(() => {
   removeStartupLogListener = null;
   stopBackendRetry();
   stopCurrentGameStatePolling();
+  clearCardRatingPulse();
 });
 
 const appCtx = reactive({
@@ -10004,6 +10261,7 @@ const appCtx = reactive({
   filteredItemAuthorOptions,
   favoritingCardPath,
   ratingCardPath,
+  cardRatingPulse,
   formatBytes,
   formatTaskDuration,
   formatTaskTimestamp,
@@ -10164,6 +10422,7 @@ const appCtx = reactive({
   itemAccessoryPrompt,
   itemFacePrompt,
   itemBodyPrompt,
+  itemMapPrompt,
   itemGameApply,
   itemGameNotice,
   assemblyMode,
@@ -10177,6 +10436,7 @@ const appCtx = reactive({
   assemblyAccessoryPartMenu,
   itemGameApplySpec,
   itemGameApplyLabel,
+  itemGameApplyVisible,
   gameCurrentSlotLabel,
   gameCurrentItemName,
   setAssemblyMode,
@@ -10203,6 +10463,8 @@ const appCtx = reactive({
   GAME_BODY_PAINT_SLOT_OPTIONS,
   closeItemBodyPrompt,
   confirmItemBodyApply,
+  closeItemMapPrompt,
+  confirmItemMapApply,
   workbenchTemplateSelection,
   selectedMod,
   selectedModCanDelete,
@@ -10363,10 +10625,11 @@ watch(backendStatus, (status, previousStatus) => {
     <div class="wallpaper-layer" :class="{ 'wallpaper-layer--media-pending': !wallpaperReady }" aria-hidden="true">
       <video
         v-if="wallpaperIsVideo"
+        ref="wallpaperVideoRef"
         class="wallpaper-media"
         :src="wallpaperSource"
         autoplay
-        muted
+        :muted="!managerSettings.wallpaperAudioEnabled"
         loop
         playsinline
         @canplay="handleWallpaperReady"
@@ -10406,7 +10669,10 @@ watch(backendStatus, (status, previousStatus) => {
                   <path d="M7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"></path>
                 </g>
                 <g v-else-if="view.id === 'overview'">
-                  <rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><path d="M14 20v-5M17 20v-8M20 20v-3"></path>
+                  <path d="M12 12H8.2c-2.3 0-4-1.7-4-4s1.7-4 4-4 3.8 1.7 3.8 4.1V12Z"></path>
+                  <path d="M12 12V8.2c0-2.3 1.7-4 4-4s4 1.7 4 4-1.7 3.8-4 3.8H12Z"></path>
+                  <path d="M12 12v3.8c0 2.3-1.7 4-4 4s-4-1.7-4-4 1.7-3.8 4-3.8H12Z"></path>
+                  <path d="M12 12h3.8c2.3 0 4 1.7 4 4s-1.7 4-4 4-3.8-1.7-3.8-4V12Z"></path>
                 </g>
                 <g v-else-if="view.id === 'characters'">
                   <path d="M7 5.5 18.2 4a1.8 1.8 0 0 1 2 1.5l1.5 10.8a1.8 1.8 0 0 1-1.5 2L9 19.8a1.8 1.8 0 0 1-2-1.5L5.5 7.5a1.8 1.8 0 0 1 1.5-2Z"></path>
@@ -10436,6 +10702,17 @@ watch(backendStatus, (status, previousStatus) => {
             <span>{{ view.label }}</span>
           </button>
           <div v-if="view.id === 'characters'" class="nav-card-type-actions" role="group" aria-label="卡片类型">
+            <button
+              class="nav-card-type-button"
+              :class="{ active: cardBrowserMode === 'remote' }"
+              type="button"
+              aria-label="网站人物卡"
+              title="云端卡片"
+              :aria-pressed="cardBrowserMode === 'remote'"
+              @click="setCardBrowserMode('remote')"
+            >
+              <img class="nav-card-type-image" :src="remoteCardTypeIcon" alt="" aria-hidden="true">
+            </button>
             <button
               class="nav-card-type-button"
               :class="{ active: cardBrowserMode === 'character' }"
@@ -10571,11 +10848,12 @@ watch(backendStatus, (status, previousStatus) => {
         <div class="path-box">
           <button type="button" class="primary" @click="selectGameDir">选择 HS2 目录</button>
           <div class="path-value">
-            <span class="path-label">当前目录</span>
-            <span class="path-text">{{ gameDirDisplay }}</span>
+            <span class="path-copy">
+              <span class="path-label">当前目录</span>
+              <span class="path-text">{{ gameDirDisplay }}</span>
+            </span>
+            <span class="badge" :class="badgeClass(gameDirStatus)"><span class="dot"></span>{{ gameDirStatus }}</span>
           </div>
-          <span class="badge" :class="badgeClass(gameDirStatus)"><span class="dot"></span>{{ gameDirStatus }}</span>
-          <span class="badge" :class="gamePluginSetup.status === '安装失败' ? 'danger' : gamePluginSetup.status === '已就绪' ? 'ok' : gamePluginSetup.status === '检查中' ? 'warn' : 'neutral'"><span class="dot"></span>{{ gamePluginSetup.checking ? "检查 Star Manager 插件" : gamePluginSetup.status }}</span>
         </div>
 
         <button class="system-status" type="button" @click="activeView = 'logs'">
@@ -11346,14 +11624,45 @@ watch(backendStatus, (status, previousStatus) => {
               </label>
               <label class="manifest-field">
                 <span>作者</span>
-                <input
-                  v-model="manifestEditor.fields.author"
-                  class="search"
-                  type="text"
-                  autocomplete="off"
-                  list="zipmod-author-list"
-                  @keydown.enter="submitManifestEditor"
-                >
+                <div class="author-combobox manifest-author-combobox" @keydown.esc="manifestEditor.authorSuggestionsOpen = false">
+                  <input
+                    v-model="manifestEditor.fields.author"
+                    class="search"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label="作者"
+                    aria-haspopup="listbox"
+                    :aria-expanded="manifestEditor.authorSuggestionsOpen"
+                    @focus="manifestEditor.authorSuggestionsOpen = true; loadZipmodAuthors()"
+                    @blur="closeManifestAuthorSuggestionsSoon"
+                    @input="manifestEditor.authorSuggestionsOpen = true"
+                    @keydown.enter.prevent="submitManifestEditor"
+                  >
+                  <button
+                    class="author-combobox-toggle"
+                    type="button"
+                    aria-label="显示作者列表"
+                    @mousedown.prevent
+                    @click="loadZipmodAuthors(); manifestEditor.authorSuggestionsOpen = !manifestEditor.authorSuggestionsOpen"
+                  >
+                    ▼
+                  </button>
+                  <div v-if="manifestEditor.authorSuggestionsOpen" class="author-option-list" role="listbox" aria-label="作者选项">
+                    <button
+                      v-for="author in manifestAuthorSuggestions"
+                      :key="author"
+                      type="button"
+                      :class="{ active: manifestEditor.fields.author === author }"
+                      role="option"
+                      :aria-selected="manifestEditor.fields.author === author"
+                      @mousedown.prevent="selectManifestAuthorSuggestion(author)"
+                    >
+                      {{ author }}
+                    </button>
+                    <div v-if="manifestAuthorSuggestions.length === 0" class="author-option-empty">没有匹配作者</div>
+                  </div>
+                </div>
               </label>
             </div>
             <div v-if="manifestEditor.error" class="prompt-error">{{ manifestEditor.error }}</div>
@@ -11410,7 +11719,7 @@ watch(backendStatus, (status, previousStatus) => {
         <div v-if="bulkUnity3dPrompt.open" class="prompt-backdrop" @click.self="bulkUnity3dPrompt.open = false">
           <div class="prompt-panel">
             <strong>批量补入 unity3d</strong>
-            <p class="subtext">将诊断为在游戏目录中的 unity3d 文件补入已选 zipmod；共享文件会复制，独占文件才会移入。</p>
+            <p class="subtext">将可修复的 unity3d 文件补入已选 zipmod；游戏目录或 provider 中仍被其它物品使用的文件会复制，独占文件才会移入。</p>
             <div class="prompt-note">
               <span>已选模组</span>
               <strong>{{ selectedModCount }} 个</strong>
@@ -11436,10 +11745,6 @@ watch(backendStatus, (status, previousStatus) => {
               <span>不会改变</span>
               <strong>当前主记录 zipmod 与需要人工判断的重复项</strong>
             </div>
-            <div class="prompt-note">
-              <span>可逆性</span>
-              <strong>删除文件不可由应用自动恢复</strong>
-            </div>
             <div v-if="bulkDuplicateCleanupPrompt.error" class="prompt-error">{{ bulkDuplicateCleanupPrompt.error }}</div>
             <div class="prompt-actions">
               <button type="button" :disabled="bulkActionBusy === 'duplicates'" @click="bulkDuplicateCleanupPrompt.open = false">取消</button>
@@ -11461,10 +11766,6 @@ watch(backendStatus, (status, previousStatus) => {
             <div class="prompt-note">
               <span>可逆性</span>
               <strong>可在回收站恢复或永久删除</strong>
-            </div>
-            <div class="prompt-note">
-              <span>更安全替代</span>
-              <strong>先用导出功能备份到其它目录</strong>
             </div>
             <div v-if="bulkDeletePrompt.error" class="prompt-error">{{ bulkDeletePrompt.error }}</div>
             <div class="prompt-actions">

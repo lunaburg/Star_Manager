@@ -169,12 +169,21 @@ onBeforeUnmount(() => {
             <div>
               <h2>应用壁纸</h2>
             </div>
-            <span class="settings-app-status" :class="{ configured: ctx.managerSettings.wallpaperPath }">
-              <i></i>{{ ctx.managerSettings.wallpaperPath ? "已配置" : "默认壁纸" }}
-            </span>
           </div>
 
           <div class="wallpaper-setting-card">
+            <button
+              type="button"
+              class="wallpaper-setting-help"
+              aria-label="查看应用壁纸设置说明"
+              data-tooltip="支持 PNG、JPG、WebP、GIF 和 MP4。MP4 默认静音、循环、自动播放；可用下方开关播放原声，并作为所有页面内容的底层壁纸。"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <circle cx="10" cy="10" r="8.2"></circle>
+                <path d="M7.9 7.6a2.2 2.2 0 1 1 3.8 1.5c-.9.8-1.7 1.2-1.7 2.5"></path>
+                <circle cx="10" cy="14.5" r=".7" fill="currentColor" stroke="none"></circle>
+              </svg>
+            </button>
             <div class="wallpaper-setting-preview" aria-hidden="true">
               <video v-if="ctx.wallpaperIsVideo" :src="ctx.wallpaperSource" muted autoplay loop playsinline></video>
               <img v-else :src="ctx.wallpaperSource" alt="" />
@@ -182,12 +191,27 @@ onBeforeUnmount(() => {
             </div>
             <div class="wallpaper-setting-copy">
               <strong>{{ ctx.managerSettings.wallpaperPath || "使用内置默认壁纸" }}</strong>
-              <small>支持 PNG、JPG、WebP、GIF 与 MP4。视频会自动静音循环播放，并始终位于所有页面内容的最底层。</small>
               <div class="wallpaper-setting-actions">
-                <button type="button" class="primary" @click="ctx.selectWallpaper">选择图片或 MP4</button>
+                <button type="button" class="primary" @click="ctx.selectWallpaper">选择</button>
                 <button v-if="ctx.managerSettings.wallpaperPath" type="button" @click="ctx.clearWallpaper">恢复默认</button>
               </div>
             </div>
+          </div>
+
+          <div class="setting-row wallpaper-audio-setting" :class="{ disabled: !ctx.wallpaperIsVideo }">
+            <span class="setting-copy">
+              <strong>MP4 壁纸声音</strong>
+              <small>开启后动态壁纸会播放原视频声音，仅对 MP4 壁纸生效。</small>
+            </span>
+            <button
+              class="setting-switch"
+              :class="{ on: ctx.wallpaperIsVideo && ctx.managerSettings.wallpaperAudioEnabled }"
+              type="button"
+              role="switch"
+              :disabled="!ctx.wallpaperIsVideo"
+              :aria-checked="ctx.wallpaperIsVideo && ctx.managerSettings.wallpaperAudioEnabled"
+              @click="ctx.updateManagerSetting('wallpaperAudioEnabled', !ctx.managerSettings.wallpaperAudioEnabled)"
+            ><span></span></button>
           </div>
         </div>
       </section>

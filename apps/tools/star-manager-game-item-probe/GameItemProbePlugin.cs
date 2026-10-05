@@ -26,7 +26,7 @@ namespace StarManager.GameItemProbe
     {
         public const string PluginGuid = "star.manager.gameitemprobe";
         public const string PluginName = "Star Manager Game Item Probe";
-        public const string PluginVersion = "0.9.3";
+        public const string PluginVersion = "0.9.5";
         private const float MinimumCurrentPollSeconds = 1f;
 
         private ConfigEntry<int> port;
@@ -1880,6 +1880,11 @@ namespace StarManager.GameItemProbe
         internal int? TargetSex;
         internal int? TargetCharacterIndex;
         internal int? TargetCharacterId;
+        internal int? MapNo;
+        internal string MapAssetBundle;
+        internal string MapAssetName;
+        internal string MapManifest;
+        internal string MapItemId;
         internal string Guid;
         internal int? CategoryNo;
         internal int? LocalSlot;
@@ -2319,7 +2324,7 @@ namespace StarManager.GameItemProbe
             if (!values.TryGetValue("type", out type) || string.IsNullOrWhiteSpace(type))
             {
                 errorCode = "invalid_command";
-                error = "type must be card, clothes, hair, face, body or accessory.";
+                error = "type must be card, map, clothes, hair, face, body or accessory.";
                 return false;
             }
             type = type.Trim().ToLowerInvariant();
@@ -2327,11 +2332,15 @@ namespace StarManager.GameItemProbe
             {
                 return TryParseCard(values, target, out command, out errorCode, out error);
             }
+            if (type == "map")
+            {
+                return TryParseMap(values, target, out command, out errorCode, out error);
+            }
 
             if (type != "clothes" && type != "hair" && type != "face" && type != "body" && type != "accessory")
             {
                 errorCode = "invalid_command";
-                error = "type must be card, clothes, hair, face, body or accessory.";
+                error = "type must be card, map, clothes, hair, face, body or accessory.";
                 return false;
             }
 
@@ -2528,6 +2537,70 @@ namespace StarManager.GameItemProbe
             return true;
         }
 
+        private static bool TryParseMap(
+            Dictionary<string, string> values,
+            string target,
+            out ApplyCommand command,
+            out string errorCode,
+            out string error
+        )
+        {
+            command = null;
+            errorCode = null;
+            error = null;
+            if (!string.Equals(target, "hscene", StringComparison.OrdinalIgnoreCase))
+            {
+                errorCode = "invalid_target";
+                error = "Map replacement is only available for the hscene target.";
+                return false;
+            }
+
+            int mapNo;
+            bool hasMapNo = TryGetInt(values, "mapNo", out mapNo)
+                || TryGetInt(values, "mapId", out mapNo);
+            string itemId = null;
+            values.TryGetValue("itemId", out itemId);
+            if (!hasMapNo && !string.IsNullOrWhiteSpace(itemId))
+            {
+                string[] parts = itemId.Split(':');
+                if (parts.Length >= 3)
+                {
+                    hasMapNo = int.TryParse(parts[parts.Length - 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out mapNo);
+                    if (!hasMapNo)
+                    {
+                        hasMapNo = int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out mapNo);
+                    }
+                }
+            }
+            if (!hasMapNo || mapNo < 0)
+            {
+                errorCode = "invalid_map";
+                error = "mapNo is required and must be a non-negative integer.";
+                return false;
+            }
+
+            string assetBundle = null;
+            string assetName = null;
+            string manifest = null;
+            string guid = null;
+            values.TryGetValue("mainAB", out assetBundle);
+            values.TryGetValue("mainData", out assetName);
+            values.TryGetValue("manifest", out manifest);
+            values.TryGetValue("guid", out guid);
+            command = new ApplyCommand
+            {
+                Type = "map",
+                Target = "hscene",
+                MapNo = mapNo,
+                MapAssetBundle = assetBundle == null ? string.Empty : assetBundle.Trim(),
+                MapAssetName = assetName == null ? string.Empty : assetName.Trim(),
+                MapManifest = manifest == null ? string.Empty : manifest.Trim(),
+                Guid = string.IsNullOrWhiteSpace(guid) ? null : guid.Trim(),
+                MapItemId = itemId == null ? string.Empty : itemId.Trim(),
+            };
+            return true;
+        }
+
         private static bool TryParseCard(
             Dictionary<string, string> values,
             string target,
@@ -2690,6 +2763,18 @@ namespace StarManager.GameItemProbe
 
         internal static ApplyResult Execute(ApplyCommand command, ManualLogSource logger)
         {
+            if (string.Equals(command.Type, "map", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(command.Target, "hscene", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ApplyResult.Failure("invalid_target", "Map replacement is only available in an HScene.");
+                }
+                if (GameItemSnapshotBuilder.FindHScene(logger) == null)
+                {
+                    return ApplyResult.Failure("not_in_hscene", "The active HScene instance is not available. Enter an H scene first.");
+                }
+                return ReplaceHSceneMap(command, logger);
+            }
             bool hSceneTarget = string.Equals(
                 command.Target,
                 "hscene",
@@ -2780,6 +2865,7 @@ namespace StarManager.GameItemProbe
                     logger.LogError($"ChangeClothes failed: {exception}");
                     return ApplyResult.Failure("execution_error", exception.Message);
                 }
+
             }
 
             if (string.Equals(command.Type, "hair", StringComparison.OrdinalIgnoreCase))
@@ -2874,6 +2960,369 @@ namespace StarManager.GameItemProbe
                 logger.LogError($"ChangeAccessory failed: {exception}");
                 return ApplyResult.Failure("execution_error", exception.Message);
             }
+        }
+
+        private static ApplyResult ReplaceHSceneMap(ApplyCommand command, ManualLogSource logger)
+        {
+            return ApplyResult.Defer(
+                ReplaceHSceneMapRoutine(command, logger),
+                delegate { return ApplyResult.Success(command.MapNo); },
+                null,
+                120f
+            );
+        }
+
+        private static IEnumerator ReplaceHSceneMapRoutine(ApplyCommand command, ManualLogSource logger)
+        {
+            Type baseMapType = FindType("Manager.BaseMap");
+            if (baseMapType == null)
+            {
+                throw new InvalidOperationException("Manager.BaseMap is unavailable in the current game scene.");
+            }
+            int runtimeMapNo = ResolveRuntimeMapNo(baseMapType, command, logger);
+            logger?.LogInfo(
+                $"Loading HScene map requested={command.MapNo}, runtime={runtimeMapNo}: "
+                    + $"item={command.MapItemId}, bundle={command.MapAssetBundle}, asset={command.MapAssetName}."
+            );
+            InvokeBaseMapChange(baseMapType, runtimeMapNo);
+
+            PropertyInfo loadingProperty = baseMapType.GetProperty(
+                "isMapLoading",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+            );
+            FieldInfo loadingField = baseMapType.GetField(
+                "isMapLoading",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+            );
+            float deadline = Time.realtimeSinceStartup + 120f;
+            while (ReadBoolMember(null, loadingProperty, loadingField) && Time.realtimeSinceStartup < deadline)
+            {
+                yield return new WaitForEndOfFrame();
+            }
+            if (ReadBoolMember(null, loadingProperty, loadingField))
+            {
+                throw new TimeoutException("The HScene map loader did not finish within 120 seconds.");
+            }
+            RefreshHSceneMapPoints(baseMapType, logger);
+        }
+
+        private static int ResolveRuntimeMapNo(Type baseMapType, ApplyCommand command, ManualLogSource logger)
+        {
+            int requestedMapNo = command?.MapNo ?? -1;
+            try
+            {
+                PropertyInfo tableProperty = baseMapType.GetProperty(
+                    "infoTable",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+                );
+                object table = tableProperty?.GetValue(null, null);
+                System.Collections.IEnumerable entries = table as System.Collections.IEnumerable;
+                if (entries == null) return requestedMapNo;
+
+                int bestKey = requestedMapNo;
+                int bestScore = -1;
+                int bestMatches = 0;
+                foreach (object entry in entries)
+                {
+                    if (entry == null) continue;
+                    object keyValue = ReadMember(entry, "Key");
+                    object param = ReadMember(entry, "Value");
+                    int key;
+                    if (!TryConvertInt(keyValue, out key) || param == null) continue;
+
+                    string bundle = ReadMemberString(param, "AssetBundleName");
+                    string asset = ReadMemberString(param, "AssetName");
+                    int paramNo;
+                    bool hasParamNo = TryConvertInt(ReadMember(param, "No"), out paramNo);
+                    int score = 0;
+                    if (MapResourceEquals(command.MapAssetBundle, bundle)) score += 100;
+                    else if (MapResourceSuffixEquals(command.MapAssetBundle, bundle)) score += 70;
+                    if (MapAssetEquals(command.MapAssetName, asset)) score += 50;
+                    if (requestedMapNo >= 0 && (key == requestedMapNo || (hasParamNo && paramNo == requestedMapNo))) score += 15;
+
+                    if (score > bestScore)
+                    {
+                        bestKey = key;
+                        bestScore = score;
+                        bestMatches = 1;
+                    }
+                    else if (score == bestScore && score >= 70)
+                    {
+                        bestMatches++;
+                    }
+                }
+
+                // A Map_kPlug row normally carries 0 in its first column. The
+                // actual map number is assigned by the runtime map registry;
+                // resource matching is therefore preferred over that CSV value.
+                if (bestScore >= 70 && bestMatches == 1)
+                {
+                    if (bestKey != requestedMapNo)
+                    {
+                        logger?.LogInfo($"Resolved mod map runtime id {requestedMapNo} -> {bestKey} from BaseMap.infoTable.");
+                    }
+                    return bestKey;
+                }
+                if (bestScore > 0 && requestedMapNo < 0)
+                {
+                    return bestKey;
+                }
+            }
+            catch (Exception exception)
+            {
+                logger?.LogWarning($"Could not resolve the runtime map id from BaseMap.infoTable: {exception.Message}");
+            }
+            return requestedMapNo;
+        }
+
+        private static object ReadMember(object instance, string name)
+        {
+            if (instance == null) return null;
+            Type type = instance.GetType();
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (property != null)
+            {
+                try { return property.GetValue(instance, null); } catch { return null; }
+            }
+            FieldInfo field = FindInstanceField(type, name);
+            if (field == null) return null;
+            try { return field.GetValue(instance); } catch { return null; }
+        }
+
+        private static string ReadMemberString(object instance, string name)
+        {
+            object value = ReadMember(instance, name);
+            return value == null ? string.Empty : Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+
+        private static bool TryConvertInt(object value, out int result)
+        {
+            if (value is int)
+            {
+                result = (int)value;
+                return true;
+            }
+            return int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+        }
+
+        private static bool MapAssetEquals(string requested, string actual)
+        {
+            string left = NormalizeMapToken(requested);
+            string right = NormalizeMapToken(actual);
+            return !string.IsNullOrEmpty(left) && !string.IsNullOrEmpty(right)
+                && string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool MapResourceEquals(string requested, string actual)
+        {
+            string left = NormalizeMapToken(requested);
+            string right = NormalizeMapToken(actual);
+            return !string.IsNullOrEmpty(left) && !string.IsNullOrEmpty(right)
+                && string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool MapResourceSuffixEquals(string requested, string actual)
+        {
+            string left = NormalizeMapToken(requested);
+            string right = NormalizeMapToken(actual);
+            if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right)) return false;
+            return left.EndsWith("/" + right, StringComparison.OrdinalIgnoreCase)
+                || right.EndsWith("/" + left, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeMapToken(string value)
+        {
+            string normalized = (value ?? string.Empty).Trim().Replace('\\', '/');
+            while (normalized.StartsWith("/", StringComparison.Ordinal)) normalized = normalized.Substring(1);
+            if (normalized.StartsWith("abdata/", StringComparison.OrdinalIgnoreCase)) normalized = normalized.Substring(7);
+            return normalized.TrimEnd('/');
+        }
+
+        private static Type FindType(string fullName)
+        {
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null) return type;
+                try
+                {
+                    type = assembly.GetTypes().FirstOrDefault(candidate =>
+                        string.Equals(candidate.Name, fullName, StringComparison.Ordinal)
+                        || string.Equals(candidate.FullName, fullName, StringComparison.Ordinal)
+                    );
+                    if (type != null) return type;
+                }
+                catch (ReflectionTypeLoadException)
+                {
+                    // Optional plugin assemblies can expose incomplete metadata.
+                }
+            }
+            return null;
+        }
+
+        private static bool ReadBoolMember(object instance, PropertyInfo property, FieldInfo field)
+        {
+            try
+            {
+                object value = property != null ? property.GetValue(instance, null) : field?.GetValue(instance);
+                return value is bool && (bool)value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void RefreshHSceneMapPoints(Type baseMapType, ManualLogSource logger)
+        {
+            try
+            {
+                HScene hScene = GameItemSnapshotBuilder.FindHScene(logger);
+                if (hScene == null)
+                {
+                    logger?.LogWarning("The active HScene disappeared before H-point refresh.");
+                    return;
+                }
+                PropertyInfo mapRootProperty = baseMapType.GetProperty(
+                    "mapRoot",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+                );
+                object mapRoot = mapRootProperty?.GetValue(null, null);
+                if (mapRoot == null) return;
+                // Map Selector Lite stores the newly loaded map root back into
+                // HScene.objMap before rebuilding the H-point controller.
+                FieldInfo objMap = FindInstanceField(hScene.GetType(), "objMap");
+                if (objMap != null)
+                {
+                    objMap.SetValue(hScene, mapRoot);
+                }
+
+                Type hPointCtrlType = FindType("HPointCtrl");
+                Type hPointListType = FindType("HPointList");
+                if (hPointCtrlType == null || hPointListType == null) return;
+
+                FieldInfo hPointCtrlField = FindInstanceField(hScene.GetType(), "hPointCtrl");
+                object pointCtrl = hPointCtrlField?.GetValue(hScene);
+                if (pointCtrl == null)
+                {
+                    logger?.LogWarning("The active HScene has no hPointCtrl; H-scene pose data was not rebuilt.");
+                    return;
+                }
+
+                MethodInfo getComponentInChildren = mapRoot.GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(method =>
+                        string.Equals(method.Name, "GetComponentInChildren", StringComparison.Ordinal)
+                        && method.IsGenericMethodDefinition
+                        && method.GetParameters().Length == 0
+                    );
+                object list = getComponentInChildren == null
+                    ? null
+                    : getComponentInChildren.MakeGenericMethod(hPointListType).Invoke(mapRoot, null);
+                PropertyInfo listProperty = hPointCtrlType.GetProperty(
+                    "HPointList",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+                );
+                listProperty?.SetValue(pointCtrl, list, null);
+                MethodInfo init = list?.GetType().GetMethod("Init", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                init?.Invoke(list, null);
+                Type managerType = FindType("Manager.HSceneManager");
+                PropertyInfo tablesProperty = managerType?.GetProperty(
+                    "HResourceTables",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+                );
+                object tables = tablesProperty?.GetValue(null, null);
+                MethodInfo pointInit = tables?.GetType().GetMethod("HPointInitData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                pointInit?.Invoke(tables, new[] { list, mapRoot });
+                logger?.LogInfo("H-points refreshed after HScene map replacement.");
+            }
+            catch (Exception exception)
+            {
+                logger?.LogWarning($"Could not refresh HScene H-points after map replacement: {exception.Message}");
+            }
+        }
+
+        private static FieldInfo FindInstanceField(Type type, string name)
+        {
+            for (Type current = type; current != null; current = current.BaseType)
+            {
+                FieldInfo field = current.GetField(
+                    name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly
+                );
+                if (field != null) return field;
+            }
+            return null;
+        }
+
+        private static void InvokeBaseMapChange(Type baseMapType, int mapNo)
+        {
+            MethodInfo[] methods = baseMapType.GetMethods(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+            );
+            foreach (MethodInfo method in methods)
+            {
+                if (!string.Equals(method.Name, "Change", StringComparison.Ordinal)
+                    || method.ContainsGenericParameters)
+                {
+                    continue;
+                }
+                ParameterInfo[] parameters = method.GetParameters();
+                object[][] candidates;
+                if (parameters.Length == 1)
+                {
+                    candidates = new[] { new object[] { mapNo } };
+                }
+                else if (parameters.Length == 2)
+                {
+                    candidates = new[] {
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 4) },
+                        new object[] { mapNo, true },
+                    };
+                }
+                else if (parameters.Length == 3)
+                {
+                    candidates = new[] {
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 3), false },
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 3), true },
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 4), true },
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 1), true },
+                        new object[] { mapNo, EnumOrValue(parameters[1].ParameterType, 4), false },
+                    };
+                }
+                else if (parameters.Length == 4)
+                {
+                    candidates = new[] {
+                        new object[] { mapNo, mapNo, EnumOrValue(parameters[2].ParameterType, 4), true },
+                        new object[] { mapNo, mapNo, EnumOrValue(parameters[2].ParameterType, 4), false },
+                    };
+                }
+                else
+                {
+                    continue;
+                }
+                foreach (object[] args in candidates)
+                {
+                    try
+                    {
+                        method.Invoke(null, args);
+                        return;
+                    }
+                    catch (ArgumentException)
+                    {
+                        // Try the next known BaseMap.Change overload shape.
+                    }
+                }
+            }
+            throw new MissingMethodException("Manager.BaseMap.Change map overload was not found.");
+        }
+
+        private static object EnumOrValue(Type type, int value)
+        {
+            if (type.IsEnum) return Enum.ToObject(type, value);
+            if (type == typeof(bool)) return value != 0;
+            if (type == typeof(int)) return value;
+            return Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
         }
 
         private static ApplyResult ApplyFace(
@@ -5353,6 +5802,11 @@ namespace StarManager.GameItemProbe
                 writer.Property("sex"); writer.NullableInt(command?.TargetSex);
                 writer.Property("characterIndex"); writer.NullableInt(command?.TargetCharacterIndex);
                 writer.Property("targetCharacterId"); writer.NullableInt(command?.TargetCharacterId);
+                writer.Property("mapNo"); writer.NullableInt(command?.MapNo);
+                writer.Property("mainAB"); writer.String(command?.MapAssetBundle);
+                writer.Property("mainData"); writer.String(command?.MapAssetName);
+                writer.Property("manifest"); writer.String(command?.MapManifest);
+                writer.Property("itemId"); writer.String(command?.MapItemId);
                 writer.Property("guid"); writer.String(command?.Guid);
                 writer.Property("categoryNo"); writer.NullableInt(command?.CategoryNo);
                 writer.Property("localSlot"); writer.NullableInt(command?.LocalSlot);

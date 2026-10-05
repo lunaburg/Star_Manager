@@ -2464,10 +2464,8 @@ async function saveMainResource() {
           <button class="primary" type="button" @click="openProjectPrompt">创建</button>
         </section>
 
-        <div v-if="projectPrompt.open" class="project-prompt-backdrop" role="presentation" @click.self="projectPrompt.open = false">
+        <div v-if="projectPrompt.open" class="project-prompt-backdrop project-create-backdrop" role="presentation" @click.self="projectPrompt.open = false">
           <section class="project-prompt" role="dialog" aria-modal="true" aria-labelledby="project-prompt-title">
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
-            <span class="section-kicker">NEW MOD PROJECT / 01</span>
             <h2 id="project-prompt-title">创建模组</h2>
             <label class="field-label" for="workbench-project-name">
               <span>模组名称</span>
@@ -2518,10 +2516,8 @@ async function saveMainResource() {
             aria-labelledby="sims4-fbx-prompt-title"
             @keydown.esc.prevent="closeSims4FbxPrompt"
           >
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="sims4-fbx-modal-head">
               <div>
-                <span class="section-kicker">SIMS 4 / PACKAGE → FBX</span>
                 <h2 id="sims4-fbx-prompt-title">Package 转 FBX</h2>
               </div>
               <button class="sims4-fbx-close" type="button" :disabled="sims4FbxPrompt.busy || sims4FbxPrompt.deletingResult" aria-label="关闭" @click="closeSims4FbxPrompt">×</button>
@@ -2612,10 +2608,8 @@ async function saveMainResource() {
             aria-labelledby="fbx-transform-prompt-title"
             @keydown.esc.prevent="closeFbxTransformPrompt"
           >
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="fbx-skin-modal-head">
               <div>
-                <span class="section-kicker">ITEM TOOL / FBX</span>
                 <h2 id="fbx-transform-prompt-title">应用旋转与缩放</h2>
               </div>
               <button class="sims4-fbx-close" type="button" :disabled="fbxTransformPrompt.busy" aria-label="关闭" @click="closeFbxTransformPrompt">×</button>
@@ -2681,10 +2675,8 @@ async function saveMainResource() {
             aria-labelledby="fbx-skin-prompt-title"
             @keydown.esc.prevent="closeFbxSkinPrompt"
           >
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="fbx-skin-modal-head">
               <div>
-                <span class="section-kicker">ITEM TOOL / FBX</span>
                 <h2 id="fbx-skin-prompt-title">FBX 纯网格</h2>
               </div>
               <button class="sims4-fbx-close" type="button" :disabled="fbxSkinPrompt.busy" aria-label="关闭" @click="closeFbxSkinPrompt">×</button>
@@ -2739,10 +2731,8 @@ async function saveMainResource() {
             aria-labelledby="hs2-skeleton-prompt-title"
             @keydown.esc.prevent="closeHs2SkeletonPrompt"
           >
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="fbx-skin-modal-head">
               <div>
-                <span class="section-kicker">ITEM TOOL / HS2 RIG</span>
                 <h2 id="hs2-skeleton-prompt-title">绑定 HS2 骨架</h2>
               </div>
               <button class="sims4-fbx-close" type="button" :disabled="hs2SkeletonPrompt.busy" aria-label="关闭" @click="closeHs2SkeletonPrompt">×</button>
@@ -2808,10 +2798,8 @@ async function saveMainResource() {
             aria-labelledby="fbx-weight-prompt-title"
             @keydown.esc.prevent="closeFbxWeightPrompt"
           >
-            <div class="prompt-decoration" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="fbx-skin-modal-head">
               <div>
-                <span class="section-kicker">ITEM TOOL / WEIGHTS</span>
                 <h2 id="fbx-weight-prompt-title">复制 FBX 权重</h2>
               </div>
               <button class="sims4-fbx-close" type="button" :disabled="fbxWeightPrompt.busy" aria-label="关闭" @click="closeFbxWeightPrompt">×</button>
@@ -4093,6 +4081,8 @@ async function saveMainResource() {
   backdrop-filter: blur(3px);
 }
 
+.project-create-backdrop { z-index: 70; }
+
 .project-prompt {
   width: min(540px, 100%);
   position: relative;
@@ -4332,7 +4322,7 @@ async function saveMainResource() {
 .item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #ddd7d4; border-radius: 5px; background: #fffdfb; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease; }
 .item-row:hover { border-color: #9cc2cf; background: #f8fcff; }
 .item-row:focus-visible { outline: 2px solid #78b9d4; outline-offset: 2px; }
-.item-row.is-selected { border-color: #72b79a; background: #f1fcf5; box-shadow: inset 4px 0 0 #34ad8a; }
+.item-row.is-selected { border-color: #72b79a; background: #f1fcf5; }
 .item-row-copy { min-width: 0; display: grid; gap: 3px; }
 .item-row-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .item-row-copy code { color: #53737d; font-family: var(--mono); font-size: 9px; }
@@ -4731,5 +4721,429 @@ async function saveMainResource() {
   .template-preprocess-rename { grid-template-columns: 1fr; }
   .template-preprocess-rename > button { width: 100%; }
   .tool-preview-grid { grid-template-columns: 1fr; }
+}
+
+/* Keep the workbench on the same visual surface as the rest of the app. */
+.workbench-view {
+  --workbench-edge: rgba(126, 143, 157, .26);
+  --workbench-edge-soft: rgba(126, 143, 157, .16);
+  --workbench-glass-fallback: rgba(247, 251, 255, .28);
+  --workbench-glass: color-mix(in srgb, var(--bg-color) 28%, transparent);
+  --workbench-glass-strong-fallback: rgba(255, 255, 255, .48);
+  --workbench-glass-strong: color-mix(in srgb, rgba(255, 255, 255, .76) 64%, transparent);
+  --workbench-blue: #397f9e;
+  margin-top: 0;
+  height: 100%;
+  position: relative;
+}
+
+.workbench-scroll {
+  padding: 8px 4px 24px 0;
+  scrollbar-color: rgba(103, 132, 148, .35) transparent;
+}
+
+/* The project toolbar belongs to the workbench window chrome, rather than the
+   short project-board box that happens to contain its buttons. */
+.workbench-view:has(.project-workbench-toolbar-floating) .workbench-scroll {
+  /* Keep the first project/item row below the full floating toolbar surface. */
+  padding-top: 70px;
+}
+
+.workbench-home:has(> .project-board.is-project-space),
+.workbench-home:has(> .project-board.is-project-list-open) {
+  row-gap: 0;
+}
+
+.project-workbench-toolbar-floating {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  width: auto;
+  margin: 0;
+}
+
+/* Let the toolbar use .workbench-view as its containing block. */
+.project-board.is-project-space,
+.project-board.is-project-list-open {
+  position: static;
+}
+
+.project-board.is-project-list-open > .project-list {
+  top: 52px;
+}
+
+.workbench-view:has(.project-workbench-toolbar-floating) .workbench-home {
+  margin-top: 0;
+}
+
+.workbench-onboarding,
+.workbench-home {
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.setup-card,
+.process-board,
+.coming-board,
+.principles-board,
+.project-board,
+.item-browser,
+.item-workspace,
+.main-resource-editor {
+  border: 1px solid var(--workbench-edge);
+  border-radius: 16px;
+  background: var(--workbench-glass-fallback);
+  background: var(--workbench-glass);
+  -webkit-backdrop-filter: blur(12px) saturate(1.04);
+  backdrop-filter: blur(12px) saturate(1.04);
+  box-shadow: inset 0 -1px 0 rgba(177, 188, 198, .18), 0 10px 26px rgba(66, 87, 103, .06);
+}
+
+.setup-card,
+.process-board,
+.coming-board,
+.principles-board {
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+}
+
+.setup-form-card {
+  box-shadow: inset 0 -1px 0 rgba(177, 188, 198, .2), 0 18px 40px rgba(66, 87, 103, .1);
+}
+
+.section-kicker,
+.project-workbench-toolbar-kicker {
+  color: #668292;
+}
+
+.field-label input,
+.field-label select,
+.path-picker input,
+.path-picker button {
+  border-color: rgba(126, 143, 157, .32);
+  border-width: 1px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+.field-label input:focus,
+.field-label select:focus,
+.path-picker input:focus {
+  outline: 2px solid rgba(117, 170, 184, .24);
+  border-color: rgba(57, 127, 158, .58);
+}
+
+.path-picker button,
+.setup-submit,
+.first-project-banner button,
+.prompt-actions .primary {
+  box-shadow: 0 5px 14px rgba(57, 127, 158, .16);
+}
+
+.first-project-banner {
+  border: 1px solid rgba(194, 155, 93, .52);
+  border-radius: 14px;
+  background: rgba(255, 247, 214, .48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 8px 20px rgba(120, 93, 47, .08);
+}
+
+.project-prompt-backdrop {
+  background: rgba(26, 41, 52, .28);
+  -webkit-backdrop-filter: blur(12px) saturate(.9);
+  backdrop-filter: blur(12px) saturate(.9);
+}
+
+.project-prompt {
+  border: 1px solid var(--workbench-edge);
+  border-radius: 16px;
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+  -webkit-backdrop-filter: blur(20px) saturate(1.05);
+  backdrop-filter: blur(20px) saturate(1.05);
+  box-shadow: 0 24px 70px rgba(34, 53, 66, .2), inset 0 1px 0 rgba(255, 255, 255, .58);
+}
+
+.project-prompt .field-label input,
+.project-prompt .field-label select {
+  border-color: rgba(126, 143, 157, .3);
+  background: rgba(255, 255, 255, .54);
+}
+
+.project-board {
+  padding: 18px 20px;
+}
+
+.project-board.is-project-space,
+.project-board.is-project-list-open {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.project-board.is-project-list-open > .project-list {
+  border: 1px solid var(--workbench-edge);
+  border-radius: 14px;
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+  box-shadow: 0 12px 28px rgba(66, 87, 103, .13);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.project-search-control {
+  border-color: var(--workbench-edge);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .54);
+}
+
+.project-search-control:focus-within {
+  border-color: rgba(57, 127, 158, .55);
+  outline: 2px solid rgba(117, 170, 184, .18);
+}
+
+.project-list-toggle,
+.project-workbench-context-button,
+.workbench-tool-button,
+.item-browser-actions button,
+.item-workspace-actions button {
+  border: 1px solid rgba(126, 143, 157, .34);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .42);
+  color: #385f70;
+  box-shadow: 0 3px 10px rgba(66, 87, 103, .08);
+}
+
+.project-list-toggle:hover,
+.project-workbench-context-button:hover,
+.workbench-tool-button:hover:not(:disabled),
+.item-browser-actions button:hover,
+.item-workspace-actions button:hover {
+  border-color: rgba(57, 127, 158, .52);
+  background: rgba(236, 248, 252, .68);
+  color: #245b69;
+}
+
+.project-workbench-toolbar-floating {
+  border: 1px solid var(--workbench-edge);
+  border-radius: 14px;
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+  box-shadow: 0 10px 24px rgba(66, 87, 103, .12), inset 0 1px 0 rgba(255, 255, 255, .52);
+  -webkit-backdrop-filter: blur(14px) saturate(1.04);
+  backdrop-filter: blur(14px) saturate(1.04);
+}
+
+.project-workbench-toolbar-tools {
+  border-left-color: var(--workbench-edge-soft);
+}
+
+.item-workbench-toolbar--project {
+  border-left-color: var(--workbench-edge-soft);
+}
+
+.project-workbench-toolbar-label strong,
+.item-workbench-toolbar-label strong,
+.item-browser-head h2,
+.item-workspace-heading h2,
+.item-resource-card h3,
+.workbench-item-preview-head h3,
+.workbench-asset-library-head h3 {
+  color: #294f60;
+}
+
+.project-row,
+.item-row {
+  border: 1px solid var(--workbench-edge-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28);
+}
+
+.project-row:hover,
+.item-row:hover {
+  border-color: rgba(57, 127, 158, .36);
+  background: rgba(255, 255, 255, .5);
+  box-shadow: 0 6px 16px rgba(66, 87, 103, .08);
+}
+
+.project-row.is-current,
+.item-row.is-selected {
+  border-color: rgba(107, 175, 182, .58);
+  background: linear-gradient(100deg, rgba(255, 216, 231, .58), rgba(237, 248, 255, .68));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .44);
+}
+
+.workbench-delete-button {
+  border-color: rgba(194, 130, 143, .48);
+  border-radius: 9px;
+  background: rgba(255, 240, 243, .54);
+  box-shadow: none;
+}
+
+.workbench-delete-button:hover {
+  border-color: rgba(179, 91, 111, .62);
+  background: rgba(255, 224, 231, .72);
+}
+
+.item-workspace {
+  border-color: var(--workbench-edge);
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+  box-shadow: inset 0 -1px 0 rgba(177, 188, 198, .18), 0 16px 32px rgba(66, 87, 103, .1);
+}
+
+.item-workspace-head {
+  border-bottom-color: var(--workbench-edge-soft);
+}
+
+.workspace-back {
+  color: var(--workbench-blue);
+}
+
+.workspace-back:hover {
+  color: #245b69;
+}
+
+.item-name-input:hover,
+.item-name-input:focus {
+  border-color: rgba(117, 170, 184, .4);
+  background: rgba(255, 255, 255, .4);
+}
+
+.workspace-status {
+  border-color: rgba(111, 175, 151, .46);
+  background: rgba(239, 251, 244, .58);
+}
+
+.item-resource-card,
+.item-resource-card.is-texture {
+  border-color: var(--workbench-edge-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34);
+}
+
+.item-resource-card h3,
+.item-resource-card-title {
+  border-bottom-color: var(--workbench-edge-soft);
+}
+
+.resource-field {
+  border-top-color: rgba(126, 143, 157, .16);
+}
+
+.resource-field-input:hover,
+.resource-field-input:focus,
+.main-resource-existing-select:hover,
+.main-resource-existing-select:focus {
+  background: rgba(255, 255, 255, .5);
+}
+
+.workbench-item-preview,
+.workbench-asset-library {
+  border-color: var(--workbench-edge);
+  border-radius: 14px;
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .38), 0 12px 26px rgba(66, 87, 103, .08);
+}
+
+.workbench-item-preview-head,
+.workbench-asset-library-head {
+  border-bottom-color: var(--workbench-edge-soft);
+}
+
+.workbench-preview-state,
+.workbench-preview-refresh,
+.workbench-preview-back,
+.workbench-asset-refresh {
+  border-color: var(--workbench-edge);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .42);
+  box-shadow: none;
+}
+
+.workbench-preview-refresh:hover,
+.workbench-preview-back:hover,
+.workbench-asset-refresh:hover:not(:disabled) {
+  border-color: rgba(57, 127, 158, .5);
+  background: rgba(236, 248, 252, .66);
+}
+
+.workbench-preview-state.is-ready {
+  border-color: rgba(111, 175, 151, .46);
+  background: rgba(239, 251, 244, .58);
+}
+
+.workbench-texture-stage,
+.workbench-preview-empty {
+  border-color: var(--workbench-edge-soft);
+  border-radius: 12px;
+}
+
+.workbench-asset-row {
+  border-color: var(--workbench-edge-soft);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .3);
+}
+
+.workbench-asset-row:hover {
+  border-color: rgba(179, 109, 138, .4);
+  background: rgba(255, 240, 247, .54);
+}
+
+.main-resource-editor {
+  border-color: rgba(111, 175, 182, .42);
+  background: var(--workbench-glass-strong-fallback);
+  background: var(--workbench-glass-strong);
+}
+
+.template-selected-summary,
+.template-preprocess-tools,
+.resource-editor-path-row {
+  border-color: var(--workbench-edge-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .34);
+}
+
+.external-resource-action-row button,
+.template-preprocess-rename > button {
+  border-color: rgba(126, 143, 157, .34);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .42);
+  color: #385f70;
+  box-shadow: none;
+}
+
+.external-resource-action-row button:hover:not(:disabled),
+.template-preprocess-rename > button:hover:not(:disabled) {
+  border-color: rgba(57, 127, 158, .5);
+  background: rgba(236, 248, 252, .66);
+}
+
+.workbench-notice {
+  border-color: rgba(111, 175, 151, .44);
+  border-radius: 12px;
+  background: rgba(239, 251, 244, .58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .38);
+}
+
+.workbench-notice.error,
+.setup-error {
+  border-color: rgba(194, 130, 143, .46);
+  border-radius: 12px;
+  background: rgba(255, 240, 243, .62);
+}
+
+@media (max-width: 760px) {
+  .project-workbench-toolbar-floating {
+    border-radius: 12px;
+  }
 }
 </style>

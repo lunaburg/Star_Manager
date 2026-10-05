@@ -308,11 +308,17 @@ small {
   min-width: 0;
   border: 0;
   border-radius: 6px;
+  transition: transform 180ms cubic-bezier(.22, .8, .24, 1);
 }
 
 .nav-entry.active {
   background: linear-gradient(90deg, var(--pink) 0%, var(--teal-soft) 56%, #ffffff 100%);
   box-shadow: none;
+  animation: nav-entry-settle 220ms cubic-bezier(.22, .8, .24, 1);
+}
+
+.nav-secondary > button.active {
+  animation: nav-entry-settle 220ms cubic-bezier(.22, .8, .24, 1);
 }
 
 .nav-main-button,
@@ -328,6 +334,12 @@ small {
   box-shadow: none;
   text-align: left;
   white-space: nowrap;
+  transition: transform 140ms cubic-bezier(.22, .8, .24, 1), color 180ms ease;
+}
+
+.nav-main-button:active,
+.nav-secondary > button:active {
+  transform: translateY(1px) scale(.975);
 }
 
 .nav-entry.active > .nav-main-button,
@@ -378,6 +390,11 @@ small {
   background: rgba(255, 255, 255, .48);
   color: #5f6873;
   box-shadow: none;
+  transition: transform 140ms cubic-bezier(.22, .8, .24, 1), background 160ms ease, border-color 160ms ease;
+}
+
+.nav-card-type-button:active {
+  transform: translateY(1px) scale(.95);
 }
 
 .nav-card-type-button:hover,
@@ -397,9 +414,32 @@ small {
 
 .nav-card-type-button img {
   display: block;
-  width: 21px;
-  height: 21px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   object-fit: contain;
+}
+
+.remote-character-page-view {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.remote-character-page-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.remote-character-page-panel > .remote-character-page > .remote-character-page-body {
+  padding: 18px;
+}
+
+.remote-character-page-panel .remote-character-page-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  max-height: none;
 }
 
 .nav-icon {
@@ -411,6 +451,12 @@ small {
   border-radius: 0;
   background: transparent;
   color: #4f5965;
+}
+
+@keyframes nav-entry-settle {
+  0% { transform: scale(.985); }
+  62% { transform: scale(1.012); }
+  100% { transform: scale(1); }
 }
 
 .nav-icon svg {
@@ -431,6 +477,24 @@ small {
 .nav-secondary {
   margin-top: auto;
   padding-top: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-entry,
+  .nav-entry.active,
+  .nav-main-button,
+  .nav-card-type-button,
+  .nav-secondary > button,
+  .nav-secondary > button.active {
+    animation: none;
+    transition: none;
+  }
+
+  .nav-main-button:active,
+  .nav-card-type-button:active,
+  .nav-secondary > button:active {
+    transform: none;
+  }
 }
 
 .main {
@@ -959,16 +1023,34 @@ small {
 .path-value,
 .system-status {
   min-width: 0;
-  display: grid;
-  gap: 3px;
   border: 1px solid #cfc9c1;
   border-radius: 6px;
   background: var(--surface-clean);
 }
 
+.system-status {
+  display: grid;
+  gap: 3px;
+}
+
 .path-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   flex: 1;
   padding: 7px 12px;
+}
+
+.path-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-width: 0;
+}
+
+.path-value > .badge {
+  flex: 0 0 auto;
 }
 
 .path-label {
@@ -1165,6 +1247,7 @@ small {
 }
 
 .wallpaper-setting-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(180px, 240px) 1fr;
   gap: 22px;
@@ -1173,6 +1256,78 @@ small {
   border: 1px solid rgba(23, 23, 23, .12);
   border-radius: 12px;
   background: rgba(255, 255, 255, .48);
+}
+
+.wallpaper-setting-help {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(96, 145, 160, .42);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .3);
+  color: #326c7b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62), 0 2px 7px rgba(68, 111, 126, .08);
+  transform: none;
+}
+
+.wallpaper-setting-help svg {
+  width: 17px;
+  height: 17px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+button.wallpaper-setting-help:hover,
+.wallpaper-setting-help:focus-visible {
+  border-color: rgba(73, 139, 161, .7);
+  color: #245c75;
+  background: rgba(235, 249, 255, .62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .76), 0 3px 10px rgba(68, 111, 126, .14);
+  outline: none;
+  transform: none;
+}
+
+.wallpaper-setting-help[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: min(280px, calc(100vw - 48px));
+  padding: 9px 10px;
+  border: 1px solid rgba(96, 145, 160, .38);
+  border-radius: 9px;
+  background: rgba(249, 253, 255, .94);
+  color: #315966;
+  box-shadow: 0 7px 18px rgba(68, 111, 126, .16), inset 0 1px 0 rgba(255, 255, 255, .72);
+  -webkit-backdrop-filter: blur(12px) saturate(1.06);
+  backdrop-filter: blur(12px) saturate(1.06);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.wallpaper-setting-help[data-tooltip]:hover::after,
+.wallpaper-setting-help[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .wallpaper-setting-preview {
@@ -1205,15 +1360,18 @@ small {
 
 .wallpaper-setting-copy {
   display: flex;
+  align-self: stretch;
   min-width: 0;
   flex-direction: column;
   gap: 8px;
 }
 
 .wallpaper-setting-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding-right: 34px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .wallpaper-setting-copy small {
@@ -1224,8 +1382,9 @@ small {
 .wallpaper-setting-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: auto;
 }
 
 @media (max-width: 760px) {
@@ -2069,6 +2228,11 @@ small {
   border-bottom: 0;
 }
 
+.start-view > .start-grid > .start-columns > aside.panel .module-head h2 {
+  font-size: 23px;
+  line-height: 1.2;
+}
+
 .start-view > .start-grid > .start-columns > aside.panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2699,12 +2863,32 @@ small {
   gap: 14px;
 }
 
-.summary-card {
+.overview-grid .summary-card {
   min-height: 90px;
   display: block;
   padding: 12px;
   text-align: left;
-  box-shadow: none;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .28);
+  background: color-mix(in srgb, var(--surface-clean) 28%, transparent);
+  -webkit-backdrop-filter: blur(9px) saturate(1.06);
+  backdrop-filter: blur(9px) saturate(1.06);
+  box-shadow: 0 6px 16px rgba(94, 111, 128, .07);
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.overview-grid .summary-card:hover {
+  border: 0;
+  background: rgba(255, 255, 255, .42);
+  background: color-mix(in srgb, var(--surface-clean) 42%, transparent);
+  box-shadow: 0 8px 20px rgba(94, 111, 128, .11);
+  transform: translateY(-1px);
+}
+
+.overview-grid .summary-card:focus-visible {
+  outline: 2px solid rgba(64, 146, 177, .62);
+  outline-offset: 2px;
 }
 
 .summary-card strong {
@@ -2723,6 +2907,28 @@ small {
 .overview-empty strong {
   color: var(--text);
   font-size: 18px;
+}
+
+.overview-grid .achievement-disabled-state {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  text-align: center;
+}
+
+.overview-grid .achievement-disabled-state > strong {
+  align-self: center;
+  margin-top: auto;
+}
+
+.overview-grid .achievement-disabled-state > span {
+  align-self: center;
+}
+
+.overview-grid .achievement-disabled-state > button {
+  align-self: stretch;
+  margin-top: auto;
+  width: 100%;
 }
 
 .task-list,
@@ -3362,22 +3568,6 @@ small {
   height: auto;
   max-width: 100%;
   max-height: 100%;
-}
-
-.clothes-card-check {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 2px solid #171514;
-  border-radius: 50%;
-  background: #fff;
-  color: #171514;
-  font-weight: 900;
 }
 
 .clothes-card-state {
@@ -4346,7 +4536,8 @@ small {
 }
 
 .settings-section--startup .setting-switch.on,
-.settings-section--achievements .setting-switch.on {
+.settings-section--achievements .setting-switch.on,
+.settings-section--wallpaper .setting-switch.on {
   border-color: rgba(255, 255, 255, .78);
   background: rgba(158, 216, 232, .48);
   background: color-mix(in srgb, #9ed8e8 48%, transparent);
@@ -4358,10 +4549,32 @@ small {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34), 0 2px 5px rgba(35, 61, 69, .22);
 }
 
+.settings-section--wallpaper .setting-switch {
+  border: 1px solid rgba(255, 255, 255, .72);
+  background: rgba(247, 251, 255, .28);
+  background: color-mix(in srgb, var(--bg-color) 28%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), inset 0 -1px 0 rgba(135, 157, 169, .18), 0 3px 10px rgba(64, 88, 101, .08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.08);
+  transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.settings-section--wallpaper .setting-switch span {
+  background: rgba(255, 255, 255, .86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 2px 5px rgba(55, 79, 91, .16);
+}
+
+.settings-section--wallpaper .setting-switch.on span {
+  background: rgba(35, 61, 69, .84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .34), 0 2px 5px rgba(35, 61, 69, .22);
+}
+
 .settings-section--startup .setting-switch:not(:disabled):hover,
 .settings-section--startup .setting-switch:not(:disabled):focus-visible,
 .settings-section--achievements .setting-switch:not(:disabled):hover,
-.settings-section--achievements .setting-switch:not(:disabled):focus-visible {
+.settings-section--achievements .setting-switch:not(:disabled):focus-visible,
+.settings-section--wallpaper .setting-switch:not(:disabled):hover,
+.settings-section--wallpaper .setting-switch:not(:disabled):focus-visible {
   border-color: rgba(108, 179, 194, .7);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .86), inset 0 -1px 0 rgba(135, 157, 169, .18), 0 5px 14px rgba(64, 119, 133, .14);
   outline: none;
@@ -5263,6 +5476,14 @@ small {
   min-height: 160px;
 }
 
+/* 场景卡预览横向占比更高，使用更紧凑的间距和更大的首选卡宽。 */
+.card-grid.clothes-card-grid.scene-card-grid {
+  --card-width: 184px;
+  --card-grid-gap-x: 10px;
+  --card-grid-gap-y: 10px;
+  --card-grid-padding: 12px;
+}
+
 .character-card-virtual-canvas {
   position: relative;
   grid-column: 1 / -1;
@@ -5501,36 +5722,6 @@ small {
   object-fit: contain;
   object-position: center;
   background: #f0eff7;
-}
-
-.portrait:has(img)::before,
-.portrait:has(img)::after {
-  display: none;
-}
-
-.portrait::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 16%;
-  width: 26%;
-  height: 18%;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background: #f6e4d9;
-  box-shadow: 0 0 0 12px rgba(90, 60, 74, .08);
-}
-
-.portrait::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -11%;
-  width: 52%;
-  height: 42%;
-  transform: translateX(-50%);
-  border-radius: 48px 48px 12px 12px;
-  background: linear-gradient(160deg, #6f809b, #29364a);
 }
 
 .card-hover-tags {
@@ -6479,12 +6670,14 @@ small {
 
 .card-rating-star-glyph {
   display: block;
+  width: 27px;
+  height: 27px;
   color: transparent;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 27px;
-  line-height: 29px;
-  -webkit-text-stroke: 1.5px #8f887f;
-  transition: color .14s ease, -webkit-text-stroke-color .14s ease, transform .14s ease;
+  font-size: 0;
+  line-height: 1;
+  background: url("./assets/card-rating-star.svg") center / contain no-repeat;
+  filter: grayscale(1) saturate(.18) opacity(.52);
+  transition: filter .14s ease, transform .14s ease;
 }
 
 .card-rating-star.active {
@@ -6492,8 +6685,7 @@ small {
 }
 
 .card-rating-star.active .card-rating-star-glyph {
-  color: #ffc94a;
-  -webkit-text-stroke-color: #d99008;
+  filter: none;
 }
 
 .card-rating-stars:not(:has(.card-rating-star:disabled)):hover .card-rating-star {
@@ -6501,8 +6693,7 @@ small {
 }
 
 .card-rating-stars:not(:has(.card-rating-star:disabled)):hover .card-rating-star-glyph {
-  color: #ffc94a;
-  -webkit-text-stroke-color: #d99008;
+  filter: none;
 }
 
 .card-rating-stars .card-rating-star:hover ~ .card-rating-star {
@@ -6510,8 +6701,7 @@ small {
 }
 
 .card-rating-stars .card-rating-star:hover ~ .card-rating-star .card-rating-star-glyph {
-  color: transparent;
-  -webkit-text-stroke-color: #8f887f;
+  filter: grayscale(1) saturate(.18) opacity(.52);
 }
 
 .card-rating-star:hover:not(:disabled),
@@ -6525,6 +6715,31 @@ small {
 .card-rating-star:hover:not(:disabled) .card-rating-star-glyph,
 .card-rating-star:focus-visible:not(:disabled) .card-rating-star-glyph {
   transform: translateY(-1px) scale(1.08);
+}
+
+.card-rating-star.is-pulsing .card-rating-star-glyph {
+  animation: card-rating-star-pop 560ms cubic-bezier(.34, 1.56, .64, 1) var(--rating-pulse-delay, 0ms) both;
+}
+
+@keyframes card-rating-star-pop {
+  0% {
+    opacity: .55;
+    transform: translateY(1px) scale(.72) rotate(-9deg);
+  }
+
+  38% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.25) rotate(6deg);
+  }
+
+  68% {
+    transform: translateY(0) scale(.94) rotate(-2deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0);
+  }
 }
 
 .card-rating-star:focus-visible {
@@ -8211,6 +8426,12 @@ small {
 .mod-page .bulk-icon-button svg {
   width: 23px;
   height: 23px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .mod-page .bulk-duplicate-action {
@@ -8277,6 +8498,46 @@ small {
 .mod-page .table-wrap {
   height: auto;
   min-height: 0;
+}
+
+/* Match the native mod-list scrollbars to the translucent application surfaces. */
+.mod-page .table-wrap.mod-list-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(103, 132, 148, .48) rgba(255, 255, 255, .12);
+  scrollbar-gutter: stable;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar-track {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  background-clip: padding-box;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 34px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(103, 132, 148, .46);
+  background-clip: padding-box;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(82, 119, 138, .68);
+  background-clip: padding-box;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.mod-page .table-wrap.mod-list-scrollbar::-webkit-scrollbar-button {
+  display: none;
 }
 
 .compact-item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); align-content: start; align-items: start; gap: 2px; padding: 6px; background: #dfbfd0; }
@@ -9846,9 +10107,8 @@ button.assembly-group-head:focus-visible {
 }
 
 .character-layout > .character-side-panel .card-rating-star-glyph {
-  color: transparent;
-  -webkit-text-stroke-color: rgba(96, 115, 123, .72);
-  transition: color .2s ease, -webkit-text-stroke-color .2s ease, transform .2s ease;
+  filter: grayscale(1) saturate(.18) opacity(.52);
+  transition: filter .2s ease, transform .2s ease;
 }
 
 .character-layout > .character-side-panel .card-rating-star.active {
@@ -9857,11 +10117,17 @@ button.assembly-group-head:focus-visible {
 
 .character-layout > .character-side-panel .card-rating-star.active .card-rating-star-glyph,
 .character-layout > .character-side-panel .card-rating-stars:not(:has(.card-rating-star:disabled)):hover .card-rating-star-glyph {
-  color: #f3c85b;
-  -webkit-text-stroke-color: #b67b1b;
+  filter: none;
 }
 
-.character-layout > .character-side-panel .card-rating-star:hover:not(:disabled),
+.character-layout > .character-side-panel .card-rating-star:hover:not(:disabled) {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: #a86d0e;
+  box-shadow: none;
+  transform: none;
+}
+
 .character-layout > .character-side-panel .card-rating-star:focus-visible:not(:disabled) {
   border-color: rgba(255, 255, 255, .62) !important;
   background: rgba(255, 255, 255, .24) !important;
@@ -9877,6 +10143,10 @@ button.assembly-group-head:focus-visible {
 
 .character-layout > .character-side-panel .card-rating-star:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.character-layout > .character-side-panel .card-rating-star.is-pulsing {
+  z-index: 1;
 }
 
 .character-layout > .character-side-panel .card-tags-section {
@@ -10066,6 +10336,10 @@ button.assembly-group-head:focus-visible {
   .character-layout > .character-side-panel .card-detail-info-panel .profile-edit-row select,
   .character-layout > .character-side-panel .card-detail-info-panel .profile-editor-actions button {
     transition: none;
+  }
+
+  .character-layout > .character-side-panel .card-rating-star.is-pulsing .card-rating-star-glyph {
+    animation: none !important;
   }
 }
 
@@ -10695,7 +10969,6 @@ button.assembly-group-head:focus-visible {
 
 .game-item-boundary-note {
   padding: 8px 9px;
-  border-left: 3px solid #78a5bc;
   background: #f1f8fc;
   color: #4a6d7c;
   font-size: 11px;
@@ -11728,9 +12001,7 @@ body.model-preview-expanded { overflow: hidden; }
 
 .card-load-destination-option {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
   height: auto;
   min-height: 54px;
   padding: 8px 9px;
@@ -11750,19 +12021,6 @@ body.model-preview-expanded { overflow: hidden; }
 .card-load-destination-option.selected {
   border-color: #8a6cc2;
   background: #f2ecff;
-}
-
-.card-load-destination-radio {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #a8aeba;
-  border-radius: 50%;
-}
-
-.card-load-destination-option.selected .card-load-destination-radio {
-  border-color: #7653ae;
-  box-shadow: inset 0 0 0 3px #f2ecff;
-  background: #7653ae;
 }
 
 .card-load-destination-empty,
@@ -12986,6 +13244,23 @@ tbody tr:hover td {
   font-weight: 900;
 }
 
+/* 卡片浏览器的虚拟缩略图只保留无文字的磨砂玻璃占位层。 */
+.card-grid .portrait .lazy-thumbnail-placeholder,
+.clothes-card-layout .clothes-card-preview .lazy-thumbnail-placeholder,
+.scene-card-layout .clothes-card-preview .lazy-thumbnail-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(255, 255, 255, .44);
+  border-radius: inherit;
+  background: rgba(255, 255, 255, .16);
+  color: transparent;
+  font-size: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48), inset 0 -1px 0 rgba(126, 143, 157, .12);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  backdrop-filter: blur(12px) saturate(1.08);
+}
+
 .item-thumb.warn,
 .item-thumb.danger {
   background: var(--red-soft);
@@ -13163,18 +13438,6 @@ tbody tr:hover td {
     inset 0 0 0 5px rgba(105, 137, 155, .18);
 }
 
-.achievement-panel::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  inset: 5px;
-  pointer-events: none;
-  background:
-    linear-gradient(112deg, transparent 0 13%, rgba(255, 255, 255, .46) 13.5% 17%, transparent 17.5% 35%),
-    linear-gradient(112deg, transparent 0 66%, rgba(255, 255, 255, .25) 66.5% 70%, transparent 70.5%);
-  opacity: .72;
-}
-
 .achievement-panel::after {
   content: "";
   position: absolute;
@@ -13209,13 +13472,14 @@ tbody tr:hover td {
 .achievement-head {
   z-index: 3;
   align-items: flex-start;
-  background: rgba(255, 255, 255, .44);
-  backdrop-filter: blur(3px);
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .achievement-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 0 16px 16px; }
 .achievement-card { display: flex; align-items: flex-start; gap: 10px; min-width: 0; height: auto; min-height: 96px; padding: 12px; text-align: left; border: 1px solid rgba(132, 126, 119, .66); border-radius: 5px; background: rgba(248, 246, 242, .74); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .88); backdrop-filter: blur(5px); color: #716b65; }
-.achievement-card:hover { transform: translateY(-2px); border-color: #171514; }
-.achievement-card.unlocked { color: #171514; border-color: #171514; background: linear-gradient(145deg, rgba(255, 247, 201, .84), rgba(238, 248, 255, .78) 72%); box-shadow: 3px 3px 0 #171514, inset 0 1px 0 rgba(255, 255, 255, .94); }
+.achievement-card:hover { transform: translateY(-2px); border-color: rgba(132, 126, 119, .66); }
+.achievement-card.unlocked { color: #171514; border-color: rgba(132, 126, 119, .66); background: linear-gradient(145deg, rgba(255, 247, 201, .84), rgba(238, 248, 255, .78) 72%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .94); }
 .achievement-medal { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; overflow: hidden; border: 1px solid currentColor; background: #e7e3dd; font: 800 10px/1 var(--mono); }
 .achievement-medal img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
 .unlocked .achievement-medal, .achievement-toast .achievement-medal { background: #f7dd69; color: #171514; box-shadow: inset -4px -4px 0 rgba(0,0,0,.12); }
@@ -14352,6 +14616,12 @@ tbody tr:hover td {
   background: transparent;
 }
 
+/* 卡片详情内容紧贴标题栏下方，避免预览与标题之间留下过大的空白。 */
+.clothes-card-layout > .clothes-side-panel .clothes-detail-section,
+.scene-card-layout > .scene-side-panel .clothes-detail-section {
+  padding-top: 8px;
+}
+
 .clothes-card-layout > .clothes-side-panel .clothes-tree-row,
 .scene-card-layout > .scene-side-panel .clothes-tree-row {
   border: 1px solid transparent;
@@ -14456,14 +14726,6 @@ tbody tr:hover td {
 .clothes-card-layout > .clothes-browser-panel .clothes-card-caption strong,
 .scene-card-layout > .scene-browser-panel .scene-card-caption strong {
   color: rgba(46, 55, 64, .9);
-}
-
-.clothes-card-layout > .clothes-browser-panel .clothes-card-check,
-.scene-card-layout > .scene-browser-panel .clothes-card-check {
-  border: 1px solid rgba(255, 255, 255, .72);
-  background: rgba(255, 255, 255, .62);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .76), 0 2px 7px rgba(59, 77, 91, .1);
-  color: #245c75;
 }
 
 .clothes-card-layout > .clothes-side-panel .scene-detail-preview,
@@ -14877,4 +15139,273 @@ tbody tr:hover td {
   .trash-hero-actions { justify-content: flex-start; }
   .trash-item { grid-template-columns: minmax(0, 1fr); }
   .trash-item-actions { grid-column: 1; }
+}
+
+/* All renderer-owned dialogs share one glass surface and scrim. Content-specific
+   panels keep their own width and internal layout, while the outer treatment
+   stays consistent across pages. */
+:root {
+  --dialog-surface: color-mix(in srgb, var(--bg-color) 72%, rgba(255, 255, 255, .74));
+  --dialog-surface-fallback: rgba(247, 251, 255, .88);
+  --dialog-border: rgba(126, 143, 157, .34);
+  --dialog-text: #274454;
+  --dialog-muted: #66808d;
+  --dialog-shadow: 0 26px 72px rgba(35, 57, 70, .22), inset 0 1px 0 rgba(255, 255, 255, .62);
+  --dialog-radius: 16px;
+}
+
+.prompt-backdrop,
+.project-prompt-backdrop,
+.plugin-confirm-backdrop,
+.trash-confirm-backdrop,
+.texture-dialog-backdrop,
+.cropper-backdrop,
+.task-drawer-backdrop,
+.achievement-drawer-backdrop {
+  background: rgba(22, 35, 45, .28) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(1.06) !important;
+  backdrop-filter: blur(12px) saturate(1.06) !important;
+}
+
+.prompt-panel,
+.project-prompt,
+.plugin-confirm-modal,
+.trash-confirm-modal,
+.texture-dialog,
+.cropper-panel,
+.task-drawer.duplicate-clothing-drawer,
+.item-context-menu,
+.author-option-list {
+  border: 1px solid var(--dialog-border) !important;
+  border-radius: var(--dialog-radius) !important;
+  background: var(--dialog-surface-fallback) !important;
+  background: var(--dialog-surface) !important;
+  box-shadow: var(--dialog-shadow) !important;
+  color: var(--dialog-text) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.08) !important;
+  backdrop-filter: blur(18px) saturate(1.08) !important;
+}
+
+.task-drawer,
+.achievement-drawer {
+  border-color: var(--dialog-border) !important;
+  background: var(--dialog-surface-fallback) !important;
+  background: var(--dialog-surface) !important;
+  box-shadow: -18px 0 42px rgba(35, 57, 70, .18), inset 1px 0 0 rgba(255, 255, 255, .42) !important;
+  color: var(--dialog-text) !important;
+}
+
+.plugin-confirm-modal > header,
+.trash-confirm-header,
+.texture-dialog-header,
+.cropper-header {
+  border-bottom-color: rgba(126, 143, 157, .22) !important;
+  background: rgba(255, 255, 255, .24) !important;
+}
+
+.texture-dialog-header,
+.texture-empty {
+  background: #eef7fc !important;
+}
+
+.plugin-confirm-modal h2,
+.trash-confirm-header h2,
+.texture-dialog-header h2,
+.cropper-header h2,
+.project-prompt h2,
+.task-drawer-heading h2,
+.achievement-drawer h2 {
+  color: var(--dialog-text) !important;
+}
+
+.plugin-confirm-modal footer,
+.trash-confirm-footer,
+.texture-dialog-actions,
+.cropper-actions,
+.prompt-panel .prompt-actions,
+.project-prompt .prompt-actions {
+  border-top-color: rgba(126, 143, 157, .22) !important;
+  background: rgba(255, 255, 255, .18) !important;
+}
+
+.plugin-confirm-close,
+.trash-confirm-close,
+.texture-close,
+.cropper-close,
+.task-drawer-close,
+.achievement-close,
+.sims4-fbx-close {
+  border: 1px solid var(--dialog-border) !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, .34) !important;
+  color: var(--dialog-text) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48), 0 3px 10px rgba(35, 57, 70, .06) !important;
+}
+
+.plugin-confirm-close:hover,
+.trash-confirm-close:hover,
+.texture-close:hover,
+.cropper-close:hover,
+.task-drawer-close:hover,
+.achievement-close:hover,
+.sims4-fbx-close:hover {
+  border-color: rgba(20, 126, 145, .58) !important;
+  background: rgba(255, 255, 255, .62) !important;
+  color: #145f70 !important;
+}
+
+.plugin-confirm-path,
+.prompt-note,
+.game-item-target,
+.sims4-fbx-field,
+.fbx-skin-source-row,
+.task-drawer-summary {
+  border-color: rgba(126, 143, 157, .26) !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, .28) !important;
+}
+
+.plugin-confirm-name,
+.plugin-confirm-note,
+.plugin-confirm-path,
+.texture-dialog-header p,
+.cropper-header p,
+.task-drawer-summary span,
+.achievement-drawer > p {
+  color: var(--dialog-muted) !important;
+}
+
+.plugin-confirm-modal footer button,
+.trash-confirm-footer button,
+.texture-dialog-actions button,
+.cropper-actions button,
+.prompt-panel .prompt-actions button,
+.project-prompt .prompt-actions button {
+  border-radius: 10px !important;
+  box-shadow: 0 3px 10px rgba(35, 57, 70, .06) !important;
+}
+
+/* 回收站确认框复用浅色玻璃弹窗表面时，覆盖旧深色主题的正文颜色，保证说明文字和取消按钮清晰可读。 */
+.trash-confirm-kicker {
+  color: #a65340 !important;
+}
+
+.trash-confirm-body {
+  color: #355563 !important;
+}
+
+.trash-confirm-body strong {
+  color: #a34e3b !important;
+}
+
+.trash-confirm-warning {
+  color: var(--dialog-muted) !important;
+}
+
+.trash-confirm-cancel {
+  border-color: var(--dialog-border) !important;
+  background: rgba(255, 255, 255, .42) !important;
+  color: var(--dialog-text) !important;
+}
+
+.trash-confirm-cancel:hover,
+.trash-confirm-cancel:focus-visible {
+  border-color: rgba(20, 126, 145, .58) !important;
+  background: rgba(255, 255, 255, .62) !important;
+  color: #145f70 !important;
+}
+
+/* 模组列表选中行使用中性磨砂玻璃，避免沿用全局粉色选中底。 */
+.mod-page tbody tr.selected-row td,
+.mod-page tbody tr.bulk-selected-row td {
+  background: rgba(255, 255, 255, .34);
+  background: color-mix(in srgb, var(--surface-clean) 36%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48), inset 0 -1px 0 rgba(133, 151, 164, .12);
+}
+
+.mod-page tbody tr.selected-row:hover td,
+.mod-page tbody tr.bulk-selected-row:hover td {
+  background: rgba(255, 255, 255, .44);
+  background: color-mix(in srgb, var(--surface-clean) 46%, transparent);
+}
+
+/* 物品浏览表格与紧凑视图复用模组列表的中性玻璃选中态。 */
+.mod-page .item-table-virtual-row.selected {
+  background: rgba(255, 255, 255, .34);
+  background: color-mix(in srgb, var(--surface-clean) 36%, transparent);
+  color: var(--text);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48), inset 0 -1px 0 rgba(133, 151, 164, .12);
+}
+
+.mod-page .item-table-virtual-row.selected:hover {
+  background: rgba(255, 255, 255, .44);
+  background: color-mix(in srgb, var(--surface-clean) 46%, transparent);
+}
+
+.mod-management-layout > .mod-page .compact-item-grid .compact-item-card.selected {
+  border-color: rgba(255, 255, 255, .86);
+  background: rgba(255, 255, 255, .34);
+  background: color-mix(in srgb, var(--surface-clean) 36%, transparent);
+  color: var(--text);
+  outline: 1px solid rgba(112, 143, 160, .5);
+  outline-offset: -2px;
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56), 0 3px 10px rgba(63, 85, 99, .08);
+}
+
+.mod-management-layout > .mod-page .compact-item-grid .compact-item-card.selected:hover {
+  background: rgba(255, 255, 255, .44);
+  background: color-mix(in srgb, var(--surface-clean) 46%, transparent);
+}
+
+/* Shared Chromium/Windows and Firefox scrollbar surface for every scrollable
+   renderer element. Page-specific rules with a more specific selector can
+   still hide or tune their own scrollbar when that is intentional. */
+:root {
+  --app-scrollbar-track: rgba(255, 255, 255, .12);
+  --app-scrollbar-thumb: rgba(103, 132, 148, .46);
+  --app-scrollbar-thumb-hover: rgba(82, 119, 138, .68);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--app-scrollbar-track);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 34px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--app-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--app-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
 }

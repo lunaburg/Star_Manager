@@ -109,6 +109,14 @@
 
 所有卡片类型的列表预览都必须复用 `card_previews/`、`LazyThumbnail` 和可视区域虚拟渲染逻辑。列表接口只返回轻量元数据和带源文件签名的预览 URL；前端通过 `IntersectionObserver` 请求视口附近的图片，不能为渲染列表直接读取或解码原始卡片 PNG。完整卡片解析和原图请求仅允许发生在用户打开单卡详情后。新增卡片类型时，若无法遵循该规则，必须在对应页面文档和本文登记明确的性能与缓存边界。
 
+### 2.4.1 `remote_character_pages/`：网站人物卡与场景卡页面缓存
+
+位置：`<runtime>/remote_character_pages/<md5(canonical-page-url)>/manifest.json`。旧版本可能另有 `cover_<card-id>.<ext>`。
+
+- 由网站卡片页面的“人物卡 / 场景卡”切换控件按需创建；只接受 `https://db.bepis.moe/aishoujo` 与 `https://db.bepis.moe/aiscenes` 列表页及正整数页码。页面 URL 参与缓存键，两类卡片及其分页互不混用。
+- v4 manifest 保存规范化页面 URL、抓取时间、页数和卡片元数据（含悬浮信息的日期及上传者字段，场景卡另含男女人数和物件数）。封面使用固定的 BepisDB 同源缩略图 URL，由 Chromium 对可见图片并发请求和按 HTTP 缓存规则复用；列表请求不再逐张下载封面，也不再生成本地封面文件。单卡“下载”通过 Electron 原生另存为保存到用户选定路径，不进入此缓存。
+- 旧版 `cover_*` 文件及本地图片路由暂时保留兼容；旧 manifest 不会被新版读取命中。元数据缓存有效期为 15 分钟；不写入 `UserData/chara`、人物卡 SQLite 索引或回收站。离线时元数据命中不保证远端封面可显示。
+
 ### 2.5 `clothes_card_index.sqlite`：服装卡有效性索引
 
 位置：`<runtime>/clothes_card_index.sqlite`

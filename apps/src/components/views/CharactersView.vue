@@ -5,6 +5,7 @@ import LoadingAnimation from "../LoadingAnimation.vue";
 import VirtualCharacterCardGrid from "../VirtualCharacterCardGrid.vue";
 import VirtualCharacterCardTree from "../VirtualCharacterCardTree.vue";
 import VirtualClothesCardGrid from "../VirtualClothesCardGrid.vue";
+import RemoteCharacterPageGallery from "../RemoteCharacterPageGallery.vue";
 import characterCardEmptyAnimation from "../../assets/character-card-empty-loading.json";
 import characterCardLoadingAnimation from "../../assets/character-card-loading.json";
 
@@ -697,7 +698,7 @@ const cardModeMeta = computed(() => {
               <div class="module-head character-side-head">
                 <div>
                   <h2>{{ ctx.characterSideMode === 'tree' ? '卡片目录' : '卡片详情' }}</h2>
-                  <p class="subtext">{{ ctx.characterSideMode === 'tree' ? 'UserData/chara' : '当前人物卡' }}</p>
+                  <p v-if="ctx.characterSideMode === 'tree'" class="subtext">UserData/chara</p>
                 </div>
                 <div class="side-toggle" aria-label="卡片侧栏视图">
                   <button type="button" :class="{ active: ctx.characterSideMode === 'tree' }" @click="ctx.characterSideMode = 'tree'">目录</button>
@@ -780,18 +781,24 @@ const cardModeMeta = computed(() => {
                     <button :class="{ active: ctx.cardDetailTab === '工具' }" type="button" @click="ctx.cardDetailTab = '工具'">工具</button>
                   </div>
                   <div v-if="ctx.cardDetailTab === '详情'" class="drawer-tab-panel active card-detail-info-panel">
-                    <section class="card-rating-panel" aria-labelledby="card-rating-title">
-                      <div class="card-rating-copy">
-                        <span id="card-rating-title">人物卡评分</span>
-                        <strong>{{ ctx.ratingCardPath ? '保存中...' : (ctx.selectedCardDetail.rating ? `${ctx.selectedCardDetail.rating} / 5` : '未评分') }}</strong>
-                      </div>
+                    <section class="card-rating-panel" aria-label="人物卡评分">
                       <div class="card-rating-stars" role="radiogroup" aria-label="人物卡评分，1 到 5 星">
                         <button
                           v-for="star in 5"
                           :key="star"
                           type="button"
                           class="card-rating-star"
-                          :class="{ active: star <= (ctx.selectedCardDetail.rating || 0) }"
+                          :class="{
+                            active: star <= (ctx.selectedCardDetail.rating || 0),
+                            'is-pulsing': ctx.cardRatingPulse.active
+                              && ctx.cardRatingPulse.path === ctx.selectedCardDetail.absolutePath
+                              && star <= ctx.cardRatingPulse.rating
+                          }"
+                          :style="ctx.cardRatingPulse.active
+                            && ctx.cardRatingPulse.path === ctx.selectedCardDetail.absolutePath
+                            && star <= ctx.cardRatingPulse.rating
+                            ? { '--rating-pulse-delay': `${(star - 1) * 42}ms` }
+                            : undefined"
                           :disabled="Boolean(ctx.ratingCardPath)"
                           role="radio"
                           :aria-checked="ctx.selectedCardDetail.rating === star"
@@ -799,17 +806,8 @@ const cardModeMeta = computed(() => {
                           :title="`评为 ${star} 星`"
                           @click="ctx.setSelectedCardRating(star)"
                         >
-                          <span class="card-rating-star-glyph" aria-hidden="true">★</span>
+                          <span class="card-rating-star-glyph" aria-hidden="true"></span>
                         </button>
-                      </div>
-                      <div
-                        v-if="ctx.cardRatingNotice.message"
-                        class="card-rating-notice"
-                        :class="ctx.cardRatingNotice.type"
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {{ ctx.cardRatingNotice.message }}
                       </div>
                     </section>
                     <section class="card-tags-section" aria-labelledby="card-tags-title">
@@ -1246,7 +1244,6 @@ const cardModeMeta = computed(() => {
                     :disabled="ctx.cardLoadPrompt.busy || ctx.cardLoadPrompt.contextLoading"
                     @click="ctx.selectCardLoadTarget(option)"
                   >
-                    <span class="card-load-destination-radio" aria-hidden="true"></span>
                     <span>
                       <strong>{{ option.name }}</strong>
                       <small>{{ option.meta }}</small>
@@ -1411,6 +1408,11 @@ const cardModeMeta = computed(() => {
           </div>
 </section>
 </template>
+<section v-else-if="ctx.cardBrowserMode === 'remote'" class="view remote-character-page-view">
+  <section class="panel remote-character-page-panel">
+    <RemoteCharacterPageGallery standalone :game-dir="ctx.paths?.gameDir || ''" />
+  </section>
+</section>
 <section v-else-if="ctx.cardBrowserMode === 'clothes'" class="view clothes-card-view">
   <div class="clothes-card-layout">
     <section class="panel clothes-browser-panel">
@@ -1472,7 +1474,7 @@ const cardModeMeta = computed(() => {
       <div class="module-head character-side-head">
         <div>
           <h2>{{ ctx.clothesSideMode === 'tree' ? '服装卡目录' : '服装卡详情' }}</h2>
-          <p class="subtext">{{ ctx.clothesSideMode === 'tree' ? 'UserData/coordinate' : '当前服装卡' }}</p>
+          <p v-if="ctx.clothesSideMode === 'tree'" class="subtext">UserData/coordinate</p>
         </div>
         <div class="side-toggle" aria-label="服装卡侧栏视图">
           <button type="button" :class="{ active: ctx.clothesSideMode === 'tree' }" @click="ctx.clothesSideMode = 'tree'">目录</button>
@@ -1713,7 +1715,7 @@ const cardModeMeta = computed(() => {
       <div class="module-head character-side-head">
         <div>
           <h2>{{ ctx.sceneSideMode === 'tree' ? '场景卡目录' : '场景卡详情' }}</h2>
-          <p class="subtext">{{ ctx.sceneSideMode === 'tree' ? 'UserData/studio/scene' : '当前场景卡' }}</p>
+          <p v-if="ctx.sceneSideMode === 'tree'" class="subtext">UserData/studio/scene</p>
         </div>
         <div class="side-toggle" aria-label="场景卡侧栏视图">
           <button type="button" :class="{ active: ctx.sceneSideMode === 'tree' }" @click="ctx.sceneSideMode = 'tree'">目录</button>

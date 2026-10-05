@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -29,6 +32,7 @@ BUILTIN_MAP_KIND = "__game_map_scene__"
 _BUILTIN_BUNDLE_ITEMS_CACHE: dict[tuple[str, str, str], tuple[BuiltinItem, ...]] = {}
 _BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT = 64
 _BUILTIN_SCENE_HPOINT_CACHE: dict[tuple[str, str], tuple[int, int, str, str]] = {}
+_BUILTIN_CACHE_LOCK = threading.Lock()
 
 CLOTHES_CATEGORY_BY_SLOT = {
     0: "240",
@@ -269,13 +273,15 @@ def _read_bundle_items(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
 def _read_bundle_items_cached(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
     """Reuse parsed ChaListData rows while the backend process stays alive."""
     key = (str(bundle_path), _path_signature(bundle_path), BUILTIN_LIST_PARSER_VERSION)
-    cached = _BUILTIN_BUNDLE_ITEMS_CACHE.get(key)
+    with _BUILTIN_CACHE_LOCK:
+        cached = _BUILTIN_BUNDLE_ITEMS_CACHE.get(key)
     if cached is not None:
         return list(cached)
     items = _read_bundle_items(game_dir, bundle_path)
-    if len(_BUILTIN_BUNDLE_ITEMS_CACHE) >= _BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT:
-        _BUILTIN_BUNDLE_ITEMS_CACHE.pop(next(iter(_BUILTIN_BUNDLE_ITEMS_CACHE)))
-    _BUILTIN_BUNDLE_ITEMS_CACHE[key] = tuple(items)
+    with _BUILTIN_CACHE_LOCK:
+        if len(_BUILTIN_BUNDLE_ITEMS_CACHE) >= _BUILTIN_BUNDLE_ITEMS_CACHE_LIMIT:
+            _BUILTIN_BUNDLE_ITEMS_CACHE.pop(next(iter(_BUILTIN_BUNDLE_ITEMS_CACHE)))
+        _BUILTIN_BUNDLE_ITEMS_CACHE[key] = tuple(items)
     return items
 
 
@@ -287,18 +293,21 @@ def _scene_hpoint_info(scene_path: Path) -> tuple[int, int, str, str]:
     serialized fields happen to contain a similarly named value.
     """
     key = (str(scene_path), _path_signature(scene_path))
-    cached = _BUILTIN_SCENE_HPOINT_CACHE.get(key)
+    with _BUILTIN_CACHE_LOCK:
+        cached = _BUILTIN_SCENE_HPOINT_CACHE.get(key)
     if cached is not None:
         return cached
     if UnityPy is None or not scene_path.is_file():
         result = (0, 0, "missing", "")
-        _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+        with _BUILTIN_CACHE_LOCK:
+            _BUILTIN_SCENE_HPOINT_CACHE[key] = result
         return result
     try:
         environment = UnityPy.load(str(scene_path))
     except Exception:  # noqa: BLE001 - one scene must not abort the index.
         result = (0, 0, "error", "")
-        _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+        with _BUILTIN_CACHE_LOCK:
+            _BUILTIN_SCENE_HPOINT_CACHE[key] = result
         return result
     try:
         scripts: dict[int, str] = {}
@@ -346,7 +355,8 @@ def _scene_hpoint_info(scene_path: Path) -> tuple[int, int, str, str]:
         )
     finally:
         del environment
-    _BUILTIN_SCENE_HPOINT_CACHE[key] = result
+    with _BUILTIN_CACHE_LOCK:
+        _BUILTIN_SCENE_HPOINT_CACHE[key] = result
     return result
 
 
@@ -427,24 +437,189 @@ def _read_mapinfo_items(game_dir: Path, bundle_path: Path) -> list[BuiltinItem]:
 class _BuiltinThumbnailBundleCache:
     def __init__(self) -> None:
         self._bundles: dict[tuple[str, str], UnityThumbnailBundle | ThumbnailResult] = {}
+        self._cache_lock = threading.Lock()
+        self._load_locks: dict[tuple[str, str], threading.Lock] = {}
+        self._bundle_locks: dict[tuple[str, str], threading.Lock] = {}
 
     def load(self, path: Path) -> UnityThumbnailBundle | ThumbnailResult:
         key = (str(path), _path_signature(path))
-        cached = self._bundles.get(key)
-        if cached is not None:
-            return cached
-        if not path.is_file():
-            result: UnityThumbnailBundle | ThumbnailResult = ThumbnailResult(
-                "", "missing", f"thumbnail source not found: {path}"
-            )
-            self._bundles[key] = result
+        with self._cache_lock:
+            cached = self._bundles.get(key)
+            if cached is not None:
+                return cached
+            load_lock = self._load_locks.setdefault(key, threading.Lock())
+        with load_lock:
+            with self._cache_lock:
+                cached = self._bundles.get(key)
+                if cached is not None:
+                    return cached
+            if not path.is_file():
+                result: UnityThumbnailBundle | ThumbnailResult = ThumbnailResult(
+                    "", "missing", f"thumbnail source not found: {path}"
+                )
+            else:
+                try:
+                    result = UnityThumbnailBundle.from_bytes(path.read_bytes())
+                except OSError as exc:
+                    result = ThumbnailResult("", "error", str(exc))
+            with self._cache_lock:
+                self._bundles[key] = result
+                self._bundle_locks.setdefault(key, threading.Lock())
             return result
-        try:
-            result = UnityThumbnailBundle.from_bytes(path.read_bytes())
-        except OSError as exc:
-            result = ThumbnailResult("", "error", str(exc))
-        self._bundles[key] = result
-        return result
+
+    def write_thumbnail(
+        self,
+        path: Path,
+        thumb_tex: str,
+        output_path: Path,
+    ) -> ThumbnailResult:
+        key = (str(path), _path_signature(path))
+        bundle = self.load(path)
+        if isinstance(bundle, ThumbnailResult):
+            return bundle
+        with self._cache_lock:
+            bundle_lock = self._bundle_locks.setdefault(key, threading.Lock())
+        # UnityPy object readers and their image cache are shared for items
+        # that point at the same bundle. Serialize only those same-bundle
+        # reads while allowing different thumbnail bundles to run in parallel.
+        with bundle_lock:
+            return bundle.write_thumbnail(thumb_tex, output_path)
+
+
+@dataclass(frozen=True)
+class _PreparedBuiltinItem:
+    item: BuiltinItem
+    cache_path: Path
+    thumbnail_result: ThumbnailResult | None
+    resource_status: str
+    resource_error: str
+    source_signature: str
+    previous_created_at: str
+    reused: bool = False
+
+
+def _builtin_worker_count(requested: int | str | None) -> int:
+    """Clamp builtin indexing concurrency to a conservative machine limit."""
+    limit = max(1, min(8, (os.cpu_count() or 1) // 2))
+    try:
+        value = int(requested) if requested is not None else limit
+    except (TypeError, ValueError):
+        value = limit
+    return max(1, min(limit, value))
+
+
+def _prepare_builtin_item(
+    game_dir: Path,
+    thumbnail_dir: Path,
+    item: BuiltinItem,
+    bundle_path: Path,
+    previous: dict[str, str],
+    force_full: bool,
+    thumbnail_cache: _BuiltinThumbnailBundleCache,
+) -> _PreparedBuiltinItem:
+    previous_cache = previous.get("thumbnail_cache_path", "")
+    previous_status = previous.get("thumbnail_status", "")
+    previous_signature = previous.get("source_signature", "")
+    cache_path = Path(previous_cache) if previous_cache else _thumbnail_cache_path(thumbnail_dir, item)
+    source_signature = _builtin_source_signature(game_dir, item, bundle_path)
+    can_reuse = (
+        not force_full
+        and previous_signature == source_signature
+        and previous_status in {"ready", "ok"}
+        and cache_path.is_file()
+    )
+    if can_reuse:
+        return _PreparedBuiltinItem(
+            item=item,
+            cache_path=cache_path,
+            thumbnail_result=None,
+            resource_status=previous.get("resource_status", ""),
+            resource_error=previous.get("resource_error", ""),
+            source_signature=source_signature,
+            previous_created_at=previous.get("created_at", ""),
+            reused=True,
+        )
+    thumbnail_result = _extract_builtin_thumbnail(
+        game_dir,
+        item,
+        cache_path,
+        thumbnail_cache,
+    )
+    resource_status, resource_error = _resource_status(game_dir, item)
+    return _PreparedBuiltinItem(
+        item=item,
+        cache_path=cache_path,
+        thumbnail_result=thumbnail_result,
+        resource_status=resource_status,
+        resource_error=resource_error,
+        source_signature=source_signature,
+        previous_created_at=previous.get("created_at", ""),
+    )
+
+
+def _insert_builtin_item(
+    conn: sqlite3.Connection,
+    prepared: _PreparedBuiltinItem,
+    now: str,
+) -> None:
+    item = prepared.item
+    thumbnail_result = prepared.thumbnail_result
+    if thumbnail_result is None:
+        raise ValueError("cannot insert a reused builtin item")
+    thumbnail_cache_path = str(prepared.cache_path) if thumbnail_result.status == "ready" else ""
+    conn.execute(
+        """
+        INSERT INTO builtin_items (
+            game_dir_key, game_dir, category_no, item_id, item_domain,
+            map_no, map_state, is_outdoors, h_point_count,
+            h_point_list_status, mapinfo_source, name,
+            name_en, name_zh_cn, name_zh_tw, source_path, source_asset,
+            main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
+            thumbnail_cache_path, thumbnail_status, thumbnail_error,
+            resource_status, resource_error, source_signature,
+            parser_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(game_dir_key, category_no, item_id) DO UPDATE SET
+            game_dir = excluded.game_dir,
+            item_domain = excluded.item_domain,
+            map_no = excluded.map_no,
+            map_state = excluded.map_state,
+            is_outdoors = excluded.is_outdoors,
+            h_point_count = excluded.h_point_count,
+            h_point_list_status = excluded.h_point_list_status,
+            mapinfo_source = excluded.mapinfo_source,
+            name = excluded.name,
+            name_en = excluded.name_en,
+            name_zh_cn = excluded.name_zh_cn,
+            name_zh_tw = excluded.name_zh_tw,
+            source_path = excluded.source_path,
+            source_asset = excluded.source_asset,
+            main_manifest = excluded.main_manifest,
+            main_ab = excluded.main_ab,
+            main_data = excluded.main_data,
+            thumb_ab = excluded.thumb_ab,
+            thumb_tex = excluded.thumb_tex,
+            thumbnail_cache_path = excluded.thumbnail_cache_path,
+            thumbnail_status = excluded.thumbnail_status,
+            thumbnail_error = excluded.thumbnail_error,
+            resource_status = excluded.resource_status,
+            resource_error = excluded.resource_error,
+            source_signature = excluded.source_signature,
+            parser_version = excluded.parser_version,
+            updated_at = excluded.updated_at
+        """,
+        (
+            item.game_dir_key, item.game_dir, item.category_no, item.item_id,
+            item.item_domain, item.map_no, item.map_state, item.is_outdoors,
+            item.h_point_count, item.h_point_list_status, item.mapinfo_source,
+            item.name, item.name_en, item.name_zh_cn, item.name_zh_tw,
+            item.source_path, item.source_asset, item.main_manifest, item.main_ab,
+            item.main_data, item.thumb_ab, item.thumb_tex, thumbnail_cache_path,
+            thumbnail_result.status, thumbnail_result.error, prepared.resource_status,
+            prepared.resource_error, prepared.source_signature,
+            BUILTIN_LIST_PARSER_VERSION, prepared.previous_created_at or now, now,
+        ),
+    )
 
 
 def _thumbnail_cache_path(thumbnail_dir: Path, item: BuiltinItem) -> Path:
@@ -480,11 +655,10 @@ def _extract_builtin_thumbnail(
         if source_path is None or not source_path.is_file():
             errors.append(f"thumbnail source not found: {reference}")
             continue
-        bundle = bundle_cache.load(source_path)
-        if isinstance(bundle, ThumbnailResult):
-            errors.append(bundle.error)
+        result = bundle_cache.write_thumbnail(source_path, item.thumb_tex, output_path)
+        if result.status == "error":
+            errors.append(result.error)
             continue
-        result = bundle.write_thumbnail(item.thumb_tex, output_path)
         if result.status == "ready":
             return result
         errors.append(result.error or "thumbnail asset not found")
@@ -539,6 +713,7 @@ def build_builtin_items_index(
     thumbnail_dir: Path,
     progress_callback: Callable[[int, str], None] | None = None,
     mode: str = "incremental",
+    worker_count: int | str | None = None,
 ) -> dict[str, object]:
     """Scan original ChaListData and H-point map bundles into builtin_items."""
 
@@ -547,6 +722,7 @@ def build_builtin_items_index(
     thumbnail_dir = thumbnail_dir.resolve()
     game_dir_key = normalize_game_dir_key(game_dir)
     force_full = str(mode or "incremental").casefold() == "full"
+    actual_worker_count = _builtin_worker_count(worker_count)
     cached_index_ready = (
         get_database_metadata(conn, "builtin_index_ready") == "1"
         and get_database_metadata(conn, "builtin_index_game_dir_key") == game_dir_key
@@ -582,6 +758,7 @@ def build_builtin_items_index(
             "builtin_duplicate_items": 0,
             "builtin_scan_complete": True,
             "builtin_scan_skipped": True,
+            "builtin_worker_count": actual_worker_count,
             "builtin_errors": [],
         }
     list_root = (game_dir / BUILTIN_LIST_ROOT).resolve()
@@ -609,6 +786,7 @@ def build_builtin_items_index(
         "builtin_parse_errors": 0,
         "builtin_duplicate_items": 0,
         "builtin_scan_complete": True,
+        "builtin_worker_count": actual_worker_count,
         "builtin_errors": [],
     }
     if not list_paths and not mapinfo_paths:
@@ -631,251 +809,134 @@ def build_builtin_items_index(
 
     seen: set[tuple[str, str]] = set()
     thumbnail_cache = _BuiltinThumbnailBundleCache()
-    total = max(len(list_paths), 1)
     now = utc_now()
 
-    with conn:
-        for index, bundle_path in enumerate(list_paths, start=1):
-            if progress_callback is not None:
-                progress_callback(
-                    1 + round(index / total * 3, 1),
-                    f"Reading original resource lists {index}/{total}",
-                )
-            try:
-                items = _read_bundle_items_cached(game_dir, bundle_path)
-            except Exception as exc:  # noqa: BLE001 - retain usable bundles.
-                stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
-                stats["builtin_scan_complete"] = False
-                errors = stats["builtin_errors"]
-                if isinstance(errors, list) and len(errors) < 20:
-                    errors.append(f"{bundle_path.name}: {exc}")
-                continue
+    def read_list(path: Path) -> list[BuiltinItem]:
+        return _read_bundle_items_cached(game_dir, path)
 
-            for item in items:
-                key = (item.category_no, item.item_id)
-                if key in seen:
-                    stats["builtin_duplicate_items"] = int(stats["builtin_duplicate_items"]) + 1
-                    continue
-                seen.add(key)
-                source_signature = _builtin_source_signature(game_dir, item, bundle_path)
-                previous = existing.get(key)
-                previous_cache = str(previous["thumbnail_cache_path"] or "") if previous else ""
-                previous_status = str(previous["thumbnail_status"] or "") if previous else ""
-                previous_signature = str(previous["source_signature"] or "") if previous else ""
-                cache_path = Path(previous_cache) if previous_cache else _thumbnail_cache_path(thumbnail_dir, item)
-                thumbnail_result: ThumbnailResult
-                can_reuse = (
-                    not force_full
-                    and previous_signature == source_signature
-                    and previous_status in {"ready", "ok"}
-                    and cache_path.is_file()
-                )
-                if can_reuse:
-                    stats["builtin_items"] = int(stats["builtin_items"]) + 1
-                    stats["builtin_reused_items"] = int(stats["builtin_reused_items"]) + 1
-                    stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
-                    seen.add(key)
-                    continue
-                else:
-                    thumbnail_result = _extract_builtin_thumbnail(
-                        game_dir,
-                        item,
-                        cache_path,
-                        thumbnail_cache,
+    def read_map(path: Path) -> list[BuiltinItem]:
+        return _read_mapinfo_items(game_dir, path)
+
+    def read_paths(
+        paths: list[Path],
+        reader: Callable[[Path], list[BuiltinItem]],
+        progress_start: float,
+        progress_label: str,
+    ) -> dict[Path, list[BuiltinItem] | Exception]:
+        results: dict[Path, list[BuiltinItem] | Exception] = {}
+        if actual_worker_count > 1 and len(paths) > 1:
+            with ThreadPoolExecutor(max_workers=actual_worker_count) as executor:
+                futures = {executor.submit(reader, path): path for path in paths}
+                for index, future in enumerate(as_completed(futures), start=1):
+                    path = futures[future]
+                    try:
+                        results[path] = future.result()
+                    except Exception as exc:  # noqa: BLE001 - retain usable bundles.
+                        results[path] = exc
+                    if progress_callback is not None:
+                        progress_callback(
+                            progress_start + round(index / max(len(paths), 1) * 3, 1),
+                            f"{progress_label} {index}/{len(paths)}",
+                        )
+        else:
+            for index, path in enumerate(paths, start=1):
+                try:
+                    results[path] = reader(path)
+                except Exception as exc:  # noqa: BLE001 - retain usable bundles.
+                    results[path] = exc
+                if progress_callback is not None:
+                    progress_callback(
+                        progress_start + round(index / max(len(paths), 1) * 3, 1),
+                        f"{progress_label} {index}/{len(paths)}",
                     )
-                if thumbnail_result.status == "ready":
-                    stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
-                    thumbnail_cache_path = str(cache_path)
-                else:
-                    stats["builtin_thumbnail_missing"] = int(stats["builtin_thumbnail_missing"]) + 1
-                    thumbnail_cache_path = ""
-                resource_status, resource_error = _resource_status(game_dir, item)
-                conn.execute(
-                    """
-                    INSERT INTO builtin_items (
-                        game_dir_key, game_dir, category_no, item_id, item_domain,
-                        map_no, map_state, is_outdoors, h_point_count,
-                        h_point_list_status, mapinfo_source, name,
-                        name_en, name_zh_cn, name_zh_tw, source_path, source_asset,
-                        main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
-                        thumbnail_cache_path, thumbnail_status, thumbnail_error,
-                        resource_status, resource_error, source_signature,
-                        parser_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(game_dir_key, category_no, item_id) DO UPDATE SET
-                        game_dir = excluded.game_dir,
-                        item_domain = excluded.item_domain,
-                        map_no = excluded.map_no,
-                        map_state = excluded.map_state,
-                        is_outdoors = excluded.is_outdoors,
-                        h_point_count = excluded.h_point_count,
-                        h_point_list_status = excluded.h_point_list_status,
-                        mapinfo_source = excluded.mapinfo_source,
-                        name = excluded.name,
-                        name_en = excluded.name_en,
-                        name_zh_cn = excluded.name_zh_cn,
-                        name_zh_tw = excluded.name_zh_tw,
-                        source_path = excluded.source_path,
-                        source_asset = excluded.source_asset,
-                        main_manifest = excluded.main_manifest,
-                        main_ab = excluded.main_ab,
-                        main_data = excluded.main_data,
-                        thumb_ab = excluded.thumb_ab,
-                        thumb_tex = excluded.thumb_tex,
-                        thumbnail_cache_path = excluded.thumbnail_cache_path,
-                        thumbnail_status = excluded.thumbnail_status,
-                        thumbnail_error = excluded.thumbnail_error,
-                        resource_status = excluded.resource_status,
-                        resource_error = excluded.resource_error,
-                        source_signature = excluded.source_signature,
-                        parser_version = excluded.parser_version,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        item.game_dir_key,
-                        item.game_dir,
-                        item.category_no,
-                        item.item_id,
-                        item.item_domain,
-                        item.map_no,
-                        item.map_state,
-                        item.is_outdoors,
-                        item.h_point_count,
-                        item.h_point_list_status,
-                        item.mapinfo_source,
-                        item.name,
-                        item.name_en,
-                        item.name_zh_cn,
-                        item.name_zh_tw,
-                        item.source_path,
-                        item.source_asset,
-                        item.main_manifest,
-                        item.main_ab,
-                        item.main_data,
-                        item.thumb_ab,
-                        item.thumb_tex,
-                        thumbnail_cache_path,
-                        thumbnail_result.status,
-                        thumbnail_result.error,
-                        resource_status,
-                        resource_error,
-                        source_signature,
-                        BUILTIN_LIST_PARSER_VERSION,
-                        str(previous["created_at"] or now) if previous else now,
-                        now,
-                    ),
-                )
-                stats["builtin_items"] = int(stats["builtin_items"]) + 1
+        return results
 
-        # MapInfo bundles contain one record per selectable map.  Later bundles
-        # override earlier records with the same No, matching the game's
-        # information-table loading order (30 -> 34 -> 50).
-        map_items: dict[tuple[str, str], tuple[BuiltinItem, Path]] = {}
-        for index, bundle_path in enumerate(mapinfo_paths, start=1):
-            if progress_callback is not None:
-                progress_callback(
-                    4 + round(index / max(len(mapinfo_paths), 1), 1),
-                    f"Reading original map index {index}/{len(mapinfo_paths)}",
-                )
-            try:
-                items = _read_mapinfo_items(game_dir, bundle_path)
-            except Exception as exc:  # noqa: BLE001 - retain other resource lists.
-                stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
-                stats["builtin_scan_complete"] = False
-                errors = stats["builtin_errors"]
-                if isinstance(errors, list) and len(errors) < 20:
-                    errors.append(f"{bundle_path.name}: {exc}")
+    list_results = read_paths(list_paths, read_list, 1, "Reading original resource lists")
+    list_item_jobs: list[tuple[BuiltinItem, Path]] = []
+    for bundle_path in list_paths:
+        result = list_results[bundle_path]
+        if isinstance(result, Exception):
+            stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
+            stats["builtin_scan_complete"] = False
+            errors = stats["builtin_errors"]
+            if isinstance(errors, list) and len(errors) < 20:
+                errors.append(f"{bundle_path.name}: {result}")
+            continue
+        for item in result:
+            key = (item.category_no, item.item_id)
+            if key in seen:
+                stats["builtin_duplicate_items"] = int(stats["builtin_duplicate_items"]) + 1
                 continue
-            for item in items:
-                key = (item.category_no, item.item_id)
-                if key in map_items:
-                    stats["builtin_duplicate_items"] = int(stats["builtin_duplicate_items"]) + 1
-                map_items[key] = (item, bundle_path)
-
-        for key in sorted(map_items):
-            item, bundle_path = map_items[key]
             seen.add(key)
-            source_signature = _builtin_source_signature(game_dir, item, bundle_path)
-            previous = existing.get(key)
-            previous_cache = str(previous["thumbnail_cache_path"] or "") if previous else ""
-            previous_status = str(previous["thumbnail_status"] or "") if previous else ""
-            previous_signature = str(previous["source_signature"] or "") if previous else ""
-            cache_path = Path(previous_cache) if previous_cache else _thumbnail_cache_path(thumbnail_dir, item)
-            can_reuse = (
-                not force_full
-                and previous_signature == source_signature
-                and previous_status in {"ready", "ok"}
-                and cache_path.is_file()
+            list_item_jobs.append((item, bundle_path))
+
+    map_results = read_paths(mapinfo_paths, read_map, 4, "Reading original map index")
+    map_items: dict[tuple[str, str], tuple[BuiltinItem, Path]] = {}
+    for bundle_path in mapinfo_paths:
+        result = map_results[bundle_path]
+        if isinstance(result, Exception):
+            stats["builtin_parse_errors"] = int(stats["builtin_parse_errors"]) + 1
+            stats["builtin_scan_complete"] = False
+            errors = stats["builtin_errors"]
+            if isinstance(errors, list) and len(errors) < 20:
+                errors.append(f"{bundle_path.name}: {result}")
+            continue
+        for item in result:
+            key = (item.category_no, item.item_id)
+            if key in map_items:
+                stats["builtin_duplicate_items"] = int(stats["builtin_duplicate_items"]) + 1
+            map_items[key] = (item, bundle_path)
+    map_item_jobs = [map_items[key] for key in sorted(map_items)]
+    for item, _bundle_path in map_item_jobs:
+        seen.add((item.category_no, item.item_id))
+
+    all_item_jobs = list_item_jobs + map_item_jobs
+    previous_rows: dict[tuple[str, str], dict[str, str]] = {}
+    for key, row in existing.items():
+        previous_rows[key] = {
+            column: str(row[column] or "")
+            for column in (
+                "thumbnail_cache_path", "thumbnail_status", "source_signature",
+                "resource_status", "resource_error", "created_at",
             )
-            if can_reuse:
-                stats["builtin_items"] = int(stats["builtin_items"]) + 1
+        }
+
+    prepared: list[_PreparedBuiltinItem] = []
+
+    def prepare_job(job: tuple[BuiltinItem, Path]) -> _PreparedBuiltinItem:
+        item, bundle_path = job
+        return _prepare_builtin_item(
+            game_dir,
+            thumbnail_dir,
+            item,
+            bundle_path,
+            previous_rows.get((item.category_no, item.item_id), {}),
+            force_full,
+            thumbnail_cache,
+        )
+
+    if actual_worker_count > 1 and len(all_item_jobs) > 1:
+        with ThreadPoolExecutor(max_workers=actual_worker_count) as executor:
+            futures = [executor.submit(prepare_job, job) for job in all_item_jobs]
+            prepared = [future.result() for future in futures]
+    else:
+        prepared = [prepare_job(job) for job in all_item_jobs]
+
+    with conn:
+        for result in prepared:
+            is_map = result.item.item_domain == "map"
+            stats["builtin_items"] = int(stats["builtin_items"]) + 1
+            if is_map:
                 stats["builtin_maps"] = int(stats["builtin_maps"]) + 1
+            if result.reused:
                 stats["builtin_reused_items"] = int(stats["builtin_reused_items"]) + 1
                 stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
                 continue
-            thumbnail_result = _extract_builtin_thumbnail(game_dir, item, cache_path, thumbnail_cache)
-            if thumbnail_result.status == "ready":
+            if result.thumbnail_result is not None and result.thumbnail_result.status == "ready":
                 stats["builtin_thumbnail_ready"] = int(stats["builtin_thumbnail_ready"]) + 1
-                thumbnail_cache_path = str(cache_path)
             else:
                 stats["builtin_thumbnail_missing"] = int(stats["builtin_thumbnail_missing"]) + 1
-                thumbnail_cache_path = ""
-            resource_status, resource_error = _resource_status(game_dir, item)
-            conn.execute(
-                """
-                INSERT INTO builtin_items (
-                    game_dir_key, game_dir, category_no, item_id, item_domain,
-                    map_no, map_state, is_outdoors, h_point_count,
-                    h_point_list_status, mapinfo_source, name,
-                    name_en, name_zh_cn, name_zh_tw, source_path, source_asset,
-                    main_manifest, main_ab, main_data, thumb_ab, thumb_tex,
-                    thumbnail_cache_path, thumbnail_status, thumbnail_error,
-                    resource_status, resource_error, source_signature,
-                    parser_version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(game_dir_key, category_no, item_id) DO UPDATE SET
-                    game_dir = excluded.game_dir,
-                    item_domain = excluded.item_domain,
-                    map_no = excluded.map_no,
-                    map_state = excluded.map_state,
-                    is_outdoors = excluded.is_outdoors,
-                    h_point_count = excluded.h_point_count,
-                    h_point_list_status = excluded.h_point_list_status,
-                    mapinfo_source = excluded.mapinfo_source,
-                    name = excluded.name,
-                    name_en = excluded.name_en,
-                    name_zh_cn = excluded.name_zh_cn,
-                    name_zh_tw = excluded.name_zh_tw,
-                    source_path = excluded.source_path,
-                    source_asset = excluded.source_asset,
-                    main_manifest = excluded.main_manifest,
-                    main_ab = excluded.main_ab,
-                    main_data = excluded.main_data,
-                    thumb_ab = excluded.thumb_ab,
-                    thumb_tex = excluded.thumb_tex,
-                    thumbnail_cache_path = excluded.thumbnail_cache_path,
-                    thumbnail_status = excluded.thumbnail_status,
-                    thumbnail_error = excluded.thumbnail_error,
-                    resource_status = excluded.resource_status,
-                    resource_error = excluded.resource_error,
-                    source_signature = excluded.source_signature,
-                    parser_version = excluded.parser_version,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    item.game_dir_key, item.game_dir, item.category_no, item.item_id,
-                    item.item_domain, item.map_no, item.map_state, item.is_outdoors,
-                    item.h_point_count, item.h_point_list_status, item.mapinfo_source,
-                    item.name, item.name_en, item.name_zh_cn, item.name_zh_tw,
-                    item.source_path, item.source_asset, item.main_manifest, item.main_ab,
-                    item.main_data, item.thumb_ab, item.thumb_tex, thumbnail_cache_path,
-                    thumbnail_result.status, thumbnail_result.error, resource_status,
-                    resource_error, source_signature, BUILTIN_LIST_PARSER_VERSION,
-                    str(previous["created_at"] or now) if previous else now, now,
-                ),
-            )
-            stats["builtin_items"] = int(stats["builtin_items"]) + 1
-            stats["builtin_maps"] = int(stats["builtin_maps"]) + 1
+            _insert_builtin_item(conn, result, now)
 
         if bool(stats["builtin_scan_complete"]):
             current_rows = conn.execute(

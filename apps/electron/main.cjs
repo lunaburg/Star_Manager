@@ -3,12 +3,14 @@ const { execFile, spawn } = require("node:child_process");
 const { Worker } = require("node:worker_threads");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { Readable } = require("node:stream");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 const { terminateProcessTree } = require("./backend-process.cjs");
 const { fetchBackendRequest } = require("./backend-request.cjs");
+const { createWallpaperFileResponse } = require("./wallpaper-protocol.cjs");
+const { downloadRemoteCharacterCard, remoteCharacterFileName } = require("./remote-character-download.cjs");
 const {
   STANDARD_RESOLUTIONS,
   formatResolution,
@@ -48,6 +50,107 @@ const gameExecutables = {
 const GITHUB_REPOSITORY_URL = "https://github.com/lunaburg/Star_Manager";
 const DEFAULT_SB3UTILITY_EXECUTABLE_PATH = String(process.env.STAR_MANAGER_SB3UTILITY_EXE || "");
 const MAX_DATABASE_WORKERS = 8;
+
+function validateRemoteCharacterPageUrl(pageUrl) {
+  const parsed = new URL(String(pageUrl || "").trim());
+  const pagePath = parsed.pathname.replace(/\/$/, "");
+  const pageValues = parsed.searchParams.getAll("page");
+  if (
+    parsed.protocol !== "https:"
+    || parsed.hostname !== "db.bepis.moe"
+    || !["", "443"].includes(parsed.port)
+    || parsed.username
+    || parsed.password
+    || !["/aishoujo", "/aiscenes"].includes(pagePath)
+    || parsed.hash
+    || [...parsed.searchParams.keys()].some((key) => key !== "page")
+    || pageValues.length !== 1
+    || !/^[1-9]\d{0,5}$/.test(pageValues[0])
+  ) {
+    throw new Error("只支持 https://db.bepis.moe 的人物卡或场景卡列表页面");
+  }
+  return parsed.toString();
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function loadRemoteCharacterPage(pageUrl) {
+  const targetUrl = validateRemoteCharacterPageUrl(pageUrl);
+  const isScenePage = new URL(targetUrl).pathname.replace(/\/$/, "") === "/aiscenes";
+  const cardType = isScenePage ? "AISCENE" : "AI";
+  const detailPath = isScenePage ? "/aiscenes/view/" : "/aishoujo/view/";
+  const pageWindow = new BrowserWindow({
+    show: false,
+    width: 1280,
+    height: 900,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  pageWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  try {
+    const deadline = Date.now() + 30000;
+    let readyTimer;
+    const domReady = new Promise((resolve, reject) => {
+      pageWindow.webContents.once("dom-ready", resolve);
+      readyTimer = setTimeout(() => reject(new Error("远程卡片页面加载超时")), 30000);
+    });
+    try {
+      await Promise.race([domReady, pageWindow.loadURL(targetUrl)]);
+    } finally {
+      clearTimeout(readyTimer);
+    }
+    let cards = [];
+    while (Date.now() < deadline) {
+      const pageResult = await pageWindow.webContents.executeJavaScript(`(() => {
+        const expectedCardType = ${JSON.stringify(cardType)};
+        const detailPath = ${JSON.stringify(detailPath)};
+        const pageNumbers = Array.from(document.querySelectorAll('button, a'))
+          .map((element) => Number.parseInt(element.textContent.trim(), 10))
+          .filter((value) => Number.isInteger(value) && value > 0);
+        const pageCount = pageNumbers.length ? Math.max(...pageNumbers) : 1;
+        const cards = Array.from(document.querySelectorAll('[data-metadata]')).map((block) => {
+        let metadata = {};
+        try { metadata = JSON.parse(block.getAttribute('data-metadata') || '{}'); } catch {}
+        const cardData = metadata.cardData && typeof metadata.cardData === 'object' ? metadata.cardData : {};
+        const link = block.querySelector('a[href*="' + detailPath + '"]');
+        const image = block.querySelector('img[src*="/card/thumb/"]');
+        if (!link || !image || metadata.cardType !== expectedCardType || !Number.isSafeInteger(metadata.id) || metadata.id <= 0) return null;
+        return {
+          id: metadata.id,
+          name: String((expectedCardType === 'AISCENE' ? metadata.customName : cardData.name) || image.alt || ('卡片 ' + metadata.id)),
+          card_type: expectedCardType,
+          gender: String(cardData.gender || ''),
+          personality: cardData.personality,
+          male_count: cardData.maleCount,
+          female_count: cardData.femaleCount,
+          object_count: cardData.objectCount,
+          file_size: metadata.fileSize,
+          download_count: metadata.downloadCount,
+          votes: metadata.votes,
+          tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+          uploader: String(metadata.uploaderName || metadata.cardAuthor || metadata.uploader?.displayName || metadata.uploader?.username || metadata.uploader?.name || 'Anonymous'),
+          date_created_utc: String(metadata.dateCreatedUtc || ''),
+          detail_url: new URL(link.href, location.href).href,
+          thumbnail_url: new URL(image.src, location.href).href,
+          cover_url: new URL(image.src, location.href).href
+        };
+        }).filter(Boolean);
+        return { pageCount, cards };
+      })()`);
+      cards = pageResult?.cards || [];
+      if (cards.length) return { ok: true, source_url: targetUrl, cards, page_count: pageResult.pageCount || 1, cached: false, browser_rendered: true };
+      await sleep(100);
+    }
+    throw new Error("页面中没有识别到卡片缩略图");
+  } finally {
+    if (!pageWindow.isDestroyed()) pageWindow.destroy();
+  }
+}
 
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -271,7 +374,8 @@ function normalizeSettings(settings = {}) {
     wallpaperPath: String(settings.wallpaperPath || "").trim(),
     wallpaperType: ["image", "video"].includes(String(settings.wallpaperType || ""))
       ? String(settings.wallpaperType)
-      : ""
+      : "",
+    wallpaperAudioEnabled: settings.wallpaperAudioEnabled === true
   };
 }
 
@@ -383,7 +487,8 @@ function getStartupWallpaperSettings() {
     wallpaperPath: String(settings.wallpaperPath || "").trim(),
     wallpaperType: ["image", "video"].includes(String(settings.wallpaperType || ""))
       ? String(settings.wallpaperType)
-      : ""
+      : "",
+    wallpaperAudioEnabled: settings.wallpaperAudioEnabled === true
   };
 }
 
@@ -3228,6 +3333,48 @@ ipcMain.handle("backend:request", async (_event, route, options = {}) => {
   return fetchBackend(route, options);
 });
 
+ipcMain.handle("remote:characterPage", async (_event, pageUrl) => {
+  try {
+    return await loadRemoteCharacterPage(pageUrl);
+  } catch (error) {
+    return { ok: false, error: error.message || "远程卡片页面读取失败" };
+  }
+});
+
+ipcMain.handle("remote:downloadCharacterCard", async (event, payload = {}) => {
+  try {
+    const cardId = payload?.id;
+    const cardType = payload?.cardType || "AI";
+    const suggestedName = remoteCharacterFileName(cardId, payload?.name, cardType);
+    const gameDir = String(payload?.gameDir || "").trim();
+    const genderDirectory = {
+      female: "female",
+      male: "male"
+    }[String(payload?.gender || "").trim().toLowerCase()] || "";
+    const defaultDirectory = gameDir
+      ? cardType === "AISCENE"
+        ? path.join(path.resolve(gameDir), "UserData", "Studio", "scene", "remote")
+        : cardType === "AI" && genderDirectory
+          ? path.join(path.resolve(gameDir), "UserData", "chara", genderDirectory, "remote")
+          : ""
+      : "";
+    if (defaultDirectory) fs.mkdirSync(defaultDirectory, { recursive: true });
+    const options = {
+      title: cardType === "AISCENE" ? "下载网站场景卡" : "下载网站人物卡",
+      defaultPath: path.join(defaultDirectory || app.getPath("downloads"), suggestedName),
+      filters: [{ name: "PNG 人物卡", extensions: ["png"] }]
+    };
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const selection = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options);
+    if (selection.canceled || !selection.filePath) return { ok: true, canceled: true };
+    return await downloadRemoteCharacterCard(cardId, selection.filePath, (url, requestOptions) => electronNet.fetch(url, requestOptions), cardType);
+  } catch (error) {
+    return { ok: false, error: error?.message || "卡片下载失败" };
+  }
+});
+
 ipcMain.handle("workbench:createProject", async (_event, payload = {}) => createWorkbenchProject(payload));
 ipcMain.handle("workbench:deleteProject", async (_event, payload = {}) => deleteWorkbenchProject(payload));
 ipcMain.handle("sims4:deleteResultDirectory", async (_event, directoryPath) => deleteSims4ResultDirectory(directoryPath));
@@ -4055,7 +4202,7 @@ app.whenReady().then(async () => {
       const target = path.resolve(filePath);
       const stat = await fs.promises.stat(target);
       if (!stat.isFile()) return new Response("Wallpaper is not a file", { status: 404 });
-      return electronNet.fetch(pathToFileURL(target).toString());
+      return createWallpaperFileResponse(request, target, stat);
     } catch (error) {
       console.warn(`[wallpaper] failed to serve media: ${error.message}`);
       return new Response("Wallpaper not found", { status: 404 });

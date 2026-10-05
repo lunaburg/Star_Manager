@@ -13,12 +13,6 @@ const { ctx } = defineProps({
               <button type="button" class="primary" :disabled="!ctx.paths.gameDir || ctx.setup.loading || !ctx.setup.loaded" @click="ctx.launchExecutable('game')">开始游戏</button>
               <button type="button" :disabled="!ctx.paths.gameDir || ctx.setup.loading || !ctx.setup.loaded" @click="ctx.launchExecutable('studio')">开始工作室</button>
               <button type="button" :disabled="!ctx.paths.gameDir || ctx.setup.loading || !ctx.setup.loaded" @click="ctx.launchExecutable('vr')">开始 VR</button>
-              <span class="badge" :class="ctx.setup.loaded ? 'ok' : ctx.setup.error ? 'danger' : 'neutral'">
-                {{ ctx.setup.loading ? "正在读取 setup.xml" : ctx.setup.loaded ? (ctx.setup.exists ? "setup.xml 已读取" : "将创建 setup.xml") : "setup.xml 未读取" }}
-              </span>
-              <span class="badge" :class="ctx.setup.dirty ? 'warn' : 'neutral'">
-                {{ ctx.setup.dirty ? "有未保存修改" : "配置已同步" }}
-              </span>
               <button
                 type="button"
                 class="repository-button"

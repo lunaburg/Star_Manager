@@ -31,7 +31,7 @@ function removeFixture(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-test("bundled plugin installation copies only missing plugins atomically", () => {
+test("bundled plugin installation installs missing plugins and replaces mismatched versions", () => {
   const fixture = createPluginFixture();
   try {
     const first = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
@@ -49,8 +49,12 @@ test("bundled plugin installation copies only missing plugins atomically", () =>
     const second = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
     assert.equal(second.ok, true);
     assert.equal(second.installed_count, 0);
+    assert.equal(second.updated_count, 1);
     assert.equal(second.destination_dir, getPluginInstallDirectory(fixture.gameDir));
-    assert.equal(fs.readFileSync(target, "utf8"), "user-version");
+    assert.equal(fs.readFileSync(target, "utf8"), "plugin-0");
+    const third = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
+    assert.equal(third.updated_count, 0);
+    assert.equal(third.installed_count, 0);
   } finally {
     removeFixture(fixture.root);
   }
@@ -66,7 +70,9 @@ test("a disabled plugin counts as installed without being re-enabled", () => {
     const result = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
     assert.equal(result.ok, true);
     assert.equal(result.installed_count, 2);
+    assert.equal(result.updated_count, 1);
     assert.equal(fs.existsSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0].slice(0, -4)}.dl_`)), true);
+    assert.equal(fs.readFileSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0].slice(0, -4)}.dl_`), "utf8"), "plugin-0");
     assert.equal(fs.existsSync(path.join(pluginDir, REQUIRED_PLUGIN_FILE_NAMES[0])), false);
   } finally {
     removeFixture(fixture.root);
@@ -83,7 +89,9 @@ test("a legacy disabled plugin is still treated as installed", () => {
     const result = ensureBundledPlugins(fixture.gameDir, { sourceDirectory: fixture.sourceDir });
     assert.equal(result.ok, true);
     assert.equal(result.installed_count, 2);
+    assert.equal(result.updated_count, 1);
     assert.equal(fs.existsSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0]}.disabled`)), true);
+    assert.equal(fs.readFileSync(path.join(pluginDir, `${REQUIRED_PLUGIN_FILE_NAMES[0]}.disabled`), "utf8"), "plugin-0");
     assert.equal(fs.existsSync(path.join(pluginDir, REQUIRED_PLUGIN_FILE_NAMES[0])), false);
   } finally {
     removeFixture(fixture.root);

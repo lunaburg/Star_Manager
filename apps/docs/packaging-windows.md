@@ -78,23 +78,31 @@ cd apps
 npm run package:win
 ```
 
-This script runs three stages:
+This script runs four stages:
 
-1. `npm run build`
+1. `npm run stage:plugins`
+
+   Synchronizes newer Release outputs from
+   `tools/star-manager-*/bin/Release/net472/` into `tools/StarManager/`, the
+   directory consumed by Electron Builder. This is the step that prevents a
+   newly compiled `GameItemProbe` from being left out of the package. A lower
+   versioned build output never downgrades an existing bundled DLL.
+
+2. `npm run build`
 
    Builds the Vue renderer with Vite into `apps/dist`.
 
-2. `npm run build:backend`
+3. `npm run build:backend`
 
    Runs PyInstaller through `apps/scripts/python.cjs` and creates `apps/build/backend/star_manager_backend.exe`.
 
-3. `electron-builder --win dir --config.electronDist=node_modules/electron/dist`
+4. `electron-builder --win dir --config.electronDist=node_modules/electron/dist`
 
    Packages the Electron app as an unpacked Windows directory in `apps/release/win-unpacked`.
 
 The packaging configuration lives in the `build` field of `apps/package.json`. The packaged app includes:
 
-- `dist/**/*`
+- `dist/**/*`, including the Vite-bundled `dist/assets/wallpaper-default-<hash>.mp4` used as the default application wallpaper
 - `electron/**/*`
 - `build-resources/**/*`
 - no `node_modules` or Python backend source/vendor files
@@ -104,11 +112,23 @@ The packaging configuration lives in the `build` field of `apps/package.json`. T
 - `tools/StarManager/*.dll` as `resources/StarManager/*.dll` (the three manager companion plugins)
 
 The three bundled plugins are installed by the Electron main process into the selected
-game directory's `BepInEx/Plugins/StarManager/` folder. The package does not overwrite an existing
-same-name DLL; an existing `.dl_` or historical `.dll.disabled` file is also treated as installed so a user's
-disabled-plugin choice is preserved. The check runs when a game directory is selected and
-when the saved directory is restored at application startup. Missing `BepInEx` and
-`Plugins/StarManager` directories are created as needed.
+game directory's `BepInEx/Plugins/StarManager/` folder. Each check compares the bundled
+DLL's Windows assembly file version with the installed DLL. A mismatched version is
+replaced; when file-version metadata cannot be read, the SHA-256 file hash is used as
+the fallback comparison. The same comparison applies to disabled `.dl_` and historical
+`.dll.disabled` files, and replacement keeps the disabled filename so a user's disabled
+state is preserved. Symbolic-link targets are rejected. The check runs when a game
+directory is selected and when the saved directory is restored at application startup.
+Missing `BepInEx` and `Plugins/StarManager` directories are created as needed. The
+installation result reports separate counts for newly installed and updated plugins.
+
+The bundled release inputs currently report these file versions:
+
+| DLL | File version |
+| --- | --- |
+| `StarManager.CardMetadata.dll` | `1.4.2.0` |
+| `StarManager.CharacterCardReadProbe.dll` | `0.2.0.0` |
+| `StarManager.GameItemProbe.dll` | `0.9.5.0` |
 
 ## Verification
 

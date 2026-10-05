@@ -340,6 +340,16 @@ GET /api/command?id=<commandId>
 
 使用 `GET /api/command?id=...` 查询 `queued`、`executing`、`succeeded`、`failed` 或 `expired`。失败结果带有 `errorCode`，包括 `not_in_editor`、`not_in_hscene`、`invalid_target`、`invalid_target_sex`、`invalid_character_index`、`target_not_found`、`target_mismatch`、`invalid_category`、`item_not_found`、`ambiguous_mapping`、`invalid_accessory_slot`、`invalid_hair_slot`、`queue_full` 和 `execution_error`。
 
+## H 场景地图替换
+
+物品管理器地图条目的右键菜单提供“替换 H 场景地图”。该操作提交 `POST /api/apply` 的 `type: "map"` 命令，目标固定为 `hscene`，不需要角色索引。原版地图的 `mapNo` 对应 `Manager.BaseMap.Change` 使用的地图键；模组地图的 `Map_kPlug.csv` 或作者目录 `Map_*.csv` 第一列通常只是占位值 `0`，不能直接作为运行时地图键。后端会返回模组地图的 `mainAB/mainData`，探针再按 `MapInfo.Param.AssetBundleName/AssetName` 从 `Manager.BaseMap.infoTable` 解析 Sideloader 注册后的真实地图 ID，只有无法匹配时才回退到请求中的 `mapNo`。仅有 mapinfo 而没有地图注册 CSV 的旧条目会显示为 `game-map:*`，需要重建数据库后才能被识别为可替换的模组地图。
+
+探针在 Unity 主线程调用 `Manager.BaseMap.Change` 的现有重载，兼容当前 Map Selector Lite 使用的 `Change(int, Fade, bool)` 形态，并等待 `Manager.BaseMap.isMapLoading` 清零。加载完成后尝试重建 H 点列表并调用 `HSceneManager.HResourceTables.HPointInitData`，使新地图的 H 点位和场景控制器同步。地图加载沿用延迟命令队列，超时上限为 120 秒。资源路径比较会统一斜杠、大小写和 `abdata/` 前缀，并支持路径后缀匹配，以适配 zipmod 登记路径与运行时资源路径的差异。
+
+这条链路不修改地图文件、zipmod 或数据库，只改变正在运行的 H 场景；必须先进入 H 场景并确保游戏内地图注册表已准备完成。若 `Manager.BaseMap` 或地图键不存在，命令会以 `not_in_hscene`、`invalid_map` 或 `execution_error` 失败。
+
+编译验证（2026-10-05）：使用 `E:\game\HoneySelect 2 DX - TSYMQ` 中的游戏程序集和 BepInEx/Sideloader 引用执行 Release 构建。首次编译发现地图辅助方法被插入到 `Execute` 的服装分支内部，造成 C# 括号结构错误；将其移到同一类的独立方法区域后重新编译，结果为 0 警告、0 错误，产物为 `apps/tools/star-manager-game-item-probe/bin/Release/net472/StarManager.GameItemProbe.dll`。此验证只确认插件与当前游戏程序集兼容编译；H 场景中的实际地图切换仍需在游戏运行时检验。
+
 ## 构建和验证
 
 ```powershell

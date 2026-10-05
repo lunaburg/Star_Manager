@@ -33,7 +33,7 @@ Current app views:
 - Plugins: BepInEx plugin inventory, metadata, dependencies, process restrictions, diagnostics, and single-plugin enable/disable.
 - Workbench: standalone mod projects, CSV-backed items, Unity3D database-template selection, MainData preprocessing, project resource write-back, and a project-level modal for Sims 4 Package to LOD0 FBX/PNG conversion.
 - Logs: task progress and runtime messages.
-- Settings: manager startup behavior, automatic database-change checks, local achievements, export defaults, portable dependency-package preferences, favorite-card themes, and Blender path.
+- Settings: manager startup behavior, the bundled default MP4 wallpaper and custom wallpaper selection, automatic database-change checks, local achievements, export defaults, portable dependency-package preferences, favorite-card themes, and Blender path.
 
 The Start page reads and writes the game's UTF-16 `UserData/setup.xml` through Electron IPC. Saving creates a `.bak` backup, atomically replaces the XML, and synchronizes Unity display values in the Windows registry. Launching uses `IPA.exe <target.exe> --launch` when IPA is present and blocks when IPA and BepInEx are detected together.
 
@@ -70,6 +70,7 @@ npm run check:python
 npm run python:dev
 npm run dev
 npm run build
+npm run stage:plugins
 npm run build:card-plugin
 npm run electron
 npm run build:backend

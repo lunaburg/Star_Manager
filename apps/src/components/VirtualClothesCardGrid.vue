@@ -156,7 +156,6 @@ watch(
         role="listitem"
         @click="emit('card-click', entry.row)"
       >
-        <span v-if="isSelected(entry.row)" class="clothes-card-check">✓</span>
         <span class="portrait clothes-card-preview" :class="{ 'scene-card-preview': props.variant === 'scene' }">
           <LazyThumbnail
             :src="entry.row.thumbnailUrl"

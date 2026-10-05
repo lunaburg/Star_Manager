@@ -1974,13 +1974,28 @@ def assess_character_card_folder_changes(
         conn.row_factory = sqlite3.Row
         try:
             init_db(conn)
-            for row in conn.execute(
-                """
-                SELECT file_path, modified_at, metadata_file_size, metadata_modified_ns
-                FROM character_cards
-                WHERE parse_status != 'stale'
-                """
-            ):
+            folder_relative = normalize_relative(folder, root).strip("/")
+            if folder_relative:
+                relative_prefix = f"{folder_relative}/%"
+                file_prefix = f"{str(folder.resolve())}{os.sep}%"
+                indexed_rows = conn.execute(
+                    """
+                    SELECT file_path, modified_at, metadata_file_size, metadata_modified_ns
+                    FROM character_cards
+                    WHERE parse_status != 'stale'
+                      AND (relative_path LIKE ? OR file_path LIKE ?)
+                    """,
+                    (relative_prefix, file_prefix),
+                )
+            else:
+                indexed_rows = conn.execute(
+                    """
+                    SELECT file_path, modified_at, metadata_file_size, metadata_modified_ns
+                    FROM character_cards
+                    WHERE parse_status != 'stale'
+                    """
+                )
+            for row in indexed_rows:
                 indexed_path = Path(str(row["file_path"] or "")).resolve()
                 if indexed_path.parent != folder.resolve():
                     continue
@@ -1994,10 +2009,26 @@ def assess_character_card_folder_changes(
 
     added = len(set(current) - set(indexed))
     removed = len(set(indexed) - set(current))
+    added_paths = sorted(
+        (normalize_relative(Path(path), root) for path in set(current) - set(indexed)),
+        key=str.casefold,
+    )
+    removed_paths = sorted(
+        (normalize_relative(Path(path), root) for path in set(indexed) - set(current)),
+        key=str.casefold,
+    )
     modified = sum(
         1
         for path, signature in current.items()
         if path in indexed and indexed[path] != signature
+    )
+    modified_paths = sorted(
+        (
+            normalize_relative(Path(path), root)
+            for path, signature in current.items()
+            if path in indexed and indexed[path] != signature
+        ),
+        key=str.casefold,
     )
     changed_total = added + removed + modified
     return {
@@ -2012,6 +2043,9 @@ def assess_character_card_folder_changes(
         "modified": modified,
         "changed_total": changed_total,
         "changed": changed_total > 0,
+        "added_paths": added_paths,
+        "removed_paths": removed_paths,
+        "modified_paths": modified_paths,
     }
 
 
@@ -3202,7 +3236,7 @@ def dependency_item_payload(row: sqlite3.Row, category: str) -> dict:
 def load_indexed_character_card_counts(
     root: Path,
     db_path: Path = DEFAULT_DB_PATH,
-) -> tuple[dict[str, int], int] | None:
+) -> tuple[dict[str, int], int, set[str], int] | None:
     resolved_db_path = Path(db_path).resolve()
     if not resolved_db_path.is_file():
         return None
@@ -3228,20 +3262,12 @@ def load_indexed_character_card_counts(
     except sqlite3.Error:
         return None
 
+    expected_signatures: dict[str, list[tuple[str, int, int]]] = {}
     for row in rows:
         file_path = str(row["file_path"] or "").strip()
         file_key = file_path.casefold().replace("/", "\\").rstrip("\\")
         if not file_key.startswith(root_key.replace("/", "\\") + "\\"):
             continue
-        try:
-            stat = Path(file_path).stat()
-        except OSError:
-            return None
-        if (
-            int(row["metadata_file_size"] or 0) != int(stat.st_size)
-            or int(row["metadata_modified_ns"] or 0) != int(stat.st_mtime_ns)
-        ):
-            return None
         relative_path = normalize_relative_path(str(row["relative_path"] or ""))
         if not relative_path:
             continue
@@ -3250,8 +3276,68 @@ def load_indexed_character_card_counts(
             continue
         directory = relative_path.rsplit("/", 1)[0] if "/" in relative_path else ""
         counts[directory] = counts.get(directory, 0) + 1
+        expected_signatures.setdefault(directory, []).append(
+            (
+                relative_path.rsplit("/", 1)[-1].casefold(),
+                int(row["metadata_file_size"] or 0),
+                int(row["metadata_modified_ns"] or 0),
+            )
+        )
         total += 1
-    return counts, total
+    current_signatures = collect_card_directory_signatures(root)
+    changed_directories = {
+        directory
+        for directory in set(expected_signatures) | set(current_signatures)
+        if directory_signature(expected_signatures.get(directory, ()))
+        != current_signatures.get(directory, (0, ""))[1]
+    }
+    current_png_count = sum(file_count for file_count, _signature in current_signatures.values())
+    return counts, total, changed_directories, current_png_count
+
+
+def directory_signature(entries: object) -> str:
+    normalized = sorted(
+        (str(name).casefold(), int(size), int(modified_ns))
+        for name, size, modified_ns in entries
+    )
+    digest = hashlib.sha1()
+    for name, size, modified_ns in normalized:
+        digest.update(name.encode("utf-8", errors="surrogatepass"))
+        digest.update(b"\0")
+        digest.update(str(size).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(modified_ns).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def collect_card_directory_signatures(root: Path) -> dict[str, tuple[int, str]]:
+    signatures: dict[str, tuple[int, str]] = {}
+    pending = [root]
+    resolved_root = root.resolve()
+    while pending:
+        folder = pending.pop()
+        relative_path = normalize_relative(folder, resolved_root)
+        entries: list[tuple[str, int, int]] = []
+        try:
+            with os.scandir(folder) as iterator:
+                for entry in iterator:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            child = Path(entry.path)
+                            if not is_ignored_root_card_dir(child, resolved_root):
+                                pending.append(child)
+                            continue
+                        if not entry.name.casefold().endswith(".png"):
+                            continue
+                        stat = entry.stat(follow_symlinks=False)
+                        entries.append((entry.name, int(stat.st_size), int(stat.st_mtime_ns)))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+        signatures[relative_path] = (len(entries), directory_signature(entries))
+    return signatures
 
 
 def build_character_card_tree(game_dir: str, db_path: Path = DEFAULT_DB_PATH) -> dict:
@@ -3266,22 +3352,35 @@ def build_character_card_tree(game_dir: str, db_path: Path = DEFAULT_DB_PATH) ->
     index_duration_ms = round((perf_counter() - index_started_at) * 1000, 2)
     indexed_counts = indexed_counts_result[0] if indexed_counts_result is not None else None
     indexed_total = indexed_counts_result[1] if indexed_counts_result is not None else 0
+    marker_directories = indexed_counts_result[2] if indexed_counts_result is not None else None
+    current_png_count = indexed_counts_result[3] if indexed_counts_result is not None else 0
     scan_started_at = perf_counter()
     tree_stats = {
         "directory_count": 0,
         "png_candidate_count": 0,
         "ais_check_count": 0,
     }
-    node = build_tree_node(root, resolved_root, tree_stats, indexed_counts)
-    if indexed_counts is not None and tree_stats.get("png_candidate_count", 0) != indexed_total:
+    node = build_tree_node(
+        root,
+        resolved_root,
+        tree_stats,
+        indexed_counts,
+        marker_directories,
+    )
+    if (
+        indexed_counts is not None
+        and not marker_directories
+        and current_png_count != indexed_total
+    ):
         tree_stats = {
             "directory_count": 0,
             "png_candidate_count": 0,
             "ais_check_count": 0,
         }
         indexed_counts = None
+        marker_directories = None
         scan_started_at = perf_counter()
-        node = build_tree_node(root, resolved_root, tree_stats, indexed_counts)
+        node = build_tree_node(root, resolved_root, tree_stats, indexed_counts, marker_directories)
         scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
     scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
     count_started_at = perf_counter()
@@ -3299,8 +3398,13 @@ def build_character_card_tree(game_dir: str, db_path: Path = DEFAULT_DB_PATH) ->
             "count_ms": count_duration_ms,
             "total_ms": round((perf_counter() - started_at) * 1000, 2),
             **tree_stats,
-            "count_source": "indexed" if indexed_counts is not None else "png_marker",
+            "count_source": (
+                "png_marker"
+                if marker_directories
+                else "indexed" if indexed_counts is not None else "png_marker"
+            ),
             "indexed_card_count": indexed_total,
+            "marker_directory_count": len(marker_directories or ()),
         },
     }
 
@@ -3310,6 +3414,7 @@ def build_tree_node(
     root: Path,
     tree_stats: dict[str, int] | None = None,
     indexed_counts: dict[str, int] | None = None,
+    marker_directories: set[str] | None = None,
 ) -> dict:
     if tree_stats is not None:
         tree_stats["directory_count"] = tree_stats.get("directory_count", 0) + 1
@@ -3319,7 +3424,13 @@ def build_tree_node(
     except OSError:
         entries = []
     children = [
-        build_tree_node(Path(child.path), root, tree_stats, indexed_counts)
+        build_tree_node(
+            Path(child.path),
+            root,
+            tree_stats,
+            indexed_counts,
+            marker_directories,
+        )
         for child in entries
         if child.is_dir(follow_symlinks=False)
         and not is_ignored_root_card_dir(Path(child.path), root)
@@ -3329,7 +3440,13 @@ def build_tree_node(
         "id": relative_path or ".",
         "name": "人物卡" if folder.resolve() == root.resolve() else folder.name,
         "relative_path": relative_path,
-        "count": count_direct_cards(entries, tree_stats, relative_path, indexed_counts),
+        "count": count_direct_cards(
+            entries,
+            tree_stats,
+            relative_path,
+            indexed_counts,
+            marker_directories,
+        ),
         "children": children,
         "has_children": bool(children),
     }
@@ -3340,6 +3457,7 @@ def count_direct_cards(
     tree_stats: dict[str, int] | None = None,
     relative_path: str = "",
     indexed_counts: dict[str, int] | None = None,
+    marker_directories: set[str] | None = None,
 ) -> int:
     count = 0
     for file_path in entries:
@@ -3353,13 +3471,17 @@ def count_direct_cards(
             continue
         if tree_stats is not None:
             tree_stats["png_candidate_count"] = tree_stats.get("png_candidate_count", 0) + 1
-        if indexed_counts is not None:
+        if indexed_counts is not None and (
+            marker_directories is None or relative_path not in marker_directories
+        ):
             continue
         if tree_stats is not None:
             tree_stats["ais_check_count"] = tree_stats.get("ais_check_count", 0) + 1
         if is_ais_card(str(getattr(file_path, "path", file_path))):
             count += 1
-    if indexed_counts is not None:
+    if indexed_counts is not None and (
+        marker_directories is None or relative_path not in marker_directories
+    ):
         return int(indexed_counts.get(relative_path, 0))
     return count
 

@@ -363,7 +363,6 @@ onBeforeUnmount(() => {
     <section class="texture-dialog" role="dialog" aria-modal="true" aria-labelledby="texture-processor-title">
       <header class="texture-dialog-header">
         <div>
-          <span class="texture-kicker">ITEM TOOL / TEXTURE LAB</span>
           <h2 id="texture-processor-title">贴图净化与方形裁剪</h2>
           <p>为 SB3Utility 准备标准 PNG：选择 1:1 区域、输出尺寸，并可将有色底材还原为白色纯纹理。</p>
         </div>
@@ -371,10 +370,6 @@ onBeforeUnmount(() => {
       </header>
 
       <div v-if="!sourceImage" class="texture-empty">
-        <div class="texture-empty-mark" aria-hidden="true">
-          <svg viewBox="0 0 64 64"><path d="M8 12h48v40H8zM8 40l13-13 11 10 8-8 16 15M44 22h.01" /></svg>
-        </div>
-        <span>INPUT / JPG · PNG · WEBP</span>
         <h3>选择一张原始贴图</h3>
         <p>原文件不会被修改；完成后会通过保存窗口生成新的 PNG。</p>
         <button class="texture-primary" type="button" :disabled="selecting" @click="selectSourceImage">
@@ -485,15 +480,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .texture-dialog-backdrop { position: fixed; inset: 0; z-index: 88; display: grid; place-items: center; padding: 20px; background: rgb(25 31 31 / 66%); backdrop-filter: blur(7px); }
 .texture-dialog { width: min(1080px, calc(100vw - 28px)); max-height: calc(100vh - 34px); overflow: auto; border: 2px solid #294e55; border-radius: 12px; background: #f7f3ec; box-shadow: 0 30px 90px rgb(9 26 29 / 40%); }
-.texture-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 20px 22px 17px; border-bottom: 1px solid #b7cbc9; background: linear-gradient(105deg, #eff8f6 0 64%, #f5e8d7 64% 100%); }
-.texture-kicker { color: #347b7b; font-family: var(--mono); font-size: 10px; font-weight: 900; letter-spacing: .14em; }
+.texture-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 20px 22px 17px; border-bottom: 1px solid #b7cbc9; background: #eef7fc; }
 .texture-dialog-header h2 { margin: 5px 0 5px; color: #253d42; font-size: 25px; letter-spacing: -.035em; }
 .texture-dialog-header p { max-width: 720px; margin: 0; color: #607579; font-size: 12px; line-height: 1.6; }
 .texture-close { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; padding: 0; border: 1px solid #8ea9aa; border-radius: 50%; background: rgb(255 255 255 / 76%); color: #416b6e; box-shadow: none; font-size: 23px; line-height: 1; }
-.texture-empty { display: grid; min-height: 430px; place-items: center; align-content: center; gap: 7px; padding: 36px; text-align: center; background: radial-gradient(circle at 50% 46%, rgb(117 170 174 / 14%), transparent 28%), repeating-linear-gradient(0deg, transparent 0 31px, rgb(46 93 99 / 5%) 31px 32px), #fbf9f4; }
-.texture-empty-mark { display: grid; width: 86px; height: 86px; place-items: center; margin-bottom: 8px; border: 1px solid #83aeb0; border-radius: 50%; color: #397b7e; background: #eef8f6; box-shadow: 5px 6px 0 #d9c7b0; }
-.texture-empty-mark svg { width: 46px; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.texture-empty > span { color: #7d9799; font-family: var(--mono); font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.texture-empty { display: grid; min-height: 430px; place-items: center; align-content: center; gap: 7px; padding: 36px; text-align: center; background: #eef7fc; }
 .texture-empty h3 { margin: 2px 0; color: #294e55; font-size: 20px; }
 .texture-empty p { margin: 0 0 12px; color: #728387; font-size: 11px; }
 .texture-primary { border-color: #265f65; background: #347b7b; color: #fff; box-shadow: 3px 3px 0 #253d42; }

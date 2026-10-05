@@ -618,6 +618,7 @@ def prepare_mod_items(
                         status_zip_index,
                         bundle_cache,
                         source_cache,
+                        provider_index,
                     )
                 )
                 if status_zip is None:
@@ -909,6 +910,7 @@ def build_database(
             }
         )
         force_full = str(mode or "incremental").lower() == "full"
+        actual_worker_count = choose_build_worker_count(worker_count)
         report(1, "Scanning original game resource lists")
         builtin_started_at = perf_counter()
         builtin_stats = build_builtin_items_index(
@@ -917,6 +919,7 @@ def build_database(
             thumbnail_dir,
             progress_callback=report,
             mode=mode,
+            worker_count=actual_worker_count,
         )
         phase_timings["builtin_resource_index_ms"] = round(
             (perf_counter() - builtin_started_at) * 1000,
@@ -954,7 +957,6 @@ def build_database(
                     f"Read manifests {current}/{total} zipmod files",
                 )
 
-        actual_worker_count = choose_build_worker_count(worker_count)
         candidates, changed_paths, reuse_stats = build_candidates_from_file_stats(
             conn,
             game_dir,
@@ -998,7 +1000,7 @@ def build_database(
         if provider_index_changed and changed_resource_keys:
             for row in conn.execute(
                 """
-                SELECT DISTINCT zipmod_guid, main_manifest, main_ab, tex_ab
+                SELECT DISTINCT zipmod_guid, main_manifest, main_ab, tex_ab, thumb_ab
                 FROM mod_items
                 WHERE parse_status = 'ok'
                 """
@@ -1006,6 +1008,7 @@ def build_database(
                 references = {
                     normalize_abdata_path(str(row["main_manifest"] or ""), str(row["main_ab"] or "")),
                     normalize_abdata_path("abdata", str(row["tex_ab"] or "")),
+                    normalize_abdata_path("abdata", str(row["thumb_ab"] or "")),
                 }
                 lookup_keys = {
                     key
@@ -1326,15 +1329,14 @@ def index_single_zipmod(
                 else f"Creating GUID record: {candidate.manifest.guid}"
             ),
         )
-        # The single-mod task intentionally does not scan other zipmods or refresh
-        # the archive-level provider index. Those operations belong to the full
-        # database rebuild; this task only needs the target archive and the
-        # existing GUID row in SQLite.
+        # The single-mod task does not refresh the archive-level provider index,
+        # but it can reuse the existing index so CSV-only patch zipmods can still
+        # resolve thumbnails from their installed provider archives.
         prepared = prepare_mod_items_for_build(
             game_dir,
             candidate,
             thumbnail_dir,
-            None,
+            load_unity3d_provider_index(conn),
         )
         report(70, f"Prepared {prepared.ok_count} items from {zipmod_path.name}")
         with conn:

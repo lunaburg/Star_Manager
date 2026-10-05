@@ -18,10 +18,11 @@ function loadStartupWallpaper() {
       wallpaperPath: String(result?.wallpaperPath || "").trim(),
       wallpaperType: ["image", "video"].includes(String(result?.wallpaperType || ""))
         ? String(result.wallpaperType)
-        : ""
+        : "",
+      wallpaperAudioEnabled: result?.wallpaperAudioEnabled === true
     };
   } catch {
-    return { wallpaperPath: "", wallpaperType: "" };
+    return { wallpaperPath: "", wallpaperType: "", wallpaperAudioEnabled: false };
   }
 }
 
@@ -92,5 +93,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   loadSettings: () => ipcRenderer.invoke("settings:load"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   backendRequest: (route, options) => ipcRenderer.invoke("backend:request", route, options),
+  remoteCharacterPage: (pageUrl) => ipcRenderer.invoke("remote:characterPage", pageUrl),
+  downloadRemoteCharacterCard: (card) => ipcRenderer.invoke("remote:downloadCharacterCard", card),
   backendBaseUrl: process.env.STAR_MANAGER_BACKEND_BASE_URL || "http://127.0.0.1:8765"
 });

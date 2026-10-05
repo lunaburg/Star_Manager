@@ -14,11 +14,14 @@
 | --- | --- |
 | [模组数据库设计](mod_database_design.md) | SQLite 表、字段、关系、扫描流程、状态和查询边界 |
 | [模组数据库建库性能基准](mod_database_build_benchmark.md) | 现有数据库 100 个 zipmod 的建库耗时、ZIP 读取/解压与 Unity3D 缩略图阶段拆分和优化建议 |
+| [原版资源索引建库性能基准](builtin_resource_build_benchmark.md) | 实际 HS2 目录的 ChaListData、MapInfo/HPoint 和原版缩略图建库耗时、阶段拆分和优化建议 |
+| [单物品缩略图重建抽样基准](item_thumbnail_rebuild_benchmark.md) | 30 个数据库物品的原图导出与写回计时、归档重写/重扫拆分及优化建议 |
 | [游戏原版资源索引](builtin_resource_index.md) | `characustom/*.unity3d` 中的 ChaListData、MapInfo H 点地图、原版物品表、缩略图和服装卡匹配 |
 | [标准模组结构记录](standard_mod_structure_record.md) | `manifest.xml`、角色/Studio CSV（递归子目录、作者工具和日语原生表头兼容）、Unity3D 引用、缩略图来源和外部 `.zip` 归一化 |
 | [Hooh ammunition_go.zipmod 结构解析](hooh_ammunition_go_zipmod_analysis.md) | 一个标准 Studio 自定义物品模组样本的目录、ItemCategory/ItemList、AssetBundle 对象和当前扫描边界 |
 | [Studio 女性姿势转换](pose_zipmod_conversion.md) | Studio `.dat` 姿势到 `Kind=501` zipmod 的 CSV、Animator/AnimationClip、骨骼映射和验证边界 |
 | [KK Animations ForMaker 注册补全](kk_animations_formaker_completion.md) | 完整 KK Animations 动画包与 ForMaker 姿势列表补丁的结构关系和全量注册结果 |
+| [`[cth]kaidongsiwa` AABB 修复](cth_kaidongsiwa_aabb_repair.md) | 服饰 Unity3D `SkinnedMeshRenderer` 包围盒异常、旁置修复和静态验证结果 |
 
 ### 2. 再了解变更和异常
 

@@ -113,6 +113,7 @@ class CardLibraryListingTests(unittest.TestCase):
 
             self.assertEqual(result["timings"]["count_source"], "png_marker")
             self.assertGreater(marker_check.call_count, 0)
+            self.assertEqual(result["timings"]["ais_check_count"], 1)
             self.assertEqual(result["total"], 1)
 
     def test_assesses_direct_folder_changes_using_file_signatures(self):
@@ -158,6 +159,9 @@ class CardLibraryListingTests(unittest.TestCase):
             self.assertEqual(result["added"], 1)
             self.assertEqual(result["removed"], 0)
             self.assertEqual(result["modified"], 0)
+            self.assertEqual(result["added_paths"], ["female/second.png"])
+            self.assertEqual(result["removed_paths"], [])
+            self.assertEqual(result["modified_paths"], [])
 
             second_stat = second.stat()
             conn = sqlite3.connect(db_path)
@@ -190,6 +194,9 @@ class CardLibraryListingTests(unittest.TestCase):
             self.assertEqual(result["added"], 0)
             self.assertEqual(result["removed"], 1)
             self.assertEqual(result["modified"], 1)
+            self.assertEqual(result["added_paths"], [])
+            self.assertEqual(result["removed_paths"], ["female/second.png"])
+            self.assertEqual(result["modified_paths"], ["female/first.png"])
 
     def test_uses_indexed_character_name_instead_of_file_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:

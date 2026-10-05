@@ -367,9 +367,10 @@ function modStatusTone(status) {
               @click="ctx.openBulkExportPrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 4v10" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="m8 8 4-4 4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
-                <path d="M5 14v5h14v-5" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
+                <path d="M5 10.5v8.25c0 .69.56 1.25 1.25 1.25h11.5c.69 0 1.25-.56 1.25-1.25V10.5" fill="none"></path>
+                <path d="M12 3.5v10" fill="none"></path>
+                <path d="m8.25 7.25 3.75-3.75 3.75 3.75" fill="none"></path>
+                <path d="M7.5 20h9" fill="none"></path>
               </svg>
             </button>
             <button
@@ -382,9 +383,9 @@ function modStatusTone(status) {
               @click="ctx.openBulkOrganizePrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M3 7h7l2 2h9v10H3z" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="M7 13h10" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M7 16h6" fill="none" stroke="currentColor" stroke-linecap="round"></path>
+                <path d="M3.5 6.5h6l1.75 2h9.25v10.75H3.5z" fill="none"></path>
+                <circle cx="16.5" cy="13" r="1.45" fill="none"></circle>
+                <path d="M14.3 17.35c.4-1.1 1.15-1.65 2.2-1.65s1.8.55 2.2 1.65" fill="none"></path>
               </svg>
             </button>
             <button
@@ -397,10 +398,9 @@ function modStatusTone(status) {
               @click="ctx.openBulkRepairUnity3dPrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M5 4h9l5 5v11H5z" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="M14 4v5h5" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="M12 17V9" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="m8.5 13.5 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M3.5 7v11a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5V9.5A1.5 1.5 0 0 0 19 8h-6.5l-2-2H5A1.5 1.5 0 0 0 3.5 7Z" fill="none"></path>
+                <path d="M8 14h8" fill="none"></path>
+                <path d="m13 11 3 3-3 3" fill="none"></path>
               </svg>
             </button>
             <button
@@ -413,12 +413,10 @@ function modStatusTone(status) {
               @click="ctx.openBulkDuplicateCleanupPrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M14 4 6 12" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="m12 2 4 4" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M5 13h8l2 7H3z" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="M7 13v7" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M11 13v7" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M4 20h12" fill="none" stroke="currentColor" stroke-linecap="round"></path>
+                <path d="M10.5 11V4.5a1.5 1.5 0 0 1 3 0V11" fill="none"></path>
+                <rect x="4" y="11" width="16" height="3" rx="1" fill="none"></rect>
+                <path d="M6 14v5.5A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V14" fill="none"></path>
+                <path d="M9 17v4m3-4v4m3-4v4" fill="none"></path>
               </svg>
             </button>
             <button
@@ -431,11 +429,10 @@ function modStatusTone(status) {
               @click="ctx.openBulkDeletePrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M3 6h18" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M8 6V4h8v2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
-                <path d="M6 6l1 15h10l1-15" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="M10 10v7" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="M14 10v7" fill="none" stroke="currentColor" stroke-linecap="round"></path>
+                <path d="M4 6.5h16" fill="none"></path>
+                <path d="M8.5 6.5V4.25h7V6.5" fill="none"></path>
+                <path d="m6.5 6.5.9 14h9.2l.9-14" fill="none"></path>
+                <path d="M10 10.5v6.5m4-6.5V17" fill="none"></path>
               </svg>
             </button>
             <button
@@ -448,16 +445,21 @@ function modStatusTone(status) {
               @click="ctx.openBulkAuthorPrompt"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="none" stroke="currentColor"></path>
-                <path d="M3 21v-2a5 5 0 0 1 5-5h2.5" fill="none" stroke="currentColor" stroke-linecap="round"></path>
-                <path d="m14 18 5.5-5.5 2 2L16 20h-2z" fill="none" stroke="currentColor" stroke-linejoin="round"></path>
-                <path d="m18.5 13.5 2 2" fill="none" stroke="currentColor" stroke-linecap="round"></path>
+                <circle cx="8" cy="7" r="3.5" fill="none"></circle>
+                <path d="M2.75 20.5v-1.75A4.75 4.75 0 0 1 7.5 14h1a4.75 4.75 0 0 1 3.55 1.6" fill="none"></path>
+                <path d="m13.75 18.25 5.5-5.5 2 2-5.5 5.5h-2z" fill="none"></path>
+                <path d="m18.25 13.75 2 2" fill="none"></path>
               </svg>
             </button>
           </div>
         </div>
 
-        <div ref="modTableWrap" class="table-wrap" @scroll="handleModTableScroll">
+        <div
+          ref="modTableWrap"
+          class="table-wrap"
+          :class="{ 'mod-list-scrollbar': ctx.libraryMode === 'mods' }"
+          @scroll="handleModTableScroll"
+        >
           <template v-if="ctx.libraryMode === 'items'">
             <div v-if="ctx.itemDatabase.loading && ctx.itemRows.length === 0" class="table-state">
               <strong>正在加载物品数据库</strong>
@@ -952,13 +954,13 @@ function modStatusTone(status) {
                       管理重复模组
                     </button>
                     <button
-                      v-if="issue.repair_action === 'copy_into_zipmod'"
+                      v-if="['copy_into_zipmod', 'copy_from_other_zipmod', 'move_from_other_zipmod'].includes(issue.repair_action)"
                       type="button"
                       class="diagnostic-action"
                       :disabled="ctx.repairingUnity3dPath === issue.path"
                       @click="ctx.repairUnity3dIssue(issue)"
                     >
-                      {{ ctx.repairingUnity3dPath === issue.path ? "正在剪切..." : "剪切补入 zipmod" }}
+                      {{ ctx.repairingUnity3dPath === issue.path ? "正在补入..." : issue.repair_action === 'copy_from_other_zipmod' ? "复制补入 zipmod" : "剪切补入 zipmod" }}
                     </button>
                   </article>
                 </div>
@@ -1015,7 +1017,7 @@ function modStatusTone(status) {
         <div class="item-context-heading">物品操作</div>
         <div class="item-context-name" :title="ctx.itemContextMenu.item?.name">{{ ctx.itemContextMenu.item?.name }}</div>
         <button
-          v-if="ctx.itemGameApplySpec(ctx.itemContextMenu.item).supported"
+          v-if="ctx.itemGameApplyVisible(ctx.itemContextMenu.item)"
           type="button"
           class="item-context-action primary-context-action"
           role="menuitem"
@@ -1151,6 +1153,24 @@ function modStatusTone(status) {
           <button type="button" :disabled="ctx.itemBodyPrompt.busy" @click="ctx.closeItemBodyPrompt">取消</button>
           <button class="primary" type="button" :disabled="ctx.itemBodyPrompt.busy || ctx.itemGameApply?.busy" @click="ctx.confirmItemBodyApply">
             {{ ctx.itemBodyPrompt.busy ? "正在换装…" : "应用到当前角色" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-if="ctx.itemMapPrompt?.open" class="prompt-backdrop" @click.self="ctx.closeItemMapPrompt">
+      <div class="prompt-panel game-item-slot-panel" role="dialog" aria-modal="true" aria-labelledby="game-item-map-title">
+        <strong id="game-item-map-title">替换 H 场景地图</strong>
+        <p>将当前地图加载到正在运行的 H 场景。这个操作只改变游戏当前场景，不会修改物品库或地图文件。</p>
+        <div class="game-item-target" :title="ctx.itemMapPrompt.item?.name">
+          <span>目标地图</span>
+          <strong>{{ ctx.itemMapPrompt.item?.name }}</strong>
+        </div>
+        <div class="game-item-boundary-note">请先进入 H 场景并保持游戏运行；地图加载和 H 点位刷新可能需要几秒钟。</div>
+        <div v-if="ctx.itemMapPrompt.error" class="prompt-error">{{ ctx.itemMapPrompt.error }}</div>
+        <div class="prompt-actions">
+          <button type="button" :disabled="ctx.itemMapPrompt.busy" @click="ctx.closeItemMapPrompt">取消</button>
+          <button class="primary" type="button" :disabled="ctx.itemMapPrompt.busy || ctx.itemGameApply?.busy" @click="ctx.confirmItemMapApply">
+            {{ ctx.itemMapPrompt.busy ? "正在替换…" : "替换当前地图" }}
           </button>
         </div>
       </div>

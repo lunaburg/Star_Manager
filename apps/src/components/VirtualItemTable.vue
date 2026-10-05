@@ -160,7 +160,6 @@ watch(
         <span class="item-table-virtual-cell" role="cell">{{ entry.row.author }}</span>
         <span class="item-table-virtual-cell" role="cell">
           <span class="item-source-cell">
-            <span v-if="entry.row.isBuiltin" class="badge builtin-source-badge">本体</span>
             <span class="text-ellipsis" :title="entry.row.sourceMod">{{ entry.row.sourceMod }}</span>
           </span>
         </span>

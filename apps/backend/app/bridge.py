@@ -224,6 +224,8 @@ SUPPORTED_API_ROUTES = {
     "/library/scene/image",
     "/library/scene/missing-mods",
     "/cards/database",
+    "/remote/character-page",
+    "/remote/character-page/image",
     "/plugins",
     "/plugins/status",
     "/plugins/toggle",
@@ -263,7 +265,7 @@ SUPPORTED_API_ROUTES = {
     "/tasks/<task_id>/control",
 }
 
-BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-weighted-database-progress-v1-pending-delete-v1"
+BACKEND_REVISION = "sims4-workbench-tpose-mesh-v2-unity3d-preprocess-v1-game-item-probe-v2-hair-slots-card-load-v1-map-replace-v1-unity3d-export-v1-trash-v2-card-single-delete-v1-scene-remote-completion-v1-weighted-database-progress-v1-pending-delete-v1"
 
 # The database task's top-bar progress is a weighted estimate of the phase
 # timings captured in the UI reference run. The mod database service reports
@@ -1446,6 +1448,11 @@ def run_task(task: TaskState, payload: dict) -> None:
                 report_card_database_progress,
                 mode=mode,
                 worker_count=payload.get("worker_count"),
+                known_card_changes=(
+                    payload.get("card_changes")
+                    if isinstance(payload.get("card_changes"), dict)
+                    else None
+                ),
             )
             task.data = {
                 "database_path": str(db_path.resolve()),
@@ -1818,26 +1825,31 @@ def run_task(task: TaskState, payload: dict) -> None:
             task.title = "Update selected zipmod authors"
             reporter.message(f"Updating author for {len(zipmod_ids)} zipmod(s)")
             updated: list[dict] = []
+            unchanged: list[dict] = []
             failures: list[dict] = []
             total = max(len(zipmod_ids), 1)
             for index, zipmod_id in enumerate(zipmod_ids, start=1):
                 result = update_zipmod_manifest_author(zipmod_id, author)
-                if result.get("ok"):
+                if result.get("no_op"):
+                    unchanged.append({"id": zipmod_id, **result})
+                elif result.get("ok"):
                     updated.append({"id": zipmod_id, **result})
                 else:
                     failures.append({"id": zipmod_id, "error": str(result.get("error") or "Author update failed")})
                 set_step_progress(task, index, total)
                 if should_report_step(index, total):
-                    reporter.message(f"Updated {index}/{total} zipmod authors")
+                    reporter.message(f"Processed {index}/{total} zipmod authors")
             task.data = {
-                "ok": len(updated) > 0 or len(failures) == 0,
+                "ok": len(updated) > 0 or len(unchanged) > 0 or len(failures) == 0,
                 "selected_count": len(zipmod_ids),
                 "updated_count": len(updated),
+                "unchanged_count": len(unchanged),
                 "failure_count": len(failures),
                 "updated": updated,
+                "unchanged": unchanged,
                 "failures": failures,
                 "author": author,
-                "message": f"Updated {len(updated)} zipmod author(s), failed {len(failures)}",
+                "message": f"Updated {len(updated)} zipmod author(s), unchanged {len(unchanged)}, failed {len(failures)}",
             }
             if not task.data["ok"]:
                 raise ValueError("Author update failed")

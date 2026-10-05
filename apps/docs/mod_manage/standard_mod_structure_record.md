@@ -29,7 +29,7 @@
     `-- <地图资源目录>/data_scene_000.unity3d
 ```
 
-`Map_kPlug.csv` 以 `MAPMOD` 作为标志行；每条有效注册记录依次包含地图槽位、内部名称、相对于 `abdata/` 的场景 `.unity3d` 路径、显示名称和根目录。数据库将其索引为只读的“地图 / 场景”条目，不把它误当作角色自定义 CSV。
+地图注册 CSV 通常是 `abdata/studio/info/kPlug/Map_kPlug.csv`，也可能是作者目录下的 `abdata/studio/info/<作者>/Map_<作者>.csv`。这类 CSV 以 `MAPMOD` 或数字占位行开头；每条有效注册记录依次包含地图槽位、地图标签、相对于 `abdata/` 的场景 `.unity3d` 路径、场景/关卡资源名和根目录。数据库将其索引为只读的“地图 / 场景”条目，不把它误当作角色自定义 CSV。第一列通常为占位值 `0`，运行时地图 ID 由游戏地图注册表重新分配，不能直接当作 `Manager.BaseMap.Change` 的参数。
 
 游戏本体地图还会提供 `abdata/map/list/mapinfo/*.unity3d`。该路径下存在地图信息包时，表示地图可进入本体地图列表；如果它与 `Map_kPlug.csv` 同时存在，则识别为“地图 / 本体 + 工作室”。只有 `Map_kPlug.csv` 时识别为“地图 / 工作室”，只有 `mapinfo` 信息包时识别为“地图 / 游戏本体”。本体地图常额外携带场景缩略图和 `abdata/adv/eventcg/` 事件资源，但它们不是判定的必要条件。
 
@@ -227,6 +227,16 @@ ThumbAB,ThumbTex
 - 如果 `ThumbTex` 没有扩展名，应尝试 `.png`、`.jpg`、`.jpeg`、`.tga` 等常见图片扩展名。
 - 如果直接图片存在，直接复制或转换为缓存 PNG，不需要解析 Unity AssetBundle。
 - 如果 `ThumbAB` 指向 `.unity3d`，再进入 AssetBundle 解析流程。
+
+### 其它 zipmod 提供缩略图 Unity3D
+
+部分补丁型 zipmod 只包含 CSV 登记表，`ThumbAB` 指向另一份 zipmod 内的
+`.unity3d` 缩略图包。建库时会按“当前 zipmod → 游戏目录 → 其它 zipmod”的顺序查找；
+当当前包和游戏目录都没有该文件，但 provider 索引能定位到其它 zipmod 的 Unity3D 文件时，
+会从提供方归档读取该包，并按 `ThumbTex` 提取贴图后写入当前物品的缩略图缓存。
+
+提供方文件不可读或找不到 `ThumbTex` 时，仍保留原有的缩略图错误状态。该逻辑只读取提供方
+归档，不会把 Unity3D 文件复制进当前 zipmod，也不会改变 CSV 引用。
 
 ### Unity3D 缩略图的按目标解析
 

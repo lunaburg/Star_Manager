@@ -4,7 +4,7 @@
 
 本插件源于对 GameBridge 物品映射方式的调查：zipmod 的 GUID、CSV `slot`、`kind` 和名称与游戏运行时使用的 `localSlot` 并不等价。插件通过读取 `ChaListControl` 和 UniversalAutoResolver 输出精确映射，并提供主线程换装接口。
 
-当前版本为 `0.9.3`。完整目录约包含 33000 个游戏物品和 83000 条 UAR 记录，因此目录只在首次初始化成功或手动刷新时扫描；角色状态独立轻量更新，避免周期性卡顿。角色编辑器和 H 场景角色都使用相同的状态读取模型。角色编辑器人物卡读取使用选择性 `LoadFileLimited`；H 场景人物卡读取使用完整 `LoadCharaFile`，随后复用原生 `ChangeNowCoordinate`/`Reload` 流程，不执行额外的 H 场景控制器重绑定。探针不会把状态区块带入 H 场景，也不会在 HTTP 工作线程调用 Unity API。
+当前版本为 `0.9.5`。完整目录约包含 33000 个游戏物品和 83000 条 UAR 记录，因此目录只在首次初始化成功或手动刷新时扫描；角色状态独立轻量更新，避免周期性卡顿。角色编辑器和 H 场景角色都使用相同的状态读取模型。角色编辑器人物卡读取使用选择性 `LoadFileLimited`；H 场景人物卡读取使用完整 `LoadCharaFile`，随后复用原生 `ChangeNowCoordinate`/`Reload` 流程，不执行额外的 H 场景控制器重绑定。探针不会把状态区块带入 H 场景，也不会在 HTTP 工作线程调用 Unity API。
 
 这是一个 HS2 BepInEx 探针插件，用于回答“游戏原生物品界面当前这一项究竟对应什么”，并提供受控的主线程换装命令接口。它不依赖物品名称作为主键。
 
@@ -307,6 +307,8 @@ GameBridge 当前使用的 `zipInfo` 适合查询某个已知 resolved ID，但�
 - `0.8.0` 根据人物卡读取审计探针恢复原生 `ChangeNowCoordinate(false, true) → Reload(...)` 调用链；`Reload` 的第一个参数按衣服/装饰是否选择设置，并在调用前后同步 `Manager.Character.customLoadGCClear`。人物卡读取不再直接调用 `ReloadAsync` 或额外的服装/装饰协程，避免与原生状态机及 `Reload` 的第三方补丁脱节；异常路径仍会回滚已选区块并尝试恢复角色显示。
 - 2026-09-05 复测发现，衣服和装饰同时选择时，coordinate 子区块保护逻辑错误地恢复了旧装饰，导致原生 `ChangeAccessory(true)` 虽被调用但卡片装饰不在当前角色中。现已改为仅在单独读取衣服时恢复旧装饰、单独读取装饰时恢复旧服装；同时选择两者时保留卡片的完整 coordinate 数据。修复版已编译，需重启游戏后实测。
  - `0.9.0` 增加 H 场景角色枚举、完整当前装配读取和目标换装。通过 `Manager.HSceneManager.Instance.Hscene` 获取活动场景，再按 `sex + characterIndex` 调用 `GetFemales()`/`GetMales()`；服装、头发、面部、身体和配饰分别复用对应的原生单件更新路径，不执行整卡替换或 H 场景重载。程序集级编译已验证；需要重启游戏后在目标 H 场景中实测女性、男性及模组资源加载结果。
+ - `0.9.4` 增加 `type: "map"` H 场景命令。探针调用 `Manager.BaseMap.Change`（兼容 Map Selector Lite 的 `Change(int, Fade, bool)` 重载），等待 `isMapLoading` 完成并刷新 H 点位；物品管理器地图右键菜单可直接提交该命令。
+ - `0.9.5` 修复模组地图只传入 `Map_kPlug.csv` 第一列编号的问题。该列通常为占位值 `0`，探针现在按 `mainAB/mainData` 在运行时 `Manager.BaseMap.infoTable` 中解析真实地图 ID；模组地图查询结果同时返回场景资源字段，供 HTTP 命令完成资源匹配。
 - `2026-09-24` 增加 H 场景人物卡完整读取：解析器接受 `target: "hscene"` 的 `type: "card"`，使用 `LoadCharaFile → ChangeNowCoordinate → Reload`，不再额外刷新 HScene 控制器引用。
 - `2026-09-24` 修复 H 场景人物卡加载超时：完整卡片重载可能在 `ChaControl.Reload`、Sideloader 资源解析和第三方角色控制器回调中同步耗时数十秒，原先沿用的 12 秒延迟命令超时会在角色已经换卡后误报失败。H 场景整卡流程现在使用 120 秒专用超时，仍保留超时保护；超时修改只影响 H 场景 `type: "card"`，普通单件换装和角色编辑器读取继续使用原有策略。
 - `2026-09-25` 根据 `HS2_HCharaSwitcher` 实机探针记录移除 H 场景人物卡读取的额外控制器重绑定和后台队列锁；原生 `Reload` 返回后直接释放命令队列，避免连续读取时后续命令过期。

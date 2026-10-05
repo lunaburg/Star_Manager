@@ -70,6 +70,8 @@ Defined in `apps/electron/preload.cjs`.
 - `loadGameSetup(gameDir)`: read the game's `UserData/setup.xml` through the Electron main process.
 - `saveGameSetup(gameDir, setup)`: validate and atomically write the game's `UserData/setup.xml`, retaining its `.bak` backup and synchronizing supported Unity display registry values.
 - `backendRequest(route, options)`: call the Python HTTP backend.
+- `remoteCharacterPage(pageUrl)`: use a hidden Electron page to read BepisDB `aishoujo` or `aiscenes` cards when the fixed JSON API fails.
+- `downloadRemoteCharacterCard({ id, name, cardType })`: open a native Save As dialog for one BepisDB `AI` or `AISCENE` card, fetch the fixed same-host full PNG by validated type and numeric ID, verify the PNG response, then stream it to the chosen path through a temporary file. The limit is 64 MB for `AI` and 512 MB for `AISCENE`. Returns `{ ok: true, canceled: true }` on cancel or `{ ok: true, path, bytes }` on success.
 - `backendBaseUrl`: backend base URL, defaulting to `http://127.0.0.1:8765`.
 
 ## Recycle bin API
@@ -87,6 +89,7 @@ Defined in `apps/electron/preload.cjs`.
 - Single file or single object operations use direct HTTP API routes.
 - Batch operations use `/tasks` and report progress through the task bridge.
 - The Workbench packaging completion path is an exception: it uses the task bridge for `index_single_zipmod` so the generated archive is indexed only after the file is finalized and its progress can be shown in the Workbench.
+- Website character-card Save As is an Electron-owned single-file exception: the native picker keeps the chosen destination in the main process, and Electron downloads only a fixed same-host PNG URL derived from a validated card ID. The Python backend never receives an arbitrary destination path.
 - Do not add new bulk direct-HTTP mutation endpoints. Add a task type in `apps/backend/app/bridge.py`.
 
 Examples:
@@ -101,6 +104,13 @@ Implemented in `apps/backend/app/server.py`.
 All JSON responses include at least `ok` unless the route serves a file. Errors return `{"ok": false, "error": "..."}` with an appropriate HTTP status.
 
 Read and file routes:
+
+- `GET /remote/character-page?url=https://db.bepis.moe/aishoujo?page=7` or `?url=https://db.bepis.moe/aiscenes?page=7`
+  - Reads BepisDB's fixed same-host JSON card search API for one AI/HS2 character or scene page. Returns validated card metadata, `page_count`, and fixed same-host remote `cover_url` values immediately; it does not wait for cover downloads. Character cards include personality and gender; scene cards include male, female, and object counts. Both include uploader/date, downloads, votes, and size. Only HTTPS `db.bepis.moe/aishoujo` and `db.bepis.moe/aiscenes` list URLs with a positive `page` parameter are accepted; redirects are not followed. Metadata manifests are reused for 15 minutes.
+- `GET /remote/character-page/image?key=&file=`
+  - Serves one cover from the earlier local-cover cache format for compatibility. The optimized list path does not create new local cover files.
+
+If the JSON API request or response fails, the Electron renderer opens the validated character or scene page in a hidden, sandboxed BrowserWindow, waits for the rendered `data-metadata` card blocks after DOM readiness, reads the numeric pagination controls as `page_count`, and returns the same card fields with the website thumbnail URLs. This fallback does not wait for all page resources to finish loading.
 
 - `GET /health`
   - Returns backend readiness, supported task types, supported API routes, and backend source path.
@@ -146,7 +156,7 @@ Read and file routes:
   - `include_total` defaults to `1`; when set to `0`, the response omits the full count (`total: null`) and fetches one extra row to report `has_more`, which is the preferred mode for incremental scrolling after the first page.
   - Builtin rows include `source_type: "builtin"`, `source_label: "游戏本体"`, `game_dir`, `category_no`, `source_path`, original resource references, and the cached thumbnail URL. They never expose a zipmod GUID or zipmod ID. H-point maps use `category_no: "__game_map_scene__"`, `item_domain: "map"`, and additionally return `map_no`, `map_state`, `is_outdoors`, `h_point_count`, `h_point_list_status`, and `mapinfo_source`.
   - Item display status is derived in the renderer: `error` for parse errors or `unity3d_status` `missing/error`; `thumb` for parsed items whose main Unity3D resource is usable but whose `thumbnail_status` is not `ready` / `ok`; `ready` when both the item and thumbnail are usable.
-  - Item `unity3d_status` checks the current zipmod first, then game `abdata`, then the indexed contents of other zipmods. Missing `TexAB` is tolerated. A resource outside the current zipmod uses `not_in_mod`; `unity3d_source` is `game_abdata` or `other_zipmod`. Public `abdata/chara/00`–`60` resources are treated as shared. `ThumbAB` only affects `unity3d_status` when it points to the same `.unity3d` as `MainAB` and thumbnail parsing proves that file is not a usable Unity resource; a thumbnail-only `ThumbAB` problem remains a thumbnail issue.
+  - Item `unity3d_status` checks the current zipmod first, then game `abdata`, then the indexed contents of other zipmods. Missing `TexAB` is tolerated. A resource outside the current zipmod uses `not_in_mod`; `unity3d_source` is `game_abdata` or `other_zipmod`. Public `abdata/chara/00`–`60` resources are treated as shared. `ThumbAB` only affects `unity3d_status` when it points to the same `.unity3d` as `MainAB` and thumbnail parsing proves that file is not a usable Unity resource; a thumbnail-only `ThumbAB` problem remains a thumbnail issue. Diagnostics for an `other_zipmod` provider expose `reference_count` and choose `copy_from_other_zipmod` when provider items still reference the file, otherwise `move_from_other_zipmod`; the repair route transfers the archive member and refreshes affected records.
 - `GET /mods/items/filters?game_dir=`
   - Returns item filter options across the indexed mod and builtin item sources. When `game_dir` is supplied, builtin Kind options and the `游戏本体` author option are limited to that selected game directory; without it, builtin options are aggregated across indexed game directories.
 - `GET /mods/thumbnails?path=`
@@ -160,9 +170,9 @@ Read and file routes:
 - `GET /mods/mannequin/body.fbx`
   - Serves the bundled mannequin FBX used as the clothing preview reference model.
 - `GET /library/cards/tree?game_dir=`
-  - Returns the character-card folder tree.
+  - Returns the character-card folder tree. Timing data includes index loading, directory scan, total count, PNG candidates, marker checks, and `marker_directory_count`; when indexed file signatures differ, only affected directories use marker checks while unchanged directories keep indexed counts.
 - `GET /library/cards/changes?game_dir=&path=`
-  - Compares the direct AIS cards in the selected folder with the indexed file-size and nanosecond-modification-time signatures. Returns added, removed, and modified counts; it does not rebuild the card database.
+  - Compares the direct AIS cards in the selected folder with the indexed file-size and nanosecond-modification-time signatures. Returns added, removed, and modified counts plus `added_paths`, `removed_paths`, and `modified_paths` relative to `UserData/chara`; it does not rebuild the card database.
 - `GET /library/cards/duplicate-clothing?game_dir=&threshold=&min_dependency_count=&min_shared_count=&include_accessories=0|1`
   - Reads indexed character-card dependencies and returns exact or near duplicate groups using `0.7 × Jaccard + 0.3 × coverage`. The endpoint is read-only; cleanup uses the existing `bulk_delete_character_cards` task and recycle-bin flow.
 - `GET /library/cards?game_dir=&path=&scope=&tag=&offset=&limit=`
@@ -239,7 +249,7 @@ Direct mutation routes:
   - Returns paginated non-map database items whose `MainAB` points to a Unity3D with database status `in_mod` or `not_in_mod`. The response includes the source item name, mod, Unity3D reference, source `MainData`, and thumbnail URL when available. This is a read-only picker source for the workbench template editor.
 - `POST /mods/zipmods/:id/repair-unity3d`
   - Body: `{ "path": "optional unity3d reference path" }`
-  - Repairs one zipmod by moving a repairable item `MainAB` or external non-public `TexAB` Unity3D file from the game directory into the zipmod. Missing `TexAB` and `TexAB` under shared `abdata/chara/00`–`60` do not enter this repair flow. Thumbnail-only `ThumbAB` issues are repaired through thumbnail import, not this endpoint.
+  - Repairs one zipmod by moving a repairable item `MainAB` or external non-public `TexAB` Unity3D file from the game directory into the zipmod. When the source is another zipmod, the endpoint copies the archive member if provider items still reference it, otherwise moves the member out of the provider archive. Missing `TexAB` and `TexAB` under shared `abdata/chara/00`–`60` do not enter this repair flow. Thumbnail-only `ThumbAB` issues are repaired through thumbnail import, not this endpoint.
 - `POST /library/cards/export-coordinate`
   - Body: `{ "game_dir": "D:\\HS2", "path": "female/card.png", "name": "optional name", "output_dir": "optional custom directory" }`.
   - Extracts the selected character card's current `Coordinate` and converts coordinate-scoped KKEx data. When `output_dir` is empty, it writes under `UserData/coordinate/female` or `male`; otherwise it writes directly to the configured existing directory.
@@ -300,13 +310,14 @@ The item browser uses the existing `StarManager.GameItemProbe` BepInEx plugin th
 - `POST /game-item-probe/apply`
   - Body for clothing: `{ "type": "clothes", "guid": "mod.guid", "categoryNo": 240, "slot": 1 }`. To target a character in an active H scene instead of the character maker, add `target: "hscene"`, `sex` (`0` male or `1` female), and `characterIndex` (the index in `HScene.GetMales()`/`GetFemales()`), for example `{ "type": "clothes", "target": "hscene", "sex": 1, "characterIndex": 0, "categoryNo": 240, "localSlot": 100008284 }`. `targetCharacterId` may be used instead of `characterIndex`; if both are supplied they must identify the same character. H-scene targets accept the same single-item `clothes`, `hair`, `face`, `body`, and `accessory` types as the editor target and call the corresponding native `ChaControl` update method without card/coordinate reload. `type: "card"` uses a separate full-card H-scene flow described below.
   - Body for hair: `{ "type": "hair", "guid": "mod.guid", "categoryNo": 300, "slot": 1, "hairSlotNo": 0 }`; the only valid mappings are `300→0` (HairBack), `301→1` (HairFront), `302→2` (HairSide), and `303→3` (HairOption).
+  - Body for H-scene map replacement: `{ "type": "map", "target": "hscene", "mapNo": 30, "mainAB": "...", "mainData": "...", "manifest": "abdata", "itemId": "..." }`. For builtin maps, `mapNo` is the `Map Selector Lite`/`Manager.BaseMap` map key. For `Map_kPlug.csv` or author-scoped `Map_*.csv` rows, the first column is commonly the placeholder `0`; the probe resolves the runtime key from `mainAB/mainData` against `Manager.BaseMap.infoTable` and only uses `mapNo` as a fallback. The probe invokes `Manager.BaseMap.Change` on Unity's main thread, waits for `isMapLoading` to finish, then refreshes H-point data. This is a single current H-scene mutation and does not write the library or source zipmod.
   - Body for a face item: `{ "type": "face", "guid": "mod.face", "categoryNo": 317, "slot": 4, "facePartNo": 1 }`; face categories include `110`–`112`, `121`, `210`–`212`, `314`–`320`, `322`, and `323`. Only eye-specific categories `317` (pupil) and `318` (black pupil) require `facePartNo` (`0` left, `1` right).
   - Body for a body item: `{ "type": "body", "guid": "mod.body", "categoryNo": 313, "slot": 4, "bodyPartNo": 1 }`; male body categories are `8`, `131`–`133`, female body categories are `231`–`233`, `313`, `334`, and `335`. Only body-paint categories `8` and `313` require `bodyPartNo` (`0` paint layer 1, `1` paint layer 2); category `8` updates the male paint layout and `313` updates the female paint texture ID.
   - Body for an accessory: `{ "type": "accessory", "guid": "mod.guid", "categoryNo": 351, "slot": 1, "slotNo": 0 }`.
   - Native game items omit `guid` and use their indexed list ID as `localSlot`, for example `{ "type": "clothes", "categoryNo": 240, "localSlot": 1 }`; the plugin verifies that this `CategoryNo + localSlot` exists in the current `ChaListControl` before calling the game API. Native hair still requires the matching `hairSlotNo`, and native accessories still require `slotNo`.
   - The backend returns the plugin submission payload under `data`, for example `{ "accepted": true, "commandId": "...", "status": "queued" }`; the renderer polls the command route until it reaches a terminal state.
 
-The renderer must only construct these payloads from a validated item row. For mod rows, `kind` is the `categoryNo` and `item_id` is the original CSV `slot`; neither is treated as a `localSlot`. For native rows, `item_id` is the indexed native list ID and is sent as `localSlot`. Hair rows require an explicit `hairSlotNo`, eye-specific face rows require an explicit `facePartNo`, and body-paint rows require an explicit `bodyPartNo`; the plugin rejects category/slot mismatches before resolving the item. The plugin resolves mod runtime local IDs and rejects ambiguous GUID/category/slot mappings. The normal item browser submits from its right-click action; assembly mode submits the same validated payload from a left click after a character slot has selected the matching `CategoryNo`. This is a single current-character mutation, not a task, batch endpoint, library write, or character-card save operation.
+The renderer must only construct these payloads from a validated item row. For mod rows, `kind` is the `categoryNo` and `item_id` is the original CSV `slot`; neither is treated as a `localSlot`. For native rows, `item_id` is the indexed native list ID and is sent as `localSlot`. Hair rows require an explicit `hairSlotNo`, eye-specific face rows require an explicit `facePartNo`, and body-paint rows require an explicit `bodyPartNo`; the plugin rejects category/slot mismatches before resolving the item. The plugin resolves mod runtime local IDs and rejects ambiguous GUID/category/slot mappings. The normal item browser submits from its right-click action; assembly mode submits the same validated payload from a left click after a character slot has selected the matching `CategoryNo`. These are single runtime mutations, not tasks, batch endpoints, library writes, or character-card saves.
 
 The probe port does not authenticate a game directory. The user must ensure that the HS2 process currently owning the probe port is the same installation selected in Star Manager; the backend cannot safely infer or enforce that association.
 
@@ -426,7 +437,8 @@ Current task types:
   - Before indexing copied zipmods, recursively searches `abdata` directories under the import source folder. When a copied zipmod references a missing `abdata/**/*.unity3d`, the matching loose unity3d file is moved into the zipmod at that referenced path.
   - Also scans external `*.png` files. `【AIS_Chara】` character cards are copied into `UserData/chara/female/imported`, while `【AIS_Clothes】` clothes cards are copied into `UserData/coordinate/female/imoprted`; ordinary PNG images are skipped. The task result reports them separately through `card_imported_count` / `imported_cards` and `coordinate_imported_count` / `imported_coordinates`.
 - `build_card_database`
-  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1 }`; `worker_count` follows the same `1..min(8, floor(available logical processors / 2))` limit as `build_mod_database`.
+  - Payload: `{ "game_dir": "D:\\HS2", "mode": "incremental | full", "worker_count": 1, "card_changes": { "added": 1, "removed": 1, "modified": 0, "added_paths": ["female/new.png"], "removed_paths": ["female/old.png"], "modified_paths": [] } }`; `worker_count` follows the same `1..min(8, floor(available logical processors / 2))` limit as `build_mod_database`.
+  - When an incremental task receives path-level `card_changes`, it parses only added/modified cards, marks removed paths stale, and skips workers and upserts for unchanged cards. Count-only change snapshots remain compatible and use the previous full enumeration path.
   - Rebuilds only the character-card database and card preview cache, using the configured worker count for card parsing and preview preparation.
 - `bulk_export_zipmods`
   - Payload: `{ "zipmod_ids": [1, 2], "target_dir": "...", "mode": "copy | move" }`
@@ -442,7 +454,7 @@ Current task types:
   - Moves every `*.zipmod` below the current game `mods` directory into `mods/StandardEditionAuthor/<author>/`. Missing authors use `未知作者`, invalid Windows path characters are replaced, and filename collisions receive a numeric suffix instead of overwriting files. After moving files, empty directories below `mods` are deleted without deleting the `mods` root, then the task refreshes the mod database.
 - `bulk_repair_zipmods_unity3d`
   - Payload: `{ "zipmod_ids": [1, 2] }`
-  - Repairs repairable item Unity3D issues for selected zipmods. The task processes `.unity3d` references from both `MainAB` and `TexAB` when the referenced file is present only in the game `abdata`. The backend groups references by game-directory source path; sources needed by multiple selected zipmods are copied into each zipmod and kept in game `abdata`, while sources needed by only one selected zipmod may be moved into that zipmod.
+  - Repairs repairable item Unity3D issues for selected zipmods. The task processes `.unity3d` references from both `MainAB` and `TexAB` when the referenced file is present only in game `abdata` or another zipmod. Game sources needed by multiple selected zipmods are copied into each zipmod and kept in game `abdata`, while sources needed by only one selected zipmod may be moved into that zipmod. Provider zipmods are copied when their own items still reference the resource and moved otherwise.
 - `bulk_cleanup_duplicate_zipmods`
   - Payload: `{ "zipmod_ids": [1, 2] }`
   - Runs duplicate analysis for selected primary zipmods, deletes only duplicate files that are safe to remove, and skips candidates that appear newer, more complete, contain unique item records, or have newer CSV-referenced `.unity3d` members than the primary zipmod. Only `.unity3d` files referenced by parsed CSV item rows participate in this comparison; unreferenced `.unity3d` members are ignored. File size is displayed for review but does not block cleanup by itself.
@@ -461,7 +473,7 @@ Current task types:
 
 - `bulk_update_zipmod_authors`
   - Payload: `{ "zipmod_ids": [1, 2], "author": "Author name" }`
-  - Updates `manifest.xml` author for selected zipmods.
+  - Updates `manifest.xml` author for selected zipmods. Task data reports `updated_count`, `unchanged_count`, and `failure_count`; matching Manifest and database values are skipped, while a stale author index is repaired without rescanning the archive.
 - `bulk_apply_item_thumbnail`
   - Payload: `{ "source_item_id": 1, "source_image_path": "D:\\cache\\thumb.png", "target_item_ids": [2, 3] }`
   - Applies the selected source item's cached thumbnail PNG to specifically selected target items missing thumbnails. This reuses the single-item thumbnail import path and updates each target source zipmod/CSV.

@@ -19,6 +19,7 @@ from star_manager.services.card_library import (  # noqa: E402
 )
 from star_manager.services.mod_database_core import (  # noqa: E402
     init_db,
+    set_database_metadata,
     timestamp_to_utc,
 )
 
@@ -231,6 +232,108 @@ class CharacterCardDependencyTests(unittest.TestCase):
 
             self.assertEqual(stats["reused_cards"], 0)
             self.assertEqual(stats["changed_cards"], 1)
+
+    def test_path_change_manifest_only_prepares_changed_cards(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "UserData" / "chara"
+            folder = root / "female"
+            folder.mkdir(parents=True)
+            unchanged = folder / "unchanged.png"
+            old_path = folder / "old.png"
+            new_path = folder / "new.png"
+            unchanged.write_bytes(b"unchanged")
+            old_path.write_bytes(b"old")
+            old_stat = old_path.stat()
+            unchanged_stat = unchanged.stat()
+            old_path.rename(new_path)
+
+            db_path = Path(temp_dir) / "star_manager.sqlite"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                init_db(conn)
+                with conn:
+                    set_database_metadata(conn, "character_card_tags_cache_root", str(root.resolve()))
+                    for card_path, card_stat in ((unchanged, unchanged_stat), (old_path, old_stat)):
+                        conn.execute(
+                            """
+                            INSERT INTO character_cards (
+                                file_path, relative_path, file_name, modified_at,
+                                metadata_file_size, metadata_modified_ns, parse_status,
+                                last_scanned_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, 'ok', '')
+                            """,
+                            (
+                                str(card_path.resolve()),
+                                f"female/{card_path.name}",
+                                card_path.name,
+                                timestamp_to_utc(card_stat.st_mtime),
+                                card_stat.st_size,
+                                card_stat.st_mtime_ns,
+                            ),
+                        )
+
+                prepared_paths = []
+
+                def fake_prepare(card_path, card_root, preview_dir, conn_arg, now, *args, **kwargs):
+                    prepared_paths.append(card_path)
+                    stat = card_path.stat()
+                    return {
+                        "file_path": str(card_path.resolve()),
+                        "relative_path": f"female/{card_path.name}",
+                        "file_name": card_path.name,
+                        "card_uid": "",
+                        "chara_name": card_path.stem,
+                        "tags_json": "[]",
+                        "favorite": False,
+                        "rating": 0,
+                        "metadata_file_size": stat.st_size,
+                        "metadata_modified_ns": stat.st_mtime_ns,
+                        "preview_cache_path": "",
+                        "modified_at": timestamp_to_utc(stat.st_mtime),
+                        "parse_status": "ok",
+                        "dependency_count": 0,
+                        "missing_count": 0,
+                        "last_scanned_at": now,
+                        "dependencies": [],
+                        "reused": False,
+                        "replace_dependencies": True,
+                    }
+
+                with patch(
+                    "star_manager.services.card_database.validate_card_root",
+                    return_value=(True, root, ""),
+                ), patch(
+                    "star_manager.services.card_database.prepare_card_record",
+                    side_effect=fake_prepare,
+                ):
+                    stats = build_card_database(
+                        Path(temp_dir),
+                        db_path=db_path,
+                        preview_dir=Path(temp_dir) / "previews",
+                        known_card_changes={
+                            "added": 1,
+                            "removed": 1,
+                            "modified": 0,
+                            "added_paths": ["female/new.png"],
+                            "removed_paths": ["female/old.png"],
+                            "modified_paths": [],
+                        },
+                    )
+
+                self.assertEqual([path.name for path in prepared_paths], ["new.png"])
+                self.assertEqual(stats["changed_cards"], 1)
+                self.assertEqual(stats["stale_cards"], 1)
+                self.assertEqual(stats["untouched_cards"], 1)
+                rows = {
+                    row["file_path"]: row["parse_status"]
+                    for row in conn.execute("SELECT file_path, parse_status FROM character_cards")
+                }
+                self.assertEqual(rows[str(old_path.resolve())], "stale")
+                self.assertEqual(rows[str(new_path.resolve())], "ok")
+                self.assertEqual(rows[str(unchanged.resolve())], "ok")
+            finally:
+                conn.close()
 
     def test_slot_matches_item_id_with_leading_zeroes(self):
         with TemporaryDirectory() as temp_dir:

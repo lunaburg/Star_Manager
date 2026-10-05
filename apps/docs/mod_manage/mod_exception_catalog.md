@@ -61,12 +61,12 @@
 解决方案：
 
 - `not_in_mod` + `source = game_abdata`：将对应 `.unity3d` 文件补入 zipmod；外置非公共目录的 `MainAB` 或 `TexAB` 允许此操作。
-- `not_in_mod` + `source = other_zipmod`：显示提供该资源的其它 zipmod，不显示补入按钮。
+- `not_in_mod` + `source = other_zipmod`：显示提供该资源的其它 zipmod；若提供方还有其它物品引用该文件则复制补入，若没有则从提供方剪切移动。
 - `missing`：重新安装来源模组，或手动找回缺失的 `MainAB` 后重建数据库。
 
 操作入口：
 
-- `补入 zipmod`
+- `复制补入 zipmod` 或 `剪切补入 zipmod`
 
 后端动作：
 
@@ -76,7 +76,7 @@
 
 - `ThumbAB` 缺失、缩略图 Unity3D 缺失、缩略图 Unity3D 解析失败，如果该 `ThumbAB` 不是同一个物品的 `MainAB`，只归入 `thumbnail` 异常，不归入 `unity3d` 异常；`TexAB` 缺失不单独产生 `unity3d` 异常；公共 `chara/00`–`60` 目录中的外部 `MainAB` 或 `TexAB` 也不产生异常。其它 zipmod 提供的 `not_in_mod/other_zipmod` 会保留来源信息，并与 `game_abdata` 一样计入模组警告。
 
-诊断读取时会将同一路径的其它 zipmod 提供者合并到同一个异常项；提供者记录统一使用字典字段 `path`、`relative_path` 和 `guid`，避免把接口输出字典误当作内部 `Unity3dProvider` 对象。
+诊断读取时会将同一路径的其它 zipmod 提供者合并到同一个异常项；提供者记录统一使用字典字段 `path`、`relative_path`、`guid`、`reference_count` 和 `source_kind`。`reference_count > 0` 时修复动作是复制并保留提供方文件，否则是剪切并从提供方归档移除。修复后会重扫当前 zipmod及被剪切的提供方记录。
 
 ### `thumbnail`
 
@@ -84,6 +84,7 @@
 
 - 该 zipmod 下存在 `parse_status = ok` 但 `thumbnail_status` 不是 `ready` / `ok` 的物品。
 - 包括 `ThumbAB` 为空、`ThumbTex` 为空、缩略图源文件找不到、缩略图 Unity3D 存在但找不到贴图资源、缩略图 Unity3D 无法解析等情况。
+- 如果 `ThumbAB` 不在当前 zipmod 或游戏目录，但由其它 zipmod 提供，建库会从提供方 Unity3D 中按 `ThumbTex` 提取缩略图；只有提供方不可读或目标贴图不存在时才保留缩略图异常。
 
 界面标题：
 
@@ -105,6 +106,7 @@
 说明：
 
 - 导入后的图片会写入 zipmod 内的 `abdata/thumbnail/star_manager/`。
+- 其它 zipmod 提供的缩略图只写入当前物品的运行时缓存，不会复制或改写提供方归档。
 - 如果缩略图问题来自 `ThumbAB`，但该 `ThumbAB` 同时也是物品 `MainAB`，并且 UnityPy 无法解析可用资源，则物品和 zipmod 会被归入 `unity3d` `error`，因为这说明主资源本身不可用。
 - 删除物品会从 zipmod 中移除对应 CSV 行，并尝试移除相关 `.unity3d` 引用文件；该操作会修改 zipmod，必须走明确确认。
 

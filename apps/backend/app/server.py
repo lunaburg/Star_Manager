@@ -98,6 +98,12 @@ from star_manager.services.remote_mod_completion import (
     inspect_clothes_missing_mods,
     inspect_scene_missing_mods,
 )
+from star_manager.services.remote_character_page import (
+    REMOTE_CHARACTER_PAGE_CACHE_ROOT,
+    RemoteCharacterPageError,
+    fetch_character_page,
+    resolve_remote_cover,
+)
 from star_manager.services.model_preview import (
     import_texture2d_into_unity3d,
     list_unity3d_main_data_candidates,
@@ -309,6 +315,26 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if route == "/cards/database":
             self.send_json({"ok": True, "database": card_database_status()})
+            return
+
+        if route == "/remote/character-page":
+            query = parse_qs(parsed_url.query)
+            page_url = unquote((query.get("url") or [""])[0])
+            try:
+                self.send_json(fetch_character_page(page_url))
+            except RemoteCharacterPageError as error:
+                self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+
+        if route == "/remote/character-page/image":
+            query = parse_qs(parsed_url.query)
+            cache_key = str((query.get("key") or [""])[0])
+            file_name = str((query.get("file") or [""])[0])
+            cover_path = resolve_remote_cover(cache_key, file_name)
+            if cover_path is None:
+                self.send_json({"ok": False, "error": "远程人物卡封面不存在"}, status=404)
+            else:
+                self.send_file(str(cover_path), REMOTE_CHARACTER_PAGE_CACHE_ROOT)
             return
 
         if route == "/library/cards/missing-mods":

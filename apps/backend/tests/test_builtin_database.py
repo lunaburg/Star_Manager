@@ -117,6 +117,59 @@ class BuiltinDatabaseTests(unittest.TestCase):
             self.assertEqual(read_bundle.call_count, 2)
             conn.close()
 
+    def test_parallel_builtin_index_keeps_all_items_and_reports_worker_count(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game = root / "game"
+            list_root = game / "abdata" / "list" / "characustom"
+            list_root.mkdir(parents=True)
+            bundle_a = list_root / "00.unity3d"
+            bundle_b = list_root / "01.unity3d"
+            bundle_a.write_bytes(b"bundle-a")
+            bundle_b.write_bytes(b"bundle-b")
+            conn = sqlite3.connect(root / "star-manager.sqlite")
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+
+            def fake_items(_game_dir, bundle_path):
+                item_id = "1" if bundle_path.name == "00.unity3d" else "2"
+                return [BuiltinItem(
+                    game_dir_key=normalize_game_dir_key(game),
+                    game_dir=str(game.resolve()),
+                    category_no="240",
+                    item_id=item_id,
+                    name=f"原版上衣{item_id}",
+                    name_en="Top",
+                    name_zh_cn="",
+                    name_zh_tw="",
+                    source_path=bundle_path.relative_to(game).as_posix(),
+                    source_asset="top",
+                    main_manifest="",
+                    main_ab="",
+                    main_data="",
+                    thumb_ab="",
+                    thumb_tex="",
+                )]
+
+            with patch(
+                "star_manager.services.builtin_database._read_bundle_items_cached",
+                side_effect=fake_items,
+            ), patch(
+                "star_manager.services.builtin_database._extract_builtin_thumbnail",
+                return_value=ThumbnailResult("", "missing", "test"),
+            ):
+                stats = build_builtin_items_index(
+                    conn, game, root / "thumbnails", mode="full", worker_count=2
+                )
+
+            self.assertEqual(stats["builtin_worker_count"], 2)
+            self.assertEqual(stats["builtin_items"], 2)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM builtin_items").fetchone()[0],
+                2,
+            )
+            conn.close()
+
     def test_coordinate_ids_resolve_by_category_and_skip_empty_slots(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

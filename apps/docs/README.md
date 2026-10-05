@@ -42,8 +42,8 @@
 | 前后端怎么通信 | [前后端接口](backend-interface.md) | Electron preload、HTTP 路由、任务协议、请求字段和单项/批量边界 |
 | 前端页面怎么组织 | [前端 UI 专题索引](frontend-ui/README.md) | 页面索引、应用外壳、实现基线和视觉假设 |
 | 应用缓存和运行时文件在哪里 | [缓存与运行时文件登记](runtime-cache-registry.md) | 后端缓存、SQLite 索引、前端缓存、回收站、临时与派生运行时文件、清理边界和开发缓存 |
-| 删除的卡片和模组在哪里 | [回收站](trash-recycle-bin.md) | runtime/trash 目录结构、恢复、单条/批量永久删除自定义确认、测试残留隔离和索引恢复行为 |
-| 如何运行、构建和打包 | [Windows 打包指南](packaging-windows.md) | 开发命令、PyInstaller、electron-builder、产物检查和运行时后端选择 |
+| 删除的卡片和模组在哪里 | [回收站](trash-recycle-bin.md) | runtime/trash 目录结构、恢复、单条/批量永久删除自定义确认、确认弹窗文字对比度、测试残留隔离和索引恢复行为 |
+| 如何运行、构建和打包 | [Windows 打包指南](packaging-windows.md) | 开发命令、插件 Release 产物同步、PyInstaller、electron-builder、产物检查和运行时后端选择 |
 | Electron 启动与后端退出 | [Electron 进程生命周期](electron-process-lifecycle.md) | 单实例锁、Windows 后端进程树清理、退出等待和异常退出边界 |
 | Electron 启动与后端退出 | [Electron 进程生命周期](electron-process-lifecycle.md) | 单实例锁、Windows 后端进程树清理、退出等待和异常退出边界 |
 
@@ -55,23 +55,25 @@
 | --- | --- | --- |
 | 前端架构 | [前端 UI 架构](frontend-ui/frontend-ui-architecture.md) | 页面清单、实现基线和整体产品假设 |
 | 应用外壳 | [主布局](frontend-ui/main-layout.md) | 全局导航、顶部目录状态、按实测耗时加权的数据库任务进度、数据库重建和共享上下文 |
-| 开始游戏 | [开始页布局](frontend-ui/start-layout.md) | 三个一级容器移除外部边框；HS2 目录选择、后端就绪竞态恢复、目录校验任务、三种启动入口、固定与自定义目录快捷入口、六个固定插件开关和两个特殊设置；读写 `UserData/setup.xml`、备份和启动框架检测 |
+| 开始游戏 | [开始页布局](frontend-ui/start-layout.md) | 三个一级容器移除外部边框；HS2 目录选择、后端就绪竞态恢复、目录校验任务、三种启动入口、固定与自定义目录快捷入口、六个固定插件开关和两个特殊设置；读写 `UserData/setup.xml`、备份、启动框架检测，以及三个 Star Manager DLL 的版本检查与不一致替换 |
 | 总览 | [总览页布局](frontend-ui/overview-layout.md) | 四个一级容器移除外部边框；资源摘要、实用工具（含将 zipmod 整理到 `mods/StandardEditionAuthor/<作者>/`）、最近任务、本地成就 |
-| 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、服装卡、场景卡子界面，其中三类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；三类卡片依赖统一支持物品级匹配、模组级降级、模组未安装可补全/不可补全，以及“模组存在，物品缺失”特殊状态；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
+| 卡片管理 | [角色卡库布局](frontend-ui/character-cards-layout.md) | 卡片管理页隐藏全局顶部栏并回收其布局高度；通过互斥 SVG 按钮切换人物卡、网站卡片、服装卡、场景卡子界面，其中四类卡片按钮使用资源目录图标；人物卡浏览器标题栏刷新按钮和普通卡名称铭牌使用透明玻璃样式，收藏卡使用暖色不透明铭牌；外部导入的人物卡归档到 `female/imported`；人物卡、服装卡和场景卡浏览器均采用宽窗口最多五列、缩小窗口优先四列的响应式虚拟网格，服装卡不显示额外搜索工具栏并复用人物卡的底部名称条和“目录/详情”tab；场景卡复用服装卡的目录、分页、虚拟网格和详情链路，预览比例为 `320:180`，关联页支持远端模组候选查询和安全安装；三类卡片依赖统一支持物品级匹配、模组级降级、模组未安装可补全/不可补全，以及“模组存在，物品缺失”特殊状态；人物卡、服装卡和场景卡详情及关联页签控件统一为连续玻璃样式，工具页签四个工具卡移除图标并保留文字与操作按钮，底部增加可恢复的单卡删除工具，包含目录树、详情、依赖、标签、收藏、批量操作和导出 |
+| 网站人物卡与场景卡 | [角色卡库布局](frontend-ui/character-cards-layout.md) | BepisDB `aishoujo` / `aiscenes` 切换、列表分页与缩略图懒加载、场景卡四列网格、悬浮信息、单卡原始 PNG 另存为及缓存边界 |
 | 收藏视觉 | [人物卡收藏视觉状态](frontend-ui/character-card-favorite-effects.md) | 收藏主题、铭牌、边框、名字溢出和设置持久化 |
-| 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、多选操作栏与批量按钮玻璃化、增强表头磨砂层及列边界亮线处理、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装、对不支持换装 Kind 隐藏换装入口和安全维护 |
+| 模组管理 | [Zipmod 库布局](frontend-ui/zipmod-library-layout.md) | 物品/模组浏览、轻模糊玻璃化物品列表/预览图与详情面板、表格视图隐藏游戏本体来源徽标、多选操作栏与批量按钮玻璃化、批量修改作者性能优化记录、批量删除确认内容、Manifest 编辑作者联想控件、增强表头磨砂层及列边界亮线处理、Kind 分类玻璃控件过渡、全部 Kind 与视图切换统一背景、全部 Kind 下方的等尺寸无图标物品视图切换、筛选图标、分页、列表滚动位置保持、装配模式顶部角色选择器、诊断、模型预览、详情文件名定位、右键服饰/头发/面部/身体/饰品换装、对不支持换装 Kind 隐藏换装入口和安全维护 |
 | 插件管理 | [插件管理布局](frontend-ui/plugins-layout.md) | BepInEx DLL 扫描、元数据、依赖、缓存、诊断和 `.dl_` 启停 |
 | 工作台 | [工作台](frontend-ui/workbench-layout.md) | 模组工程、CSV 物品、Unity3D 模板选择、MainData 预处理、资源写入，以及将打包 zipmod 输出到 `mods/Package/<作者>/`；另记保留的 Sims 4 Package → FBX 能力 |
 | 运行日志 | [运行日志布局](frontend-ui/runtime-log-layout.md) | 隐藏全局顶部栏；本地日志数组、任务轮询消息、Electron 首屏里程碑，以及 `did-finish-load`/`ready-to-show`/`renderer-ready` 的首屏显示门槛诊断 |
-| 设置 | [设置页布局](frontend-ui/settings-layout.md) | 启动页面、启动检查、数据库建库线程数、应用壁纸（图片/MP4）、成就、导出目录、便携包和 Blender 路径 |
-| 视觉规范 | [UI 风格规范](frontend-ui/ui-style.md) | 颜色、控件、卡片、界面文字极简原则、风险状态和响应式原则 |
+| 设置 | [设置页布局](frontend-ui/settings-layout.md) | 启动页面、启动检查、数据库建库线程数、应用壁纸（内置 MP4 默认视频、图片/MP4 自定义、声音开关、MP4 Range 分段读取与循环错误重试）、成就、导出目录、便携包和 Blender 路径 |
+| 视觉规范 | [UI 风格规范](frontend-ui/ui-style.md) | 颜色、控件、卡片、自定义弹窗与遮罩、界面文字极简原则、风险状态和响应式原则 |
 
 ### 后端和数据
 
 | 主题 | 文档 | 适用场景 |
 | --- | --- | --- |
 | 模组数据库 | [模组数据库设计](mod_manage/mod_database_design.md) | SQLite 表、字段、状态、扫描和查询边界 |
-| 建库性能基准 | [模组数据库建库性能基准](mod_manage/mod_database_build_benchmark.md) / [数据库变动检测](mod_manage/mod_database_change_detection.md) | 从现有数据库抽取 100 个 zipmod，拆分 ZIP 读取/解压、UnityPy 加载、缩略图写出、manifest 并发读取和完整建库耗时 |
+| 建库性能基准 | [模组数据库建库性能基准](mod_manage/mod_database_build_benchmark.md) / [原版资源索引建库性能基准](mod_manage/builtin_resource_build_benchmark.md) / [数据库变动检测](mod_manage/mod_database_change_detection.md) | 分别记录 zipmod 与游戏本体原版资源的建库耗时、阶段拆分和优化建议 |
+| 单物品缩略图重建耗时 | [缩略图重建抽样基准](mod_manage/item_thumbnail_rebuild_benchmark.md) | 从现有物品缩略图导出并写回隔离副本，拆分归档重写与全模组重扫耗时，记录优化方案 |
 | 游戏原版资源索引 | [原版资源索引](mod_manage/builtin_resource_index.md) | 原版 `ChaListData` 列表、`builtin_items`、缩略图和 Coordinate 匹配 |
 | 增量建库 | [数据库变动检测](mod_manage/mod_database_change_detection.md) | 新增/移除/修改、重复 GUID、stale 和角色卡依赖重连 |
 | 角色卡二进制 | [角色卡解析说明](mod_manage/character_card_parsing.md) | PNG 尾部、MessagePack、UniversalAutoResolver、人物参数和坐标卡导出 |
@@ -83,6 +85,7 @@
 | Studio 模组样本解析 | [Hooh ammunition_go.zipmod 结构解析](mod_manage/hooh_ammunition_go_zipmod_analysis.md) | Studio `ItemCategory` / `ItemList`、AssetBundle prefab 映射和当前扫描边界 |
 | Studio 姿势转 zipmod | [Studio 女性姿势转换](mod_manage/pose_zipmod_conversion.md) | `.dat` 女性姿势、Kind=501 CSV、Animator/AnimationClip 模板、骨骼路径映射和验证边界 |
 | KK Animations ForMaker 补全 | [KK Animations ForMaker 注册补全](mod_manage/kk_animations_formaker_completion.md) | 从完整动画包读取全部 Studio 动画并注册到 Kind=501 姿势列表 |
+| 单个服饰 Unity3D 修复 | [`[cth]kaidongsiwa` AABB 修复](mod_manage/cth_kaidongsiwa_aabb_repair.md) | `SkinnedMeshRenderer` 包围盒修复、旁置 zipmod 和验证边界 |
 
 ### 集成和排障
 

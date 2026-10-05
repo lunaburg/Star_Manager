@@ -37,6 +37,7 @@ from star_manager.services.mod_database_assets import (  # noqa: E402
     thumbnail_csv_reference_for_arcname,
     thumbnail_error_detail,
     unity3d_member_signatures,
+    unity3d_provider_lookup_keys,
     zipmod_unity3d_diagnostics,
     ZipMemberIndex,
 )
@@ -96,6 +97,73 @@ class ManifestParsingTests(unittest.TestCase):
 
 
 class ThumbnailDiagnosticTests(unittest.TestCase):
+    def test_extracts_thumbnail_from_other_zipmod_provider(self):
+        class FakeBundle:
+            def write_thumbnail(self, thumb_tex, output_path):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(f"png:{thumb_tex}".encode("utf-8"))
+                return ThumbnailResult(str(output_path), "ready", "")
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            zipmod_path = root / "patch.zipmod"
+            provider_path = root / "base.zipmod"
+            with zipfile.ZipFile(zipmod_path, "w") as zf:
+                zf.writestr(
+                    "manifest.xml",
+                    "<manifest><guid>patch.guid</guid><name>Patch</name></manifest>",
+                )
+            with zipfile.ZipFile(provider_path, "w") as zf:
+                zf.writestr("abdata/shared/thumb.unity3d", b"provider-bundle")
+
+            item = CsvItem(
+                csv_path="abdata/list/characustom/sample.csv",
+                item_id="1",
+                kind="240",
+                name="Sample",
+                main_manifest="abdata",
+                main_ab="shared/main.unity3d",
+                main_data="main",
+                thumb_ab="shared/thumb.unity3d",
+                thumb_tex="preview",
+                parse_status="ok",
+                parse_error="",
+            )
+            candidate = ZipmodCandidate(
+                manifest=ManifestData("patch.guid", "Patch", "", "", "ok", ""),
+                path=zipmod_path,
+                relative_path="patch.zipmod",
+                file_size=zipmod_path.stat().st_size,
+                modified_at="",
+            )
+            provider = Unity3dProvider(
+                zipmod_path=str(provider_path),
+                relative_path="base.zipmod",
+                guid="base.guid",
+                resource_path="abdata/shared/thumb.unity3d",
+                member_path="abdata/shared/thumb.unity3d",
+                source_kind="file",
+            )
+            provider_index = {
+                key: [provider] for key in unity3d_provider_lookup_keys(item.thumb_ab)
+            }
+            bundle_cache = UnityThumbnailBundleCache()
+            bundle_cache.bundles[
+                ("zip-provider", str(provider_path.resolve()).lower(), "abdata/shared/thumb.unity3d")
+            ] = FakeBundle()
+
+            result = extract_thumbnail_from_zipmod(
+                root,
+                candidate,
+                item,
+                root / "thumbs",
+                bundle_cache=bundle_cache,
+                provider_index=provider_index,
+            )
+
+            self.assertEqual(result.status, "ready")
+            self.assertEqual(Path(result.cache_path).read_bytes(), b"png:preview")
+
     def test_ensure_mod_item_thumbnail_rebuilds_missing_cache_from_zipmod(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -510,9 +578,31 @@ class CsvEncodingTests(unittest.TestCase):
             items[0].main_ab,
             "_mas75__crystal_cave_lair_bundles/_mas75__crystal_cave_lair/data_scene_000.unity3d",
         )
+        self.assertEqual(items[0].main_data, "(Mas75) Crystal Cave Lair")
         self.assertEqual(items[0].main_manifest, "abdata")
         self.assertEqual(items[0].thumb_ab, "maps/crystal/data_thumbnail_000.unity3d")
         self.assertEqual(items[0].thumb_tex, "map_thumb_s.psd")
+
+    def test_reads_author_scoped_map_registration_csv(self):
+        with TemporaryDirectory() as temp_dir:
+            zipmod_path = Path(temp_dir) / "kky-cafe69.zipmod"
+            _write_deflated_zipmod(
+                zipmod_path,
+                {
+                    "abdata/studio/info/KKYCafe69/Map_KKYCafe69.csv": (
+                        "0\n0\n1,[KKY] Cafe 69,kky/kky_cafe69map.unity3d,map_cafe69,abdata,list/map/,map_col_282803\n"
+                    ),
+                    "abdata/map/list/mapinfo/map_cafe69.unity3d": b"mapinfo",
+                },
+            )
+            with zipfile.ZipFile(zipmod_path) as source:
+                items = list(iter_open_zip_csv_items(source))
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, DUAL_MAP_SCENE_KIND)
+        self.assertEqual(items[0].name, "[KKY] Cafe 69")
+        self.assertEqual(items[0].main_ab, "kky/kky_cafe69map.unity3d")
+        self.assertEqual(items[0].main_data, "map_cafe69")
 
     def test_classifies_kplug_map_with_mapinfo_as_game_and_studio_map(self):
         with TemporaryDirectory() as temp_dir:
@@ -529,6 +619,7 @@ class CsvEncodingTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].kind, DUAL_MAP_SCENE_KIND)
         self.assertEqual(items[0].name, "Dual Map")
+        self.assertEqual(items[0].main_data, "scene2")
         self.assertEqual(items[0].main_ab, "maps/dual/data_scene_000.unity3d")
 
     def test_classifies_mapinfo_without_kplug_as_game_only_map(self):
@@ -901,11 +992,91 @@ class Unity3dDirectoryFallbackTests(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["status"], "not_in_mod")
         self.assertEqual(issues[0]["source"], "other_zipmod")
-        self.assertEqual(issues[0]["repair_action"], "")
+        self.assertEqual(issues[0]["repair_action"], "move_from_other_zipmod")
         self.assertEqual(issues[0]["other_zipmods"][0]["guid"], "provider.guid")
         self.assertEqual(issues[0]["affected_count"], 2)
         self.assertEqual(warning_rows["total"], 1)
         self.assertEqual(warning_rows["rows"][0]["guid"], "current.guid")
+
+    def test_repair_unity3d_from_provider_moves_when_provider_has_no_item_reference(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            mods_dir = game_dir / "mods"
+            mods_dir.mkdir(parents=True)
+            provider_path = mods_dir / "provider.zipmod"
+            with zipfile.ZipFile(provider_path, "w") as zf:
+                zf.writestr("manifest.xml", "<manifest><guid>provider.guid</guid><name>Provider</name></manifest>")
+                zf.writestr("abdata/shared/main.unity3d", b"provider-bundle")
+            current_path = mods_dir / "current.zipmod"
+            with zipfile.ZipFile(current_path, "w") as zf:
+                zf.writestr("manifest.xml", "<manifest><guid>current.guid</guid><name>Current</name></manifest>")
+                zf.writestr(
+                    "abdata/list/characustom/current.csv",
+                    "210\r\nID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex\r\n"
+                    "1,210,1,Current,abdata,shared/main.unity3d,main,,\r\n",
+                )
+            db_path = root / "database.sqlite"
+            build_database(game_dir, db_path, root / "thumbs")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                current_id = int(conn.execute("SELECT id FROM zipmods WHERE guid = 'current.guid'").fetchone()[0])
+            finally:
+                conn.close()
+
+            diagnostics = zipmod_unity3d_diagnostics(current_id, db_path)
+            issue = next(item for item in diagnostics["issues"] if item["type"] == "unity3d")
+            self.assertEqual(issue["repair_action"], "move_from_other_zipmod")
+            result = repair_zipmod_unity3d_from_game(current_id, db_path=db_path, thumbnail_dir=root / "thumbs")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["moved"], ["abdata/shared/main.unity3d"])
+            with zipfile.ZipFile(current_path) as zf:
+                self.assertEqual(zf.read("abdata/shared/main.unity3d"), b"provider-bundle")
+            with zipfile.ZipFile(provider_path) as zf:
+                self.assertNotIn("abdata/shared/main.unity3d", zf.namelist())
+
+    def test_repair_unity3d_from_provider_copies_when_provider_item_uses_it(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            game_dir = root / "game"
+            mods_dir = game_dir / "mods"
+            mods_dir.mkdir(parents=True)
+            provider_path = mods_dir / "provider.zipmod"
+            with zipfile.ZipFile(provider_path, "w") as zf:
+                zf.writestr("manifest.xml", "<manifest><guid>provider.guid</guid><name>Provider</name></manifest>")
+                zf.writestr("abdata/shared/main.unity3d", b"provider-bundle")
+                zf.writestr(
+                    "abdata/list/characustom/provider.csv",
+                    "210\r\nID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex\r\n"
+                    "2,210,1,Provider,abdata,shared/main.unity3d,main,,\r\n",
+                )
+            current_path = mods_dir / "current.zipmod"
+            with zipfile.ZipFile(current_path, "w") as zf:
+                zf.writestr("manifest.xml", "<manifest><guid>current.guid</guid><name>Current</name></manifest>")
+                zf.writestr(
+                    "abdata/list/characustom/current.csv",
+                    "210\r\nID,Kind,Possess,Name,MainManifest,MainAB,MainData,ThumbAB,ThumbTex\r\n"
+                    "1,210,1,Current,abdata,shared/main.unity3d,main,,\r\n",
+                )
+            db_path = root / "database.sqlite"
+            build_database(game_dir, db_path, root / "thumbs")
+            conn = sqlite3.connect(db_path)
+            try:
+                current_id = int(conn.execute("SELECT id FROM zipmods WHERE guid = 'current.guid'").fetchone()[0])
+            finally:
+                conn.close()
+
+            diagnostics = zipmod_unity3d_diagnostics(current_id, db_path)
+            issue = next(item for item in diagnostics["issues"] if item["type"] == "unity3d")
+            self.assertEqual(issue["repair_action"], "copy_from_other_zipmod")
+            result = repair_zipmod_unity3d_from_game(current_id, db_path=db_path, thumbnail_dir=root / "thumbs")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["copied"], ["abdata/shared/main.unity3d"])
+            with zipfile.ZipFile(provider_path) as zf:
+                self.assertEqual(zf.read("abdata/shared/main.unity3d"), b"provider-bundle")
 
     def test_matches_zip_member_names_decoded_with_wrong_legacy_encoding(self):
         with TemporaryDirectory() as temp_dir:

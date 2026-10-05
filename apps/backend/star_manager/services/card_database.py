@@ -39,6 +39,60 @@ _CACHE_UNSET = object()
 MAX_DATABASE_WORKERS = 8
 
 
+def normalize_card_change_manifest(
+    changes: dict[str, object] | None,
+) -> dict[str, tuple[str, ...]] | None:
+    """Return path-level changes when the caller supplied a complete manifest."""
+    if not isinstance(changes, dict):
+        return None
+    manifest: dict[str, tuple[str, ...]] = {}
+    has_paths = False
+    for key in ("added_paths", "removed_paths", "modified_paths"):
+        raw_paths = changes.get(key)
+        if raw_paths is None:
+            manifest[key] = ()
+            continue
+        if not isinstance(raw_paths, (list, tuple, set)):
+            return None
+        normalized = []
+        for raw_path in raw_paths:
+            value = str(raw_path or "").strip().replace("\\", "/").strip("/")
+            if value:
+                normalized.append(value)
+        manifest[key] = tuple(dict.fromkeys(normalized))
+        has_paths = True
+    return manifest if has_paths else None
+
+
+def resolve_card_change_paths(
+    root: Path,
+    manifest: dict[str, tuple[str, ...]],
+    key: str = "added_paths",
+) -> list[Path]:
+    """Resolve existing PNG paths from a relative path change manifest."""
+    resolved: dict[str, Path] = {}
+    root_resolved = root.resolve()
+    for relative in manifest.get(key, ()):
+        candidate = Path(relative)
+        if not candidate.is_absolute():
+            candidate = root_resolved / relative
+        try:
+            candidate = candidate.resolve()
+            candidate.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if candidate.suffix.casefold() != ".png" or not candidate.is_file():
+            continue
+        if (
+            candidate.relative_to(root_resolved).parts
+            and candidate.relative_to(root_resolved).parts[0].casefold()
+            in IGNORED_ROOT_CARD_DIRS
+        ):
+            continue
+        resolved[str(candidate).casefold()] = candidate
+    return sorted(resolved.values(), key=lambda path: normalize_relative(path, root).casefold())
+
+
 def get_card_database_worker_limit() -> int:
     """Use the same capped worker limit as mod database builds."""
     cpu_count = max(1, os.cpu_count() or 1)
@@ -91,10 +145,26 @@ def build_card_database(
         )
         and not affected_mod_guids_list
     )
+    delta_manifest = normalize_card_change_manifest(known_card_changes)
+    can_use_delta_manifest = (
+        not force_full
+        and not affected_mod_guids_list
+        and delta_manifest is not None
+    )
 
     report(5, "Scanning UserData/chara/**/*.png")
     scan_started_at = perf_counter()
-    card_paths = [] if known_card_unchanged else list(iter_card_pngs(root))
+    if known_card_unchanged:
+        card_paths = []
+    elif can_use_delta_manifest:
+        card_paths = resolve_card_change_paths(root, delta_manifest, "added_paths")
+        modified_paths = resolve_card_change_paths(root, delta_manifest, "modified_paths")
+        card_paths = sorted(
+            {str(path).casefold(): path for path in [*card_paths, *modified_paths]}.values(),
+            key=lambda path: normalize_relative(path, root).casefold(),
+        )
+    else:
+        card_paths = list(iter_card_pngs(root))
     scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
     total = max(len(card_paths), 1)
     now = utc_now()
@@ -127,6 +197,12 @@ def build_card_database(
             conn, "character_card_tags_cache_root"
         ) != tag_cache_key
         affected_card_ids = find_affected_card_ids(conn, affected_mod_guids_list)
+        if can_use_delta_manifest and refresh_tag_cache:
+            scan_started_at = perf_counter()
+            card_paths = list(iter_card_pngs(root))
+            scan_duration_ms = round((perf_counter() - scan_started_at) * 1000, 2)
+            can_use_delta_manifest = False
+            stats["card_files"] = len(card_paths)
         if known_card_unchanged and not refresh_tag_cache and not affected_card_ids:
             stats["card_files"] = len(cached_cards)
             stats["cards"] = len(cached_cards)
@@ -219,7 +295,30 @@ def build_card_database(
                         f"Indexed {index}/{total} character cards",
                     )
 
-            stats["stale_cards"] = mark_stale_cards(conn, seen_paths, now)
+            if can_use_delta_manifest and delta_manifest is not None:
+                cached_paths_by_key = {
+                    str(path).casefold(): str(path)
+                    for path in cached_cards
+                }
+                removed_paths = []
+                for relative in delta_manifest.get("removed_paths", ()):
+                    candidate = (root / relative).resolve()
+                    cached_path = cached_paths_by_key.get(str(candidate).casefold())
+                    if cached_path:
+                        removed_paths.append(cached_path)
+                stats["stale_cards"] = mark_stale_card_paths(conn, removed_paths, now)
+                stats["cards"] = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM character_cards WHERE parse_status != 'stale'"
+                    ).fetchone()[0]
+                )
+                stats["card_files"] = int(stats["cards"])
+                stats["untouched_cards"] = max(
+                    0,
+                    int(stats["cards"]) - int(stats["changed_cards"]),
+                )
+            else:
+                stats["stale_cards"] = mark_stale_cards(conn, seen_paths, now)
             set_database_metadata(conn, "last_card_built_at", now)
             set_database_metadata(conn, "character_card_tags_cache_root", tag_cache_key)
         stats["timings"]["card_database_write_ms"] = round(
@@ -825,6 +924,32 @@ def mark_stale_cards(conn: sqlite3.Connection, seen_paths: set[str], now: str) -
             [now, *batch],
         )
     return len(stale_paths)
+
+
+def mark_stale_card_paths(
+    conn: sqlite3.Connection,
+    file_paths: Iterable[str],
+    now: str,
+) -> int:
+    paths = list(dict.fromkeys(str(path) for path in file_paths if str(path)))
+    if not paths:
+        return 0
+    marked = 0
+    for start in range(0, len(paths), 900):
+        batch = paths[start : start + 900]
+        placeholders = ",".join("?" for _ in batch)
+        cursor = conn.execute(
+            f"""
+            UPDATE character_cards
+            SET parse_status = 'stale',
+                last_scanned_at = ?
+            WHERE file_path IN ({placeholders})
+              AND parse_status != 'stale'
+            """,
+            [now, *batch],
+        )
+        marked += int(cursor.rowcount or 0)
+    return marked
 
 
 def card_database_status(db_path: Path = DEFAULT_DB_PATH) -> dict:

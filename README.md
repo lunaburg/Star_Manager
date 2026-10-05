@@ -17,8 +17,8 @@
   郑重声明：本项目不得以任何形式收费，包括赞助
 
 ## 页面截图
-![页面截图 1 (14)](apps/docs/assets/page-screenshots/1%20%2814%29.png)
-![页面截图 1 (15)](apps/docs/assets/page-screenshots/1%20%2815%29.png)
+
+
 ![页面截图 1 (16)](apps/docs/assets/page-screenshots/1%20%2816%29.png)
 ![页面截图 1 (17)](apps/docs/assets/page-screenshots/1%20%2817%29.png)
 ![页面截图 1 (18)](apps/docs/assets/page-screenshots/1%20%2818%29.png)
@@ -44,5 +44,7 @@
 ![页面截图 1 (11)](apps/docs/assets/page-screenshots/1%20%2811%29.png)
 ![页面截图 1 (12)](apps/docs/assets/page-screenshots/1%20%2812%29.png)
 ![页面截图 1 (13)](apps/docs/assets/page-screenshots/1%20%2813%29.png)
+![页面截图 1 (14)](apps/docs/assets/page-screenshots/1%20%2814%29.png)
+![页面截图 1 (15)](apps/docs/assets/page-screenshots/1%20%2815%29.png)
 
 

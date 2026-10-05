@@ -17,20 +17,6 @@
   郑重声明：本项目不得以任何形式收费，包括赞助
 
 ## 页面截图
-
-![页面截图 1 (1)](apps/docs/assets/page-screenshots/1%20%281%29.png)
-![页面截图 1 (2)](apps/docs/assets/page-screenshots/1%20%282%29.png)
-![页面截图 1 (3)](apps/docs/assets/page-screenshots/1%20%283%29.png)
-![页面截图 1 (4)](apps/docs/assets/page-screenshots/1%20%284%29.png)
-![页面截图 1 (5)](apps/docs/assets/page-screenshots/1%20%285%29.png)
-![页面截图 1 (6)](apps/docs/assets/page-screenshots/1%20%286%29.png)
-![页面截图 1 (7)](apps/docs/assets/page-screenshots/1%20%287%29.png)
-![页面截图 1 (8)](apps/docs/assets/page-screenshots/1%20%288%29.png)
-![页面截图 1 (9)](apps/docs/assets/page-screenshots/1%20%289%29.png)
-![页面截图 1 (10)](apps/docs/assets/page-screenshots/1%20%2810%29.png)
-![页面截图 1 (11)](apps/docs/assets/page-screenshots/1%20%2811%29.png)
-![页面截图 1 (12)](apps/docs/assets/page-screenshots/1%20%2812%29.png)
-![页面截图 1 (13)](apps/docs/assets/page-screenshots/1%20%2813%29.png)
 ![页面截图 1 (14)](apps/docs/assets/page-screenshots/1%20%2814%29.png)
 ![页面截图 1 (15)](apps/docs/assets/page-screenshots/1%20%2815%29.png)
 ![页面截图 1 (16)](apps/docs/assets/page-screenshots/1%20%2816%29.png)
@@ -45,4 +31,18 @@
 ![页面截图 1 (25)](apps/docs/assets/page-screenshots/1%20%2825%29.png)
 ![页面截图 1 (26)](apps/docs/assets/page-screenshots/1%20%2826%29.png)
 ![页面截图 1 (27)](apps/docs/assets/page-screenshots/1%20%2827%29.png)
+![页面截图 1 (1)](apps/docs/assets/page-screenshots/1%20%281%29.png)
+![页面截图 1 (2)](apps/docs/assets/page-screenshots/1%20%282%29.png)
+![页面截图 1 (3)](apps/docs/assets/page-screenshots/1%20%283%29.png)
+![页面截图 1 (4)](apps/docs/assets/page-screenshots/1%20%284%29.png)
+![页面截图 1 (5)](apps/docs/assets/page-screenshots/1%20%285%29.png)
+![页面截图 1 (6)](apps/docs/assets/page-screenshots/1%20%286%29.png)
+![页面截图 1 (7)](apps/docs/assets/page-screenshots/1%20%287%29.png)
+![页面截图 1 (8)](apps/docs/assets/page-screenshots/1%20%288%29.png)
+![页面截图 1 (9)](apps/docs/assets/page-screenshots/1%20%289%29.png)
+![页面截图 1 (10)](apps/docs/assets/page-screenshots/1%20%2810%29.png)
+![页面截图 1 (11)](apps/docs/assets/page-screenshots/1%20%2811%29.png)
+![页面截图 1 (12)](apps/docs/assets/page-screenshots/1%20%2812%29.png)
+![页面截图 1 (13)](apps/docs/assets/page-screenshots/1%20%2813%29.png)
+
 

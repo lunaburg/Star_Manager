@@ -24,7 +24,6 @@
 ![页面截图 1 (18)](apps/docs/assets/page-screenshots/1%20%2818%29.png)
 ![页面截图 1 (19)](apps/docs/assets/page-screenshots/1%20%2819%29.png)
 ![页面截图 1 (20)](apps/docs/assets/page-screenshots/1%20%2820%29.png)
-![页面截图 1 (21)](apps/docs/assets/page-screenshots/1%20%2821%29.png)
 ![页面截图 1 (22)](apps/docs/assets/page-screenshots/1%20%2822%29.png)
 ![页面截图 1 (23)](apps/docs/assets/page-screenshots/1%20%2823%29.png)
 ![页面截图 1 (24)](apps/docs/assets/page-screenshots/1%20%2824%29.png)

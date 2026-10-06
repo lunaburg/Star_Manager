@@ -20,7 +20,7 @@
 
   郑重声明：本项目不得以任何形式收费，包括赞助
 
-## 页面截图
+## 页面概览
 ![页面截图 1 (17)](apps/docs/assets/page-screenshots/1%20%2817%29.png)
 ![页面截图 1 (18)](apps/docs/assets/page-screenshots/1%20%2818%29.png)
 ![页面截图 1 (19)](apps/docs/assets/page-screenshots/1%20%2819%29.png)

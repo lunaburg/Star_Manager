@@ -85,7 +85,7 @@ const { ctx } = defineProps({
                             type="button"
                             class="switch-button"
                             :disabled="!ctx.paths.gameDir || !plugin.installed || plugin.busy || ctx.startPluginSettings.loading"
-                            :aria-label="plugin.label + (plugin.enabled ? '：禁用' : '：启用')"
+                            :aria-label="$t(plugin.label) + $t(plugin.enabled ? '：禁用' : '：启用')"
                             @click="ctx.toggleStartPlugin(plugin)"
                           ><span class="switch" :class="{ on: plugin.enabled }"></span></button>
                         </div>

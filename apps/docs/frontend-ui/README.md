@@ -1,5 +1,7 @@
 # 前端 UI 文档索引
 
+- [界面多语言 / Interface localization](localization.md)：英语与简体中文、设置持久化、Vue 显示边界、Electron 对话框和词典验证。
+
 这里集中维护 Star_Manager Vue 渲染器的应用外壳、页面布局、交互边界和视觉规范。文档以当前 `apps/src/` 实现为准；接口字段、任务类型和文件写回规则以[前后端接口](../backend-interface.md)为准。
 
 - 上级索引：[文档总索引](../README.md)

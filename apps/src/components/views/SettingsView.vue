@@ -143,6 +143,14 @@ onBeforeUnmount(() => {
           </div>
 
           <label class="setting-row setting-row--select">
+            <span class="setting-copy"><strong>{{ $t('界面语言') }}</strong><small>{{ $t('立即切换并自动保存。') }}</small></span>
+            <select :value="ctx.managerSettings.language" @change="ctx.updateManagerSetting('language', $event.target.value)">
+              <option value="en-US">English</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+          </label>
+
+          <label class="setting-row setting-row--select">
             <span class="setting-copy"><strong>启动页面</strong><small>下次打开 Star_Manager 时自动进入此页面。</small></span>
             <select :value="ctx.managerSettings.startupView" @change="ctx.updateManagerSetting('startupView', $event.target.value)">
               <option v-for="item in startupViews" :key="item.value" :value="item.value">{{ item.label }}</option>

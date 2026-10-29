@@ -1,4 +1,5 @@
 <script setup>
+import { locale } from "../i18n/index.js";
 import { computed, nextTick, onMounted, ref } from "vue";
 import LazyThumbnail from "./LazyThumbnail.vue";
 
@@ -48,7 +49,7 @@ function backendAssetUrl(path) {
 function formatCount(value) {
   if (value === null || value === undefined || value === "") return "—";
   const number = Number(value);
-  return Number.isFinite(number) ? new Intl.NumberFormat("zh-CN").format(number) : "—";
+  return Number.isFinite(number) ? new Intl.NumberFormat(locale.value).format(number) : "—";
 }
 
 function formatSize(value) {
@@ -70,7 +71,7 @@ function formatDate(value) {
     : ageMinutes < 60 ? `${ageMinutes} 分钟前`
       : ageMinutes < 1440 ? `${Math.floor(ageMinutes / 60)} 小时前`
         : `${Math.floor(ageMinutes / 1440)} 天前`;
-  const date = new Intl.DateTimeFormat("zh-CN", { year: "2-digit", month: "2-digit", day: "2-digit" }).format(timestamp);
+  const date = new Intl.DateTimeFormat(locale.value, { year: "2-digit", month: "2-digit", day: "2-digit" }).format(timestamp);
   return `${relative}（${date}）`;
 }
 

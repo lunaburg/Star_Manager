@@ -1,4 +1,45 @@
-# Star_Manager 概览
+# Star_Manager
+
+[English](#english) · [简体中文](#star_manager-概览)
+
+## English
+
+Star_Manager is an open-source desktop manager for Honey Select 2 / AIS, built with Electron, Vue and a local Python backend. It requires no account or membership.
+
+Use it to browse character, outfit and scene cards; manage zipmods and their items; inspect missing dependencies and duplicate resources; manage BepInEx plugins; and create mod projects in the Workbench. Maintenance tools can change game files, so review each operation's confirmation dialog.
+
+### Language
+
+The interface supports **English** and **简体中文**. Open **Settings → Startup and checks → Interface language** to switch immediately. The choice is saved automatically and restored on the next launch. English is the default when no language has been saved. This setting changes Star_Manager's interface; the game's own language option is separate.
+
+File paths, mod/card names, tags, GUIDs and original third-party diagnostics retain their original content. Technical documentation under `apps/docs/` remains available in its original language.
+
+### Getting started
+
+Download a packaged release from this repository's Releases page and extract it to a suitable folder, preferably on a data drive. Launch `Star_Manager.exe`, choose your HS2 game folder, and build the resource database.
+
+To run from source, install Node.js and a Python environment with the dependencies in `apps/backend/requirements.txt`, then:
+
+```powershell
+cd apps
+npm ci
+# Set this to your Python executable.
+$env:PYTHON_EXECUTABLE = "C:\path\to\python.exe"
+& $env:PYTHON_EXECUTABLE -m pip install -r backend/requirements.txt
+npm run dev
+```
+
+Build the renderer with `npm run build`. To produce the Windows application, follow the [Windows packaging guide](apps/docs/packaging-windows.md); it also requires PyInstaller, the bundled companion DLLs and the remote mod index. See the [application README](apps/README.md) for architecture and commands, and the [localization guide](apps/docs/frontend-ui/localization.md) for translation maintenance.
+
+You can also ask your coding agent:
+
+> Clone https://github.com/lunaburg/Star_Manager.git, install all required dependencies, and run it locally.
+
+**The author's stated restriction: this project must not be monetized in any form, including sponsorship.**
+
+## Star_Manager 概览
+
+界面支持 English / 简体中文，可在“设置 → 启动与检查 → 界面语言”中即时切换并自动保存。未保存语言时默认使用英语。
 
 本应用无需登陆，没有会员，不用担心作者跑路用不了
 

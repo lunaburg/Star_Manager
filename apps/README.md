@@ -6,15 +6,24 @@ Star_Manager is an HS2 / AIS resource manager. It indexes a selected game direct
 
 ## Documentation Map
 
-按层级阅读项目文档：
+Read the documentation in this order:
 
-- [文档总索引](docs/README.md)：统一入口、专题地图和按任务阅读路径。
-- [项目总览](docs/project-overview.md)：架构、数据模型、工作流、测试和开发规则。
-- [前端 UI 专题索引](docs/frontend-ui/README.md)：页面布局、应用外壳和视觉规范。
-- [模组与资源专题索引](docs/mod_manage/README.md)：模组数据库、角色卡解析和异常诊断。
-- [前后端接口](docs/backend-interface.md)：Electron preload、HTTP 路由和任务协议。
-- [Electron 进程生命周期](docs/electron-process-lifecycle.md)：单实例锁、后端进程树清理和退出等待。
-- [Windows 打包指南](docs/packaging-windows.md)：开发构建、后端打包和产物验证。
+- [Documentation index](docs/README.md): entry points and task-oriented reading paths.
+- [Project overview](docs/project-overview.md): architecture, data model, workflows, testing and development rules.
+- [Frontend UI index](docs/frontend-ui/README.md): page layouts, shell and visual guidelines.
+- [Mods and resources](docs/mod_manage/README.md): database, card parsing and diagnostics.
+- [Backend interface](docs/backend-interface.md): preload bridge, HTTP routes and task protocol.
+- [Electron lifecycle](docs/electron-process-lifecycle.md): single instance, backend cleanup and shutdown.
+- [Windows packaging](docs/packaging-windows.md): renderer/backend builds and package validation.
+- [Localization](docs/frontend-ui/localization.md): English/Chinese UI, persisted language and translation checks.
+
+## Interface language
+
+Choose **English** or **简体中文** in **Settings → Startup and checks → Interface language**. Changes apply immediately and persist through the existing Electron settings file. English is the default for missing or unsupported values. The game's language remains a separate Start-page setting.
+
+Translation applies to interface copy and known messages, including dialog titles and tooltips. User content and unknown backend or third-party diagnostics are preserved. Most detailed project documents remain in Chinese.
+
+Run `npm run check:translations` and `npm run test:i18n` when changing interface copy. See the localization guide before adding a language or modifying translation boundaries.
 
 ## Product Scope
 

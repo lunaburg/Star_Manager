@@ -12,11 +12,13 @@ logRendererBoot("main.js module evaluation started");
 
 import { createApp } from "vue";
 import App from "./App.vue";
+import { installI18n } from "./i18n/index.js";
 import "./styles.css";
 
 logRendererBoot("imports resolved");
 
 const app = createApp(App);
+installI18n(app);
 logRendererBoot("createApp completed");
 
 app.mount("#app");

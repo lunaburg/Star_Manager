@@ -580,6 +580,11 @@ small {
   justify-items: start;
 }
 
+/* English action labels need more width than the original Chinese labels. */
+html[lang="en-US"] .topbar:not(.topbar-item-library):not(.assembly-topbar) {
+  grid-template-columns: minmax(340px, 1fr) minmax(160px, 1fr) auto;
+}
+
 .topbar-item-kind-filter {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

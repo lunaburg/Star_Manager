@@ -106,7 +106,7 @@
 
 ## 持久化字段
 
-`apps/electron/main.cjs` 的 `normalizeSettings()` 会限制合法值并提供默认值。当前字段为：
+`apps/electron/main.cjs` 的 `normalizeSettings()` 会限制合法值并提供默认值。`language: en-US | zh-CN` 控制管理器界面语言，缺省或非法值回退英语；设置页“启动与检查”中即时切换并自动保存，独立于游戏的语言设置。实现、问题背景、验证与边界见[界面多语言](localization.md)。当前字段为：
 
 ```text
 gameDir
@@ -123,6 +123,7 @@ portablePackageCompress
 portablePackageTypes: face | hair | body | clothes | accessory
 characterCardLoadOptions: face | body | hair | clothes | accessory | parameter
 startupView: start | overview | characters | mods | workbench | plugins | logs | settings
+language: en-US | zh-CN
 favoriteCardTheme: gold | neon | sakura | obsidian
 checkDatabaseChangesOnStartup
 wallpaperPath

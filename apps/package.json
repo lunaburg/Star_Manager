@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && set ELECTRON_RUN_AS_NODE=&& set ELECTRON_RENDERER_URL=http://127.0.0.1:5173&& electron .\"",
     "build": "vite build",
+    "check:translations": "node scripts/check-translations.mjs --strict",
+    "test:i18n": "node --test scripts/localization.test.mjs",
     "test:electron": "node --test electron/*.test.cjs",
     "test:wallpaper": "node --test electron/wallpaper-protocol.test.cjs",
     "test:card-plugin": "set DOTNET_CLI_HOME=%CD%\\.dotnet-home&& set DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1&& set DOTNET_CLI_TELEMETRY_OPTOUT=1&& dotnet run --project tools/star-manager-card-metadata-plugin/validation/StarManager.CardMetadata.Validation.csproj --configuration Release",
@@ -82,9 +84,12 @@
       ]
     }
   },
-  "dependencies": {},
   "devDependencies": {
+    "@babel/parser": "7.29.7",
     "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/compiler-dom": "3.5.35",
+    "@vue/compiler-sfc": "3.5.35",
+    "@vue/server-renderer": "3.5.35",
     "concurrently": "^9.1.2",
     "electron": "^35.2.1",
     "electron-builder": "^26.0.12",

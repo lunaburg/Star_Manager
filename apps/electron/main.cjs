@@ -10,6 +10,16 @@ const path = require("node:path");
 const { terminateProcessTree } = require("./backend-process.cjs");
 const { fetchBackendRequest } = require("./backend-request.cjs");
 const { createWallpaperFileResponse } = require("./wallpaper-protocol.cjs");
+const localization = import("./localization.mjs");
+
+// Localize only dialog copy; filenames, extensions and returned paths are data.
+async function showLocalizedDialog(method, ...args) {
+  const { translateDialogOptions } = await localization;
+  const language = loadSettingsFile().settings.language;
+  const optionsIndex = args.length - 1;
+  args[optionsIndex] = translateDialogOptions(args[optionsIndex], language);
+  return dialog[method](...args);
+}
 const { downloadRemoteCharacterCard, remoteCharacterFileName } = require("./remote-character-download.cjs");
 const {
   STANDARD_RESOLUTIONS,
@@ -366,6 +376,7 @@ function normalizeSettings(settings = {}) {
     portablePackageTypes,
     characterCardLoadOptions,
     startupView: allowedStartupViews.has(startupView) ? startupView : "start",
+    language: settings.language === "zh-CN" ? "zh-CN" : "en-US",
     favoriteCardTheme: allowedFavoriteCardThemes.has(favoriteCardTheme) ? favoriteCardTheme : "gold",
     checkDatabaseChangesOnStartup: settings.checkDatabaseChangesOnStartup !== false,
     databaseWorkerCount,
@@ -3084,7 +3095,7 @@ function createWorkbenchProject(payload = {}) {
 }
 
 ipcMain.handle("dialog:selectDirectory", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openDirectory"]
   });
@@ -3092,7 +3103,7 @@ ipcMain.handle("dialog:selectDirectory", async (_event, title) => {
 });
 
 ipcMain.handle("dialog:selectPackageFile", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openFile"],
     filters: [
@@ -3103,7 +3114,7 @@ ipcMain.handle("dialog:selectPackageFile", async (_event, title) => {
 });
 
 ipcMain.handle("dialog:selectUnity3dFile", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openFile"],
     filters: [
@@ -3119,7 +3130,7 @@ ipcMain.handle("dialog:saveUnity3dFile", async (_event, title, defaultName) => {
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/[. ]+$/g, "") || "export.unity3d";
   const suggestedName = safeName.toLowerCase().endsWith(".unity3d") ? safeName : `${safeName}.unity3d`;
-  const result = await dialog.showSaveDialog({
+  const result = await showLocalizedDialog("showSaveDialog", {
     title: title || "导出 Unity3D",
     defaultPath: suggestedName,
     filters: [
@@ -3134,7 +3145,7 @@ ipcMain.handle("dialog:saveUnity3dFile", async (_event, title, defaultName) => {
 
 ipcMain.handle("dialog:selectImageFile", async (_event, title, defaultPath) => {
   const resolvedDefaultPath = defaultPath ? path.resolve(String(defaultPath)) : undefined;
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     defaultPath: resolvedDefaultPath
       && fs.existsSync(resolvedDefaultPath)
@@ -3151,7 +3162,7 @@ ipcMain.handle("dialog:selectImageFile", async (_event, title, defaultPath) => {
 
 ipcMain.handle("dialog:selectWallpaperFile", async (_event, title, defaultPath) => {
   const resolvedDefaultPath = defaultPath ? path.resolve(String(defaultPath)) : undefined;
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title: title || "选择应用壁纸",
     defaultPath: resolvedDefaultPath
       && fs.existsSync(resolvedDefaultPath)
@@ -3198,7 +3209,7 @@ ipcMain.handle("wallpaper:readImage", async (_event, filePath) => {
 });
 
 ipcMain.handle("dialog:selectImageForCrop", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openFile"],
     filters: [
@@ -3234,7 +3245,7 @@ ipcMain.handle("dialog:selectImageForCrop", async (_event, title) => {
 });
 
 ipcMain.handle("dialog:selectBlenderExecutable", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openFile"],
     filters: [
@@ -3247,7 +3258,7 @@ ipcMain.handle("dialog:selectBlenderExecutable", async (_event, title) => {
 ipcMain.handle("dialog:selectWorkbenchFbx", async (_event, payload = {}) => {
   try {
     const { projectPath } = validateWorkbenchProject(payload);
-    const result = await dialog.showOpenDialog({
+    const result = await showLocalizedDialog("showOpenDialog", {
       title: "选择要去除骨骼的 FBX",
       defaultPath: projectPath,
       properties: ["openFile"],
@@ -3270,7 +3281,7 @@ ipcMain.handle("dialog:selectWorkbenchFbx", async (_event, payload = {}) => {
 ipcMain.handle("dialog:selectFbxReference", async (_event, payload = {}) => {
   try {
     const defaultPath = path.resolve(String(payload.defaultPath || ""));
-    const result = await dialog.showOpenDialog({
+    const result = await showLocalizedDialog("showOpenDialog", {
       title: String(payload.title || "选择 FBX 骨架来源"),
       defaultPath: fs.existsSync(defaultPath) && fs.statSync(defaultPath).isDirectory()
         ? defaultPath
@@ -3294,7 +3305,7 @@ ipcMain.handle("dialog:selectFbxReference", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("dialog:selectSb3UtilityExecutable", async (_event, title) => {
-  const result = await dialog.showOpenDialog({
+  const result = await showLocalizedDialog("showOpenDialog", {
     title,
     properties: ["openFile"],
     filters: [
@@ -3317,7 +3328,7 @@ ipcMain.handle("dialog:promptText", async (_event, title, message, defaultValue 
   if (!window) {
     return "";
   }
-  const result = await dialog.showMessageBox(window, {
+  const result = await showLocalizedDialog("showMessageBox", window, {
     type: "question",
     buttons: ["取消", "确定"],
     defaultId: 1,
@@ -3366,8 +3377,8 @@ ipcMain.handle("remote:downloadCharacterCard", async (event, payload = {}) => {
     };
     const owner = BrowserWindow.fromWebContents(event.sender);
     const selection = owner
-      ? await dialog.showSaveDialog(owner, options)
-      : await dialog.showSaveDialog(options);
+      ? await showLocalizedDialog("showSaveDialog", owner, options)
+      : await showLocalizedDialog("showSaveDialog", options);
     if (selection.canceled || !selection.filePath) return { ok: true, canceled: true };
     return await downloadRemoteCharacterCard(cardId, selection.filePath, (url, requestOptions) => electronNet.fetch(url, requestOptions), cardType);
   } catch (error) {
@@ -3553,7 +3564,7 @@ ipcMain.handle("workbench:exportProcessedTexture", async (_event, payload = {}) 
       .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
       .replace(/[. ]+$/g, "") || "texture.png";
     const suggestedName = safeName.toLowerCase().endsWith(".png") ? safeName : `${safeName}.png`;
-    const result = await dialog.showSaveDialog({
+    const result = await showLocalizedDialog("showSaveDialog", {
       title: "导出 SB3Utility PNG 贴图",
       defaultPath: path.join(projectPath, suggestedName),
       filters: [{ name: "PNG Texture", extensions: ["png"] }]

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { locale, setLocale, t } from "./i18n/index.js";
 import StartView from "./components/views/StartView.vue";
 import CardCoverCropper from "./components/CardCoverCropper.vue";
 import ViewLoading from "./components/ViewLoading.vue";
@@ -311,6 +312,7 @@ function pluginPathIdentity(value) {
 resetStartPluginSettings();
 
 const managerSettings = reactive({
+  language: "en-US",
   startupView: "start",
   favoriteCardTheme: "gold",
   checkDatabaseChangesOnStartup: true,
@@ -1635,7 +1637,7 @@ const cardTagOptions = computed(() => {
     const activeTag = cardDependencyFilter.value.slice(4);
     if (activeTag) tags.set(activeTag.toLocaleLowerCase(), activeTag);
   }
-  return [...tags.values()].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  return [...tags.values()].sort((left, right) => left.localeCompare(right, locale.value));
 });
 const cardTagFilterSuggestions = computed(() => {
   const query = cardTagFilter.search.trim().toLocaleLowerCase();
@@ -1644,14 +1646,14 @@ const cardTagFilterSuggestions = computed(() => {
     ...cardTagOptions.value
   ])
     .filter((tag) => !query || tag.toLocaleLowerCase().includes(query))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    .sort((left, right) => left.localeCompare(right, locale.value));
   return query ? matchedTags.slice(0, 12) : matchedTags;
 });
 const cardTagPromptLibraryTags = computed(() => {
   const query = cardTagPrompt.draft.trim().toLocaleLowerCase();
   return uniqueCardTags(cardTagPrompt.available)
     .filter((tag) => !query || tag.toLocaleLowerCase().includes(query))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    .sort((left, right) => left.localeCompare(right, locale.value));
 });
 const baseVisibleCards = computed(() => {
   const gender = cardGenderFilter.value;
@@ -1707,7 +1709,7 @@ const visibleClothesCards = computed(() => {
   return filtered.sort((left, right) => {
     if (clothesSort.value === "modified") return right.modifiedTimestamp - left.modifiedTimestamp;
     if (clothesSort.value === "size") return right.fileSize - left.fileSize;
-    return String(left.name || "").localeCompare(String(right.name || ""), "zh-CN", { numeric: true });
+    return String(left.name || "").localeCompare(String(right.name || ""), locale.value, { numeric: true });
   });
 });
 const selectedClothesCard = computed(() => (
@@ -2287,7 +2289,7 @@ function mapCharacterCardRows(rows) {
     relativePath: card.relative_path,
     thumbnailUrl: backendAssetUrl(card.thumbnail_url),
     coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
-    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString(locale.value) : "",
     dependencyCount: card.dependency_count == null ? null : Number(card.dependency_count),
     missingCount: card.missing_count == null ? null : Number(card.missing_count),
     missingModCount: card.missing_mod_count == null ? null : Number(card.missing_mod_count),
@@ -2307,7 +2309,7 @@ function mapClothesCardRows(rows) {
     directory: card.directory || "",
     thumbnailUrl: backendAssetUrl(card.thumbnail_url),
     coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
-    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString(locale.value) : "",
     modifiedTimestamp: Number(card.modified_at || 0),
     fileSize: Number(card.file_size || 0),
     clothesPartCount: Number(card.clothes_part_count || 0),
@@ -2327,7 +2329,7 @@ function mapSceneCardRows(rows) {
     directory: card.directory || "",
     thumbnailUrl: backendAssetUrl(card.thumbnail_url),
     coverUrl: backendAssetUrl(card.cover_url || card.thumbnail_url),
-    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString() : "",
+    modifiedAt: card.modified_at ? new Date(card.modified_at * 1000).toLocaleDateString(locale.value) : "",
     modifiedTimestamp: Number(card.modified_at || 0),
     fileSize: Number(card.file_size || 0),
     dependencyCount: Number(card.dependency_count || 0)
@@ -2642,7 +2644,7 @@ async function handleClothesCardClick(card) {
               : null
           }))
         : [],
-      modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString() : card.modifiedAt,
+      modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt,
       modifiedTimestamp: Number(detail.modified_at || card.modifiedTimestamp),
       fileSize: Number(detail.file_size || card.fileSize)
     };
@@ -2830,7 +2832,7 @@ async function loadSelectedSceneDetail(card = selectedSceneCard.value) {
                 : null
             }))
           : [],
-        modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString() : card.modifiedAt,
+        modifiedAt: detail.modified_at ? new Date(detail.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt,
         modifiedTimestamp: Number(detail.modified_at || card.modifiedTimestamp),
         fileSize: Number(detail.file_size || card.fileSize)
       };
@@ -2925,7 +2927,7 @@ function diagnosticIssueBadgeStatus(issue) {
 
 function timestampLogMessage(message) {
   const now = new Date();
-  const timestamp = new Intl.DateTimeFormat("zh-CN", {
+  const timestamp = new Intl.DateTimeFormat(locale.value, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -2965,7 +2967,7 @@ function taskElapsedMs(task) {
 function formatTaskTimestamp(value) {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
-  return new Date(timestamp * 1000).toLocaleString("zh-CN", {
+  return new Date(timestamp * 1000).toLocaleString(locale.value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -3350,7 +3352,7 @@ async function updateAchievementPreference(key, value) {
 }
 
 async function resetAchievementHistory() {
-  if (!window.confirm("确认重置全部本地成就记录？资源数据库和游戏文件不会被删除。")) return;
+  if (!window.confirm(t("确认重置全部本地成就记录？资源数据库和游戏文件不会被删除。"))) return;
   const result = await window.desktopApi?.backendRequest?.("/achievements/reset", { method: "POST", body: {} });
   if (result?.ok) {
     achievements.value = result.achievements || [];
@@ -7878,6 +7880,7 @@ async function saveAppSettings(options = {}) {
         portablePackageTypes: [...portablePackageTypes.value],
         characterCardLoadOptions: [...cardLoadPrompt.selected],
         startupView: managerSettings.startupView,
+        language: managerSettings.language,
         favoriteCardTheme: managerSettings.favoriteCardTheme,
         checkDatabaseChangesOnStartup: managerSettings.checkDatabaseChangesOnStartup,
         databaseWorkerCount: managerSettings.databaseWorkerCount,
@@ -7914,6 +7917,8 @@ async function loadAppSettingsInternal({ loadBackendData = true } = {}) {
       ? CARD_LOAD_OPTIONS.map((option) => option.key).filter((optionKey) => result.settings.characterCardLoadOptions.includes(optionKey))
       : CARD_LOAD_OPTIONS.map((option) => option.key);
     managerSettings.startupView = result.settings?.startupView || "start";
+    managerSettings.language = result.settings?.language === "zh-CN" ? "zh-CN" : "en-US";
+    setLocale(managerSettings.language);
     managerSettings.favoriteCardTheme = ["gold", "neon", "sakura", "obsidian"].includes(result.settings?.favoriteCardTheme)
       ? result.settings.favoriteCardTheme
       : "gold";
@@ -8034,6 +8039,10 @@ async function clearWallpaper() {
 
 async function updateManagerSetting(key, value) {
   if (!(key in managerSettings)) return;
+  if (key === "language") {
+    value = value === "zh-CN" ? "zh-CN" : "en-US";
+    setLocale(value);
+  }
   managerSettings[key] = value;
   const result = await saveAppSettings();
   settingsNotice.type = result?.ok ? "success" : "error";
@@ -9185,7 +9194,7 @@ async function confirmCardCoverCrop(crop) {
     const cacheBuster = `cover=${encodeURIComponent(result.image_version || Date.now())}`;
     card.thumbnailUrl = `${card.thumbnailUrl}${card.thumbnailUrl.includes("?") ? "&" : "?"}${cacheBuster}`;
     card.coverUrl = `${card.coverUrl}${card.coverUrl.includes("?") ? "&" : "?"}${cacheBuster}`;
-    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt;
     cardCoverNotice.type = result.warning ? "warning" : "success";
     cardCoverNotice.message = result.warning || `封面已按 63:88 裁剪为 ${result.width} × ${result.height}`;
     log(`[Cards] 人物卡封面已替换：${card.relativePath}`);
@@ -9218,7 +9227,7 @@ async function toggleSelectedCardFavorite() {
     });
     if (!result?.ok) throw new Error(result?.error || "人物卡收藏状态保存失败");
     card.favorite = Boolean(result.favorite);
-    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt;
     cardFavoriteNotice.type = result.warning ? "warning" : "success";
     cardFavoriteNotice.message = result.warning || (card.favorite ? "已收藏，状态已写入人物卡" : "已取消收藏");
     log(`[Cards] ${card.favorite ? "已收藏" : "已取消收藏"}：${card.relativePath}`);
@@ -9258,7 +9267,7 @@ async function setSelectedCardRating(rating) {
     if (!result?.ok) throw new Error(result?.error || "人物卡评分保存失败");
     card.rating = Math.min(5, Math.max(0, Number(result.rating) || 0));
     triggerCardRatingPulse(card.absolutePath, card.rating);
-    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt;
     cardRatingNotice.type = result.warning ? "warning" : "success";
     cardRatingNotice.message = result.warning || `已评为 ${card.rating} 星，评分已写入人物卡`;
     log(`[Cards] 已评为 ${card.rating} 星：${card.relativePath}`);
@@ -9319,7 +9328,7 @@ async function loadCardTagCatalogForPrompt(prompt) {
     prompt.available = uniqueCardTags([
       ...cardTagCatalog.tags,
       ...prompt.available
-    ]).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    ]).sort((left, right) => left.localeCompare(right, locale.value));
     return;
   }
   prompt.loading = true;
@@ -9331,7 +9340,7 @@ async function loadCardTagCatalogForPrompt(prompt) {
     prompt.available = uniqueCardTags([
       ...(result.tags || []),
       ...prompt.available
-    ]).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    ]).sort((left, right) => left.localeCompare(right, locale.value));
     cardTagCatalog.gameDir = paths.gameDir;
     cardTagCatalog.loaded = true;
     cardTagCatalog.tags = [...prompt.available];
@@ -9439,7 +9448,7 @@ function addTagPromptDraft(prompt) {
     }
     prompt.selected.push(value);
   }
-  prompt.available.sort((left, right) => left.localeCompare(right, "zh-CN"));
+  prompt.available.sort((left, right) => left.localeCompare(right, locale.value));
   prompt.draft = "";
   prompt.error = "";
 }
@@ -9496,12 +9505,12 @@ async function submitBulkAddCharacterCardTags() {
             if (!updated) continue;
             card.tags = Array.isArray(updated.tags) ? updated.tags.map((tag) => String(tag)) : card.tags;
             card.modifiedAt = updated.modified_at
-              ? new Date(updated.modified_at * 1000).toLocaleDateString()
+              ? new Date(updated.modified_at * 1000).toLocaleDateString(locale.value)
               : card.modifiedAt;
           }
           if (cardTagCatalog.loaded && cardTagCatalog.gameDir === paths.gameDir) {
             cardTagCatalog.tags = uniqueCardTags([...cardTagCatalog.tags, ...tags])
-              .sort((left, right) => left.localeCompare(right, "zh-CN"));
+              .sort((left, right) => left.localeCompare(right, locale.value));
           }
           const failureCount = Number(task.data?.failure_count || 0);
           bulkCardTagPrompt.open = failureCount > 0;
@@ -9542,9 +9551,9 @@ async function saveSelectedCardTags() {
     card.tags = Array.isArray(result.tags) ? result.tags.map((tag) => String(tag)) : [];
     if (cardTagCatalog.loaded && cardTagCatalog.gameDir === paths.gameDir) {
       cardTagCatalog.tags = uniqueCardTags([...cardTagCatalog.tags, ...card.tags])
-        .sort((left, right) => left.localeCompare(right, "zh-CN"));
+        .sort((left, right) => left.localeCompare(right, locale.value));
     }
-    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString() : card.modifiedAt;
+    card.modifiedAt = result.modified_at ? new Date(result.modified_at * 1000).toLocaleDateString(locale.value) : card.modifiedAt;
     cardTagNotice.type = result.warning ? "warning" : "success";
     cardTagNotice.message = result.warning || (card.tags.length ? "人物卡标签已保存" : "已清空人物卡标签");
     cardTagPrompt.open = false;
@@ -10591,7 +10600,7 @@ function clearLogs() {
 function formatTrashDate(value) {
   const date = new Date(value || "");
   if (Number.isNaN(date.getTime())) return "时间未知";
-  return date.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(locale.value, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 async function loadTrash() {
@@ -11632,7 +11641,7 @@ watch(backendStatus, (status, previousStatus) => {
 
         <button class="system-status" type="button" @click="activeView = 'logs'">
           <span class="status-main">
-            <span class="status-title">{{ taskName }}</span>
+            <span class="status-title">{{ $t(taskName) }}</span>
             <span class="status-percent">{{ taskPercent }}</span>
           </span>
           <span class="progress-rail"><span class="progress-fill" :style="{ width: taskPercent }"></span></span>

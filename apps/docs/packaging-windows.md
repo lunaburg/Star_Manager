@@ -2,6 +2,29 @@
 
 This document records the current Windows packaging flow for the maintained Electron/Vue/Python Star_Manager app.
 
+## English build verification (2026-10-29)
+
+The English/Chinese application was successfully packaged with `npm run package:win` on branch `English-translation`. Outputs:
+
+- `apps/release/win-unpacked/Star_Manager.exe`, with its accompanying runtime/resources files.
+- `apps/release/Star_Manager-English-win-x64.zip` (155,115,355 bytes), containing the entire `win-unpacked` directory. Extract the whole directory before launching; the executable is not standalone.
+
+The checkout initially lacked a Python build environment, a complete Electron runtime, and the required remote index. A local `apps/.venv` was created with `uv venv --python 3.11 .venv`; backend requirements and PyInstaller were installed using `uv pip install --python .venv/Scripts/python.exe -r backend/requirements.txt pyinstaller`. Set `PYTHON_EXECUTABLE` to this environment's absolute `Scripts/python.exe` path when rebuilding.
+
+Electron 35.7.5's official `electron-v35.7.5-win32-x64.zip` was verified against the SHA-256 in the installed Electron package's `checksums.json` and extracted into `apps/node_modules/electron/dist`; `path.txt` identifies `electron.exe`. This completed the distribution left incomplete by the npm install step.
+
+The remote index was recovered from the project's [V0.0.3 release archive](https://github.com/lunaburg/Star_Manager/releases/download/V0.0.3/Star_Manager.rar), extracting only `Star_Manager/runtime/remote/remote_zipmod_index.sqlite` into the existing packaging input location. SQLite `integrity_check` returned `ok`; the index has 12,979 records, including 12,978 valid manifests and one pre-existing `read_error`. Its SHA-256 is `8b3305f1cb15bdbc194d693a4250ce93a835a0097f47a0975a605fc72b071e0f`. This reuses the upstream snapshot rather than fabricating an empty index or claiming a new complete remote scan.
+
+Validation: Python syntax checks, strict translation coverage and all 9 localization tests passed. The ASAR contains the shared localization module, English catalog and built renderer. A smoke launch of the actual packaged executable reached `renderer-ready`, `first-screen-shown` and `did-finish-load`; its packaged backend returned `ok: true` from `/health` on isolated port 18765, with all reported resource modules available and `fmod_dll_exists: true`. The test processes were stopped, then `clean_packaged_runtime.cjs` reset only the release runtime directory before ZIP creation. Existing external user settings were preserved; no game directory was configured and no game/resource mutation was tested.
+
+The dependency audit passes when Windows' system DLL directory is included:
+
+```powershell
+.venv/Scripts/python.exe scripts/check_package_deps.py --extra-search-path "$env:WINDIR/System32"
+```
+
+Without that explicit search path, the current audit reports the companion plugins' `mscoree.dll` dependency as missing; both Windows system copies were verified to exist. PyInstaller's `fmod.dll` ctypes warning did not represent a missing bundled file: the DLL was explicitly collected and the packaged health check verified it. Other reported missing modules were classified as optional/platform noise. Vite's existing Lottie `eval` and bundle-size warnings and Electron Builder's missing-author warning remain non-blocking.
+
 ## Output
 
 The standard packaging command creates an unpacked Windows application directory:
@@ -128,7 +151,7 @@ The bundled release inputs currently report these file versions:
 | --- | --- |
 | `StarManager.CardMetadata.dll` | `1.4.2.0` |
 | `StarManager.CharacterCardReadProbe.dll` | `0.2.0.0` |
-| `StarManager.GameItemProbe.dll` | `0.9.5.0` |
+| `StarManager.GameItemProbe.dll` | `0.9.6.0` |
 
 ## Verification
 

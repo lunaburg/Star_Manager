@@ -22,6 +22,8 @@ The root directory is for repository-level files only. Keep application source, 
 
 ## Project Documentation
 
+- `apps/docs/frontend-ui/localization.md`: English/Chinese interface switching, persisted language, Vue display translation boundaries, shared catalog, Electron dialogs, translation checks, and raw diagnostic/documentation limits. Consult when changing language settings or interface translations.
+
 When gathering project context or learning how the app works, check the project documents under `apps/docs/` first. Useful entry points:
 
 - `apps/docs/README.md`: canonical documentation index, task-oriented reading paths, and documentation maintenance rules. Start here when you do not yet know which document applies.
